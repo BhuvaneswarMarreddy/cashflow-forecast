@@ -1,0 +1,769 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap');
+@import "tailwindcss";
+
+:root {
+  /* Dark theme - Midnight Aurora */
+  --background: #0d1117;
+  --background-secondary: #161b22;
+  --background-tertiary: #21262d;
+  --foreground: #f0f6fc;
+  --foreground-secondary: #8b949e;
+  --foreground-muted: #484f58;
+  
+  /* Accent colors - Deep Blue Theme */
+  --accent-primary: #1e40af;      /* Deep blue-800 */
+  --accent-secondary: #3b82f6;   /* Medium blue-500 */
+  --accent-tertiary: #60a5fa;    /* Light blue-400 */
+  --accent-success: #10b981;     /* Keep green for positive */
+  --accent-danger: #ef4444;      /* Keep red for negative */
+  --accent-warning: #f59e0b;     /* Keep amber for warnings */
+  
+  /* Payment method colors */
+  --amex-blue: #006fcf;
+  --chase-blue: #117aca;
+  --discover-orange: #ff6000;
+  --apple-gray: #a2aaad;
+  --visa-blue: #1a1f71;
+  --mastercard-red: #eb001b;
+  
+  /* Gradients - Deep Blue Theme */
+  --gradient-aurora: linear-gradient(135deg, #1e40af 0%, #3b82f6 50%, #60a5fa 100%);
+  --gradient-sunset: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
+  --gradient-ocean: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+  --gradient-purple: linear-gradient(135deg, #1e40af 0%, #2563eb 100%);
+  
+  /* Shadows - Blue glow */
+  --shadow-glow: 0 0 40px rgba(30, 64, 175, 0.3);
+  --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.4);
+  
+  /* Border */
+  --border-color: #30363d;
+  --border-glow: rgba(30, 64, 175, 0.5);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: 'Outfit', sans-serif;
+  --font-mono: 'Space Mono', monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: 'Outfit', sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Animated background pattern - Deep Blue Theme */
+.bg-pattern {
+  position: fixed;
+  inset: 0;
+  background-image: 
+    radial-gradient(circle at 20% 80%, rgba(30, 64, 175, 0.12) 0%, transparent 50%),
+    radial-gradient(circle at 80% 20%, rgba(59, 130, 246, 0.12) 0%, transparent 50%),
+    radial-gradient(circle at 40% 40%, rgba(96, 165, 250, 0.08) 0%, transparent 40%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Glass morphism card */
+.glass-card {
+  background: rgba(22, 27, 34, 0.8);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  transition: all 0.3s ease;
+}
+
+.glass-card:hover {
+  border-color: var(--border-glow);
+  box-shadow: var(--shadow-glow);
+}
+
+/* Input styles */
+.input-field {
+  background: var(--background-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 14px 18px;
+  color: var(--foreground);
+  font-size: 0.95rem;
+  transition: all 0.2s ease;
+  width: 100%;
+  font-family: 'Outfit', sans-serif;
+  letter-spacing: 0.01em;
+  line-height: 1.5;
+}
+
+.input-field:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(30, 64, 175, 0.2);
+}
+
+.input-field::placeholder {
+  color: var(--foreground-muted);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+}
+
+/* Input with icon - left padding for icon space */
+.input-field.pl-12 {
+  padding-left: 2.75rem;
+}
+
+/* Input with icon on right */
+.input-field.pr-12 {
+  padding-right: 2.75rem;
+}
+
+/* Icon positioning inside input wrapper */
+.input-icon-left {
+  position: absolute;
+  left: 0.875rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--foreground-muted);
+  pointer-events: none;
+  transition: color 0.2s ease;
+}
+
+.input-icon-right {
+  position: absolute;
+  right: 0.875rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--foreground-muted);
+}
+
+/* Focus state icon color */
+.input-field:focus + .input-icon-left,
+.input-field:focus ~ .input-icon-left {
+  color: var(--accent-primary);
+}
+
+/* Number input - hide spinners */
+input[type="number"].input-field {
+  -moz-appearance: textfield;
+}
+
+input[type="number"].input-field::-webkit-outer-spin-button,
+input[type="number"].input-field::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Button styles */
+.btn-primary {
+  background: var(--gradient-aurora);
+  border: none;
+  border-radius: 12px;
+  padding: 14px 28px;
+  color: white;
+  font-weight: 600;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-family: 'Outfit', sans-serif;
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(30, 64, 175, 0.4);
+}
+
+.btn-secondary {
+  background: var(--background-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 14px 28px;
+  color: var(--foreground);
+  font-weight: 500;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-family: 'Outfit', sans-serif;
+}
+
+.btn-secondary:hover {
+  border-color: var(--accent-primary);
+  background: rgba(30, 64, 175, 0.1);
+}
+
+.btn-gradient {
+  background: linear-gradient(135deg, #f59e0b 0%, #ef4444 50%, #ec4899 100%);
+  border: none;
+  border-radius: 12px;
+  padding: 14px 28px;
+  color: white;
+  font-weight: 600;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-family: 'Outfit', sans-serif;
+}
+
+.btn-gradient:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(245, 158, 11, 0.4);
+}
+
+.btn-danger {
+  background: var(--accent-danger);
+  border: none;
+  border-radius: 12px;
+  padding: 14px 28px;
+  color: white;
+  font-weight: 600;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-family: 'Outfit', sans-serif;
+}
+
+.btn-danger:hover {
+  background: #dc2626;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(239, 68, 68, 0.4);
+}
+
+.btn-danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Card payment method colors */
+.payment-amex { border-left: 4px solid var(--amex-blue); }
+.payment-chase { border-left: 4px solid var(--chase-blue); }
+.payment-discover { border-left: 4px solid var(--discover-orange); }
+.payment-apple { border-left: 4px solid var(--apple-gray); }
+.payment-visa { border-left: 4px solid var(--visa-blue); }
+.payment-mastercard { border-left: 4px solid var(--mastercard-red); }
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--background-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--foreground-muted);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--foreground-secondary);
+}
+
+/* Animation keyframes */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(30, 64, 175, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 40px rgba(30, 64, 175, 0.5);
+  }
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.6s ease-out forwards;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+/* Stagger animation delays */
+.delay-100 { animation-delay: 100ms; }
+.delay-200 { animation-delay: 200ms; }
+.delay-300 { animation-delay: 300ms; }
+.delay-400 { animation-delay: 400ms; }
+.delay-500 { animation-delay: 500ms; }
+
+/* Calendar styles */
+.calendar-day {
+  aspect-ratio: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 8px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: var(--background-tertiary);
+  border: 1px solid transparent;
+  min-height: 80px;
+}
+
+.calendar-day:hover {
+  border-color: var(--accent-primary);
+  background: rgba(30, 64, 175, 0.1);
+}
+
+.calendar-day.today {
+  border-color: var(--accent-secondary);
+  background: rgba(6, 182, 212, 0.1);
+}
+
+.calendar-day.has-expense {
+  position: relative;
+}
+
+.calendar-day.has-expense::after {
+  content: '';
+  position: absolute;
+  bottom: 8px;
+  width: 6px;
+  height: 6px;
+  background: var(--accent-danger);
+  border-radius: 50%;
+}
+
+.calendar-day.has-income::after {
+  background: var(--accent-success);
+}
+
+/* Chart container */
+.chart-container {
+  background: var(--background-secondary);
+  border-radius: 16px;
+  padding: 24px;
+  border: 1px solid var(--border-color);
+}
+
+/* Tooltip */
+.tooltip {
+  background: var(--background-tertiary) !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: 8px !important;
+  padding: 12px !important;
+  box-shadow: var(--shadow-card) !important;
+}
+
+/* Select dropdown */
+.select-field {
+  background: var(--background-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 14px 18px;
+  color: var(--foreground);
+  font-size: 0.95rem;
+  transition: all 0.2s ease;
+  width: 100%;
+  font-family: 'Outfit', sans-serif;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%238b949e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.875rem center;
+  background-size: 18px;
+  padding-right: 2.5rem;
+  letter-spacing: 0.01em;
+  line-height: 1.5;
+}
+
+/* Select with icon - left padding for icon space */
+.select-field.pl-12 {
+  padding-left: 2.75rem;
+}
+
+.select-field:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(30, 64, 175, 0.2);
+}
+
+/* Select option styling */
+.select-field option {
+  background: var(--background-tertiary);
+  color: var(--foreground);
+  padding: 12px;
+}
+
+/* Inline select/input styles for components using Tailwind */
+select,
+input[type="text"],
+input[type="number"],
+input[type="date"],
+input[type="email"],
+input[type="password"] {
+  color-scheme: dark;
+}
+
+/* Dropdown styles for better contrast - Deep Blue Theme */
+select option {
+  background-color: #21262d;
+  color: #f0f6fc;
+  padding: 10px;
+}
+
+select option:hover,
+select option:focus,
+select option:checked {
+  background-color: #1e40af;
+  color: white;
+}
+
+/* Custom dropdown styling */
+.dropdown-blue {
+  background: rgba(30, 64, 175, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  color: #f0f6fc;
+}
+
+.dropdown-blue:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+}
+
+.dropdown-blue option {
+  background-color: #161b22;
+  color: #f0f6fc;
+}
+
+/* Form spacing utilities */
+.form-group {
+  margin-bottom: 1rem;
+}
+
+.form-label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--foreground-secondary);
+  margin-bottom: 0.5rem;
+}
+
+.form-helper {
+  font-size: 0.75rem;
+  color: var(--foreground-muted);
+  margin-top: 0.375rem;
+}
+
+/* Input wrapper for icons */
+.input-wrapper {
+  position: relative;
+}
+
+.input-wrapper .input-icon {
+  position: absolute;
+  left: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1rem;
+  height: 1rem;
+  color: var(--foreground-muted);
+  pointer-events: none;
+  transition: color 0.2s ease;
+}
+
+.input-wrapper:focus-within .input-icon {
+  color: var(--accent-primary);
+}
+
+/* Badge styles */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.badge-expense {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+}
+
+.badge-income {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+}
+
+.badge-projected {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+}
+
+/* Stat card */
+.stat-card {
+  background: var(--background-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 24px;
+  transition: all 0.3s ease;
+}
+
+.stat-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-card);
+  border-color: var(--border-glow);
+}
+
+/* Modal overlay */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modal-content {
+  background: var(--background-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  padding: 32px;
+  max-width: 500px;
+  width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+  animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Delete confirmation modal */
+.delete-confirm-modal {
+  background: var(--background-secondary);
+  border: 1px solid var(--accent-danger);
+  border-radius: 16px;
+  padding: 24px;
+  text-align: center;
+  max-width: 360px;
+  width: 90%;
+}
+
+/* Mobile responsive improvements */
+@media (max-width: 640px) {
+  .modal-content {
+    padding: 20px;
+    width: 95%;
+    margin: 10px;
+    border-radius: 16px;
+  }
+
+  .btn-primary,
+  .btn-secondary,
+  .btn-gradient,
+  .btn-danger {
+    padding: 12px 20px;
+    font-size: 0.9rem;
+  }
+
+  .input-field,
+  .select-field {
+    padding: 12px 14px;
+    font-size: 16px; /* Prevents iOS zoom */
+  }
+
+  .input-field.pl-12,
+  .select-field.pl-12 {
+    padding-left: 2.5rem;
+  }
+
+  .stat-card {
+    padding: 16px;
+  }
+
+  .chart-container {
+    padding: 16px;
+  }
+
+  .glass-card {
+    border-radius: 12px;
+  }
+
+  .calendar-day {
+    min-height: 60px;
+    padding: 4px;
+    font-size: 0.8rem;
+  }
+
+  /* Stack navigation items */
+  .nav-mobile-stack {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  /* Full-width buttons on mobile */
+  .btn-mobile-full {
+    width: 100%;
+  }
+
+  /* Reduce heading sizes */
+  h1 {
+    font-size: 1.75rem !important;
+  }
+
+  h2 {
+    font-size: 1.25rem !important;
+  }
+
+  h3 {
+    font-size: 1.1rem !important;
+  }
+
+  /* Improve touch targets */
+  button, a, input, select {
+    min-height: 44px;
+  }
+
+  /* Scrollable horizontal overflow */
+  .scroll-x-mobile {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .scroll-x-mobile::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Small screen adjustments */
+@media (max-width: 375px) {
+  .modal-content {
+    padding: 16px;
+  }
+
+  .btn-primary,
+  .btn-secondary,
+  .btn-gradient {
+    padding: 10px 16px;
+    font-size: 0.85rem;
+  }
+
+  .stat-card {
+    padding: 12px;
+  }
+}
+
+/* Floating action button for mobile */
+.fab {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--gradient-aurora);
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 20px rgba(124, 58, 237, 0.5);
+  cursor: pointer;
+  z-index: 50;
+  transition: all 0.3s ease;
+}
+
+.fab:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 30px rgba(30, 64, 175, 0.6);
+}
+
+/* Safe area insets for notched phones */
+@supports (padding: max(0px)) {
+  .safe-area-bottom {
+    padding-bottom: max(24px, env(safe-area-inset-bottom));
+  }
+  
+  .safe-area-top {
+    padding-top: max(24px, env(safe-area-inset-top));
+  }
+}
+
+/* Prevent text selection on interactive elements */
+button, .btn-primary, .btn-secondary, .btn-gradient {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Improve focus states for accessibility */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+/* Transaction row swipe actions (for future enhancement) */
+.transaction-row {
+  position: relative;
+  overflow: hidden;
+}
+
+.transaction-row-actions {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  background: linear-gradient(90deg, transparent, var(--background-secondary));
+}

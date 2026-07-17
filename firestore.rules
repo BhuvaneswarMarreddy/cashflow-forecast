@@ -1,0 +1,152 @@
+rules_version = '2';
+
+/**
+ * CashFlow Forecast - Firestore Security Rules
+ * =============================================
+ * 
+ * Database Structure:
+ * - users/{userId} - User profile
+ * - users/{userId}/accounts/{accountId} - Payment accounts
+ * - users/{userId}/income/{incomeId} - Income sources
+ * - users/{userId}/transactions/{transactionId} - Transactions
+ * 
+ * Security Principles:
+ * 1. Users can only access their own data
+ * 2. All writes require authentication
+ * 3. Data validation on write operations
+ */
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // =========================================
+    // Helper Functions
+    // =========================================
+    
+    // Check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Check if the user owns this document
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Validate string field
+    function isValidString(field, minLen, maxLen) {
+      return field is string && field.size() >= minLen && field.size() <= maxLen;
+    }
+    
+    // Validate number field
+    function isValidNumber(field, min, max) {
+      return field is number && field >= min && field <= max;
+    }
+    
+    // =========================================
+    // User Profile Rules
+    // =========================================
+    
+    match /users/{userId} {
+      // Allow users to read their own profile
+      allow read: if isOwner(userId);
+      
+      // Allow users to create their own profile
+      allow create: if isOwner(userId) && 
+        request.resource.data.keys().hasAll(['uid', 'email', 'displayName', 'settings', 'metadata']) &&
+        request.resource.data.uid == userId;
+      
+      // Allow users to update their own profile
+      allow update: if isOwner(userId) &&
+        // Prevent changing uid
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['uid']));
+      
+      // Allow users to delete their own profile
+      allow delete: if isOwner(userId);
+      
+      // =========================================
+      // Payment Accounts Subcollection
+      // =========================================
+      
+      match /accounts/{accountId} {
+        // Users can read their own accounts
+        allow read: if isOwner(userId);
+        
+        // Users can create accounts with required fields
+        allow create: if isOwner(userId) &&
+          request.resource.data.keys().hasAll(['name', 'type', 'provider', 'balance', 'isActive']) &&
+          isValidString(request.resource.data.name, 1, 100) &&
+          request.resource.data.type in ['credit_card', 'debit_card', 'bank_account', 'cash'] &&
+          request.resource.data.balance is number;
+        
+        // Users can update their accounts
+        allow update: if isOwner(userId);
+        
+        // Users can delete their accounts
+        allow delete: if isOwner(userId);
+      }
+      
+      // =========================================
+      // Income Sources Subcollection
+      // =========================================
+      
+      match /income/{incomeId} {
+        // Users can read their own income sources
+        allow read: if isOwner(userId);
+        
+        // Users can create income sources with required fields
+        allow create: if isOwner(userId) &&
+          request.resource.data.keys().hasAll(['name', 'amount', 'frequency', 'isActive']) &&
+          isValidString(request.resource.data.name, 1, 100) &&
+          request.resource.data.amount is number &&
+          request.resource.data.frequency in ['weekly', 'biweekly', 'monthly', 'yearly'];
+        
+        // Users can update their income sources
+        allow update: if isOwner(userId);
+        
+        // Users can delete their income sources
+        allow delete: if isOwner(userId);
+      }
+      
+      // =========================================
+      // Transactions Subcollection
+      // =========================================
+      
+      match /transactions/{transactionId} {
+        // Users can read their own transactions
+        allow read: if isOwner(userId);
+        
+        // Users can create transactions with required fields
+        allow create: if isOwner(userId) &&
+          request.resource.data.keys().hasAll(['title', 'amount', 'type', 'category', 'paymentMethod', 'date']) &&
+          isValidString(request.resource.data.title, 1, 200) &&
+          request.resource.data.amount is number &&
+          request.resource.data.amount > 0 &&
+          request.resource.data.type in ['expense', 'income'];
+        
+        // Users can update their transactions
+        allow update: if isOwner(userId);
+        
+        // Users can delete their transactions
+        allow delete: if isOwner(userId);
+      }
+      
+      // =========================================
+      // Budgets Subcollection (Future Feature)
+      // =========================================
+      
+      match /budgets/{budgetId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+    
+    // =========================================
+    // Deny all other access
+    // =========================================
+    
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+

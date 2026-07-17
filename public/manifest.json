@@ -1,0 +1,54 @@
+{
+  "name": "CashFlow Forecast",
+  "short_name": "CashFlow",
+  "description": "Personal finance management - Track expenses, forecast cash flow, manage budgets, and plan for financial goals. Supports US and Indian currencies.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0d1117",
+  "theme_color": "#1e40af",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/logos/icon-128x128.png",
+      "sizes": "128x128",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/logos/icon-256x256.png",
+      "sizes": "256x256",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/logos/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/logos/icon-1024x1024.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["finance", "productivity"],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "Forecast",
+      "short_name": "Forecast",
+      "description": "View cash flow forecast",
+      "url": "/forecast",
+      "icons": [{ "src": "/logos/icon-128x128.png", "sizes": "128x128" }]
+    },
+    {
+      "name": "Add Transaction",
+      "short_name": "Add",
+      "description": "Add a new transaction",
+      "url": "/history",
+      "icons": [{ "src": "/logos/icon-128x128.png", "sizes": "128x128" }]
+    }
+  ]
+}
