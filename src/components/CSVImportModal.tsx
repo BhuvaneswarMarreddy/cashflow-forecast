@@ -1,10 +1,12 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { X, Upload, FileText, AlertCircle, CheckCircle, Download, HelpCircle, CreditCard, Link2 } from 'lucide-react';
+import * as XLSX from 'xlsx';
+import { format as formatDate } from 'date-fns';
 import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
-import { Transaction, ExpenseCategory, PaymentMethod, EXPENSE_CATEGORIES, PaymentAccount } from '@/types';
+import { TransactionType, TransferDirection, ExpenseCategory, PaymentMethod, EXPENSE_CATEGORIES, PaymentAccount } from '@/types';
 
 interface CSVImportModalProps {
   isOpen: boolean;
@@ -12,17 +14,87 @@ interface CSVImportModalProps {
 }
 
 interface ParsedTransaction {
+  id: string; // deterministic — see importKey()
   date: string;
   title: string;
   amount: number;
-  type: 'income' | 'expense';
+  type: TransactionType;
+  transferDirection?: TransferDirection;
   category: ExpenseCategory;
+  sourceCategory?: string;
   paymentMethod: PaymentMethod;
   description?: string;
   merchant?: string; // Store/merchant name
-  accountId?: string; // Linked account ID
+  csvAccount: string; // raw Account cell, e.g. "USAA SECURE MAIN CHECKING (...4156)"
   isValid: boolean;
   errors: string[];
+}
+
+/**
+ * Stable identity for an imported row, used directly as the Firestore document id so
+ * that re-importing Monarch's cumulative export overwrites rather than duplicates.
+ *
+ * Deliberately excludes type/category/title: those are the output of the heuristics
+ * below, so keying on them would re-import the world as duplicates every time a rule
+ * changes. `occurrence` separates genuinely identical rows (two $3.50 coffees, same
+ * merchant, same day) — it is content-keyed, not position-keyed, so it stays stable
+ * across overlapping exports.
+ */
+export function importKey(
+  dateKey: string,
+  signedAmount: number,
+  account: string,
+  statement: string,
+  occurrence: number
+): string {
+  const material = [
+    dateKey,
+    signedAmount.toFixed(2), // 85.5 and 85.50 must not diverge
+    // Last four digits survive an account rename or a re-link; the full display name
+    // does not, and a rename would otherwise re-key the user's entire history.
+    // ponytail: last-4 could collide across institutions; add the first token if it bites.
+    account.match(/(\d{4})\D*$/)?.[1] ?? account.trim().toLowerCase(),
+    statement.trim().toLowerCase().replace(/\s+/g, ' '),
+    occurrence,
+  ].join('|');
+  // encodeURIComponent escapes '/', which is the only character Firestore forbids in a
+  // document id. Bijective, so unlike a hash it has no collision probability at all.
+  return `imp_${encodeURIComponent(material)}`;
+}
+
+/**
+ * Whether a source category names internal movement between the user's own accounts.
+ * Monarch writes exactly "Transfer" or "Credit Card Payment"; matching is exact so
+ * that "Transfer Fee", a genuine expense, is not swallowed.
+ */
+export function isTransferCategory(category: string): boolean {
+  const lower = category.trim().toLowerCase();
+  return lower === 'transfer' || lower === 'credit card payment';
+}
+
+/**
+ * Whether a signed CSV amount represents money LEAVING the account.
+ *
+ * Amex and Discover export charges as positive and payments as negative — the
+ * opposite of Monarch, Chase, Mint and everyone else. Assuming one universal
+ * convention books an entire card statement as income.
+ */
+export function isOutflow(format: string, signedAmount: number): boolean {
+  const chargesArePositive = format === 'amex' || format === 'discover';
+  return chargesArePositive ? signedAmount > 0 : signedAmount < 0;
+}
+
+/** Parses a money cell without trusting it. Returns null when the cell is not money. */
+export function parseAmount(raw: string): number | null {
+  const cleaned = raw
+    .replace(/[−–—]/g, '-') // unicode minus / en / em dash
+    .replace(/[^\d.\-()]/g, ''); // strip $, €, thousands separators, spaces
+  if (!cleaned || !/\d/.test(cleaned)) return null;
+  const negative = /^\(.*\)$/.test(cleaned) || cleaned.includes('-'); // (58.12) is accounting for -58.12
+  // Number() not parseFloat(): parseFloat('12abc') silently returns 12.
+  const value = Number(cleaned.replace(/[()\-]/g, ''));
+  if (!Number.isFinite(value)) return null;
+  return negative ? -value : value;
 }
 
 // Common CSV formats from different banks/apps
@@ -39,7 +111,7 @@ const SUPPORTED_FORMATS = [
 ];
 
 export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps) {
-  const { addBulkTransactions } = useTransactions();
+  const { addBulkTransactions, transactions } = useTransactions();
   const { profile } = useUserProfile();
   const fileInputRef = useRef<HTMLInputElement>(null);
   
@@ -51,34 +123,54 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
   const [showHelp, setShowHelp] = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   const [detectedAccountName, setDetectedAccountName] = useState<string>('');
+  // Maps each distinct CSV "Account" string to one of the user's accounts.
+  const [accountMap, setAccountMap] = useState<Record<string, string>>({});
+  const [skippedCount, setSkippedCount] = useState(0);
+  const [importedCount, setImportedCount] = useState(0);
+  const [savedToCloud, setSavedToCloud] = useState(true);
 
-  // Try to match account from filename or CSV headers
-  const detectAccount = (filename: string, headers: string[]): PaymentAccount | null => {
+  // Distinct account names present in the file (empty for single-account exports).
+  const csvAccounts = useMemo(
+    () => [...new Set(parsedData.map(t => t.csvAccount).filter(Boolean))],
+    [parsedData]
+  );
+
+  /**
+   * Matches one CSV account label such as "USAA SECURE MAIN CHECKING (...4156)"
+   * against the user's accounts. Last-four wins because it survives renames.
+   */
+  const matchAccountByName = (csvName: string): PaymentAccount | null => {
     if (!profile?.paymentAccounts) return null;
-    
+    const lower = csvName.toLowerCase();
+    return (
+      profile.paymentAccounts.find(a => a.lastFourDigits && lower.includes(a.lastFourDigits)) ||
+      profile.paymentAccounts.find(a => lower.includes(a.name.toLowerCase())) ||
+      profile.paymentAccounts.find(a => a.provider && lower.includes(a.provider.toLowerCase())) ||
+      null
+    );
+  };
+
+  // Try to match an account from the filename, e.g. "amex_activity_2024.csv".
+  const detectAccount = (filename: string): PaymentAccount | null => {
+    if (!profile?.paymentAccounts) return null;
+
     const filenameLC = filename.toLowerCase();
-    const headersLC = headers.join(' ').toLowerCase();
-    
+
     for (const account of profile.paymentAccounts) {
       const accountNameLC = account.name.toLowerCase();
       const providerLC = account.provider?.toLowerCase() || '';
-      
-      // Check filename
-      if (filenameLC.includes(accountNameLC) || filenameLC.includes(providerLC)) {
+
+      // providerLC guarded: ''.includes() is always true, so an account with no
+      // provider would otherwise match every filename ever uploaded.
+      if (filenameLC.includes(accountNameLC) || (providerLC && filenameLC.includes(providerLC))) {
         return account;
       }
-      
-      // Check for last 4 digits in filename
+
       if (account.lastFourDigits && filenameLC.includes(account.lastFourDigits)) {
         return account;
       }
-      
-      // Check headers for account name
-      if (headersLC.includes(accountNameLC) || headersLC.includes(providerLC)) {
-        return account;
-      }
-      
-      // Check for common bank name patterns
+
+      // Common aliases banks use in their download filenames.
       const bankPatterns: { [key: string]: string[] } = {
         'chase': ['chase', 'jpm'],
         'amex': ['amex', 'american express'],
@@ -88,18 +180,13 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
         'mastercard': ['mastercard', 'mc'],
         'bank_of_america': ['bank of america', 'boa', 'bofa'],
       };
-      
-      for (const [provider, patterns] of Object.entries(bankPatterns)) {
-        if (account.provider === provider) {
-          for (const pattern of patterns) {
-            if (filenameLC.includes(pattern) || headersLC.includes(pattern)) {
-              return account;
-            }
-          }
-        }
+
+      const patterns = bankPatterns[account.provider] || [];
+      if (patterns.some(p => filenameLC.includes(p))) {
+        return account;
       }
     }
-    
+
     return null;
   };
 
@@ -154,16 +241,22 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
   };
 
   const parseCSV = (content: string): ParsedTransaction[] => {
-    const lines = content.split('\n').filter(line => line.trim());
-    if (lines.length < 2) return [];
-    
-    const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, '').toLowerCase());
+    // xlsx (already a dependency) is a real RFC4180 reader. The previous hand-rolled
+    // split('\n') + quote toggler mangled every Monarch export containing a comma in a
+    // merchant name, an escaped quote, or a newline inside a Notes field — the last of
+    // which silently imported a $0 ghost row AND dropped the real amount.
+    const rows = XLSX.utils.sheet_to_json<string[]>(
+      XLSX.read(content, { type: 'string', raw: true, codepage: 65001 }).Sheets.Sheet1,
+      { header: 1, defval: '', blankrows: false }
+    );
+    if (rows.length < 2) return [];
+
+    const headers = rows[0].map(h => String(h ?? '').trim().replace(/^﻿/, '').toLowerCase());
     const transactions: ParsedTransaction[] = [];
-    
+
     // Detect format
     const format = detectFormat(headers);
-    console.log('Detected CSV format:', format);
-    
+
     // Check for required columns (flexible based on format)
     const hasAmount = headers.some(h => h.includes('amount') || h.includes('debit') || h.includes('credit') || h.includes('principal'));
     const hasDate = headers.some(h => h.includes('date'));
@@ -185,24 +278,34 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
     const interestIdx = headers.findIndex(h => h.includes('interest'));
     const balanceIdx = headers.findIndex(h => h === 'balance' || h.includes('balance'));
     
+    // Monarch exports every account in ONE file, so this column is the difference
+    // between correct per-account attribution and collapsing everything onto one card.
+    const accountIdx = headers.findIndex(h => h.includes('account'));
+    const stmtIdx = headers.findIndex(h => h.includes('original statement') || h.includes('original description'));
+
     let descIdx = headers.findIndex(h => h.includes('description') || h.includes('payee'));
-    if (descIdx === -1) descIdx = headers.findIndex(h => h.includes('name'));
-    
+    // Resolved after accountIdx so Mint's "Account Name" column can't become the title.
+    if (descIdx === -1) descIdx = headers.findIndex((h, i) => i !== accountIdx && h.includes('name'));
+
     const merchantIdx = headers.findIndex(h => h === 'merchant' || h.includes('merchant'));
     const categoryIdx = headers.findIndex(h => h.includes('category'));
     const notesIdx = headers.findIndex(h => h.includes('notes') || h.includes('memo') || h.includes('extended details'));
     const typeIdx = headers.findIndex(h => h === 'type' || h.includes('type'));
     
-    for (let i = 1; i < lines.length; i++) {
-      const values = parseCSVLine(lines[i]);
+    // Counts byte-identical rows so two genuinely separate $3.50 coffees on the same
+    // day at the same merchant get distinct ids instead of collapsing into one.
+    const seen = new Map<string, number>();
+
+    for (let i = 1; i < rows.length; i++) {
+      const values = rows[i].map(v => String(v ?? '').trim());
       if (values.length < 2) continue;
-      
+
       const errors: string[] = [];
-      
+
       // Parse date
-      let dateStr = values[dateIdx]?.replace(/"/g, '').trim() || '';
+      const dateStr = values[dateIdx] || '';
       let parsedDate: Date | null = null;
-      
+
       // Try different date formats
       const datePatterns = [
         /(\d{4})-(\d{2})-(\d{2})/, // YYYY-MM-DD
@@ -210,101 +313,112 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
         /(\d{2})-(\d{2})-(\d{4})/, // MM-DD-YYYY
         /(\d{1,2})\/(\d{1,2})\/(\d{2,4})/, // M/D/YY or M/D/YYYY
       ];
-      
+
       for (const datePattern of datePatterns) {
         const match = dateStr.match(datePattern);
         if (match) {
+          let y: number, m: number, d: number;
           if (datePattern.source.startsWith('(\\d{4})')) {
-            parsedDate = new Date(parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]));
+            [y, m, d] = [parseInt(match[1]), parseInt(match[2]), parseInt(match[3])];
           } else {
-            const year = match[3].length === 2 ? 2000 + parseInt(match[3]) : parseInt(match[3]);
-            parsedDate = new Date(year, parseInt(match[1]) - 1, parseInt(match[2]));
+            y = match[3].length === 2 ? 2000 + parseInt(match[3]) : parseInt(match[3]);
+            [m, d] = [parseInt(match[1]), parseInt(match[2])];
+          }
+          const candidate = new Date(y, m - 1, d);
+          // new Date(2024, 0, 32) silently rolls into February, and a day-first
+          // "15/01/2024" rolled 14 months into the future as a valid-looking row.
+          if (candidate.getMonth() === m - 1 && candidate.getDate() === d) {
+            parsedDate = candidate;
           }
           break;
         }
       }
-      
+
       if (!parsedDate || isNaN(parsedDate.getTime())) {
         errors.push('Invalid date format');
       }
-      
-      // Parse amount - handle different formats
-      let amount = 0;
-      let type: 'income' | 'expense' = 'expense';
-      
+
+      // Parse amount. `signedAmount` keeps the CSV's own sign because it is both the
+      // income/expense signal and part of the row's identity; `amount` stays unsigned
+      // because every aggregate in the app assumes that.
+      let signedAmount: number | null = null;
+      let type: TransactionType = 'expense';
+
       if (format === 'upstart' && principalIdx >= 0) {
         // Upstart loan format: Principal + Interest = payment amount
-        const principal = parseFloat(values[principalIdx]?.replace(/"/g, '').replace(/[$,]/g, '').trim() || '0');
-        const interest = parseFloat(values[interestIdx]?.replace(/"/g, '').replace(/[$,]/g, '').trim() || '0');
-        amount = Math.abs(principal) + Math.abs(interest);
+        const principal = parseAmount(values[principalIdx] || '') ?? 0;
+        const interest = parseAmount(values[interestIdx] || '') ?? 0;
+        signedAmount = -(Math.abs(principal) + Math.abs(interest));
         type = 'expense'; // Loan payments are expenses
       } else if (format === 'capital_one' && (debitIdx >= 0 || creditIdx >= 0)) {
-        // Capital One: separate Debit/Credit columns
-        const debit = parseFloat(values[debitIdx]?.replace(/"/g, '').replace(/[$,]/g, '').trim() || '0');
-        const credit = parseFloat(values[creditIdx]?.replace(/"/g, '').replace(/[$,]/g, '').trim() || '0');
-        
-        if (credit > 0) {
-          amount = credit;
-          type = 'income'; // Credits/payments
-        } else {
-          amount = Math.abs(debit);
-          type = 'expense';
-        }
+        // Capital One: separate Debit/Credit columns, no single signed cell
+        const debit = parseAmount(values[debitIdx] || '') ?? 0;
+        const credit = parseAmount(values[creditIdx] || '') ?? 0;
+        signedAmount = credit > 0 ? credit : -Math.abs(debit);
+        type = credit > 0 ? 'income' : 'expense';
       } else {
-        // Standard amount column
-        let amountStr = values[amountIdx]?.replace(/"/g, '').replace(/[$,]/g, '').trim() || '0';
-        amount = parseFloat(amountStr);
-        
-        // Determine type based on sign or type column
+        signedAmount = parseAmount(values[amountIdx] || '');
+
+        if (signedAmount !== null) {
+          // The sign is the primary signal. The old test was `amountStr.startsWith('+')`,
+          // and no bank CSV ever writes a leading '+', so every refund and interest
+          // credit imported as a *second* expense instead of cancelling one.
+          const outflow = isOutflow(format, signedAmount);
+          // Normalise to one convention (negative = money left the account) so that
+          // importKey and transferDirection below mean the same thing for every issuer.
+          signedAmount = outflow ? -Math.abs(signedAmount) : Math.abs(signedAmount);
+          type = outflow ? 'expense' : 'income';
+        }
+
+        // A Type column REFINES the sign, it never replaces it: an unrecognised value
+        // like Chase's "DSLIP" previously left a $2,500 deposit typed as an expense.
         if (typeIdx >= 0) {
-          const typeStr = values[typeIdx]?.toLowerCase() || '';
-          if (typeStr.includes('income') || typeStr.includes('credit') || typeStr.includes('deposit') || typeStr.includes('payment')) {
+          const typeStr = (values[typeIdx] || '').toLowerCase();
+          if (typeStr.includes('income') || typeStr.includes('credit') || typeStr.includes('deposit') ||
+              typeStr.includes('payment') || typeStr.includes('return') || typeStr.includes('refund')) {
             type = 'income';
+          } else if (typeStr.includes('debit') || typeStr.includes('sale') || typeStr.includes('withdrawal')) {
+            type = 'expense';
           }
-        } else if (amount > 0) {
-          // Positive might be income in some formats
-          type = amountStr.startsWith('+') ? 'income' : 'expense';
-        }
-        
-        // Handle negative amounts - will check for payments after title is read
-        if (amount < 0) {
-          amount = Math.abs(amount);
-          type = 'expense'; // Default, will be updated below if it's a payment
+          // 'adjustment' is deliberately absent — it is sign-ambiguous.
+
+          // Re-apply the sign from the refined type. Mint exports UNSIGNED amounts and
+          // puts the direction in this column, so without this the sign-derived fields
+          // (transferDirection, the row id) keep the wrong sign and an outgoing Mint
+          // transfer renders as a green inflow everywhere.
+          if (signedAmount !== null) {
+            signedAmount = type === 'expense' ? -Math.abs(signedAmount) : Math.abs(signedAmount);
+          }
         }
       }
-      
-      if (isNaN(amount)) {
+
+      if (signedAmount === null) {
         errors.push('Invalid amount');
-        amount = 0;
+        signedAmount = 0;
       }
-      
+      // A $0.00 row carries no information and would otherwise import as income.
+      if (signedAmount === 0) {
+        errors.push('Zero amount');
+      }
+      const amount = Math.abs(signedAmount);
+
+      // Raw cells, captured BEFORE any derivation. The row's identity is built from
+      // these, so a change to the merchant regexes below can never re-key the history.
+      const csvAccount = accountIdx >= 0 ? values[accountIdx] || '' : '';
+      const rawStatement = (stmtIdx >= 0 ? values[stmtIdx] : values[descIdx]) || '';
+
       // Get merchant (from dedicated column or fallback to description)
-      let merchant = merchantIdx >= 0 ? values[merchantIdx]?.replace(/"/g, '').trim() : '';
-      
+      let merchant = merchantIdx >= 0 ? values[merchantIdx] : '';
+
       // Get description/title
-      let title = values[descIdx]?.replace(/"/g, '').trim() || '';
-      
-      // Now check if this is income or expense based on transaction description
-      const titleLower = title.toLowerCase();
-      
-      // Payments and credits to credit cards should be 'income' (reduces balance)
-      const paymentKeywords = ['payment', 'autopay', 'auto pay', 'statement credit'];
-      const isPayment = paymentKeywords.some(kw => titleLower.includes(kw));
-      
-      // Transfers: "transfer from" = money coming IN, "transfer to" = money going OUT
-      const isTransferIn = titleLower.includes('transfer from') || titleLower.includes('online transfer from');
-      const isTransferOut = titleLower.includes('transfer to') || titleLower.includes('online transfer to');
-      
-      // Deposits are income
-      const isDeposit = titleLower.includes('deposit') || titleLower.includes('direct dep');
-      
-      // Set type based on transaction nature
-      if (isPayment || isTransferIn || isDeposit) {
-        type = 'income';
-      } else if (isTransferOut) {
-        type = 'expense';
-      }
-      
+      let title = values[descIdx] || '';
+
+      // NOTE: the old code forced type='income' for any title containing "payment",
+      // with no account check. On an unmapped card export that booked every monthly
+      // payment as real income. The CSV's own sign already says which way the money
+      // moved, so it is the only signal used here; whether a payment is an internal
+      // transfer is decided by classifyTransaction() once the account is known.
+
       // Special handling for loan formats
       if (format === 'upstart') {
         title = title || 'Upstart Loan Payment';
@@ -337,99 +451,111 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
       }
       
       // Get category
-      const categoryStr = values[categoryIdx]?.replace(/"/g, '').trim() || '';
+      const categoryStr = values[categoryIdx] || '';
       let category = mapCategory(categoryStr || title);
-      
+
       // Auto-detect loan payments
       const lowerTitle = title.toLowerCase();
-      if (lowerTitle.includes('loan') || lowerTitle.includes('upstart') || lowerTitle.includes('sofi') || 
+      if (lowerTitle.includes('loan') || lowerTitle.includes('upstart') || lowerTitle.includes('sofi') ||
           lowerTitle.includes('lending') || format === 'upstart') {
         category = 'other'; // Loan payments
         type = 'expense';
       }
-      
+
       // Check if this looks like income based on category
-      const lowerCategory = categoryStr.toLowerCase();
+      const lowerCategory = categoryStr.trim().toLowerCase();
       if (lowerCategory.includes('income') || lowerCategory.includes('salary') || lowerCategory.includes('paycheck')) {
         type = 'income';
       }
-      
-      // For credit card payments (credits/refunds), mark as income
-      if (lowerTitle.includes('payment') && (lowerTitle.includes('thank you') || lowerTitle.includes('credit'))) {
-        type = 'income';
+
+      // Monarch already knows which rows are internal movement and says so in its own
+      // Category column. Using that beats guessing from a merchant string, and it is
+      // the last word here because the overrides above are last-write-wins.
+      let transferDirection: TransferDirection | undefined;
+      if (isTransferCategory(categoryStr)) {
+        type = 'transfer';
+        transferDirection = signedAmount < 0 ? 'out' : 'in';
       }
-      
+
       // Get notes/description
-      const description = values[notesIdx]?.replace(/"/g, '').trim() || '';
-      
+      const description = values[notesIdx] || '';
+
+      const dateKey = parsedDate ? formatDate(parsedDate, 'yyyy-MM-dd') : '';
+      // Counted on the SAME normalised material the id uses. Keying the counter on the
+      // raw cells instead let two rows differing only by case, whitespace, or a shared
+      // last-4 both take occurrence 0 and then collapse onto one document id.
+      const base = importKey(dateKey, signedAmount, csvAccount, rawStatement, 0);
+      const occurrence = seen.get(base) ?? 0;
+      seen.set(base, occurrence + 1);
+
       transactions.push({
-        date: parsedDate?.toISOString() || new Date().toISOString(),
+        id: importKey(dateKey, signedAmount, csvAccount, rawStatement, occurrence),
+        // LOCAL midnight, matching what every consumer does: calendar, history grouping
+        // and the dashboard month filter all read this back with local-time date math,
+        // so a UTC-midnight string put US users' 1st-of-month rows in the prior month.
+        date: parsedDate ? parsedDate.toISOString() : '',
         title,
-        amount: Math.abs(amount),
+        amount,
         type,
+        transferDirection,
         category,
+        // The source's own label, kept verbatim so nothing gets flattened into "Other".
+        sourceCategory: categoryStr.trim() || undefined,
         paymentMethod: 'chase', // Default, user can change
         description,
         merchant: merchant || undefined, // Include merchant if found
+        csvAccount,
         isValid: errors.length === 0,
         errors,
       });
     }
-    
+
     return transactions;
   };
   
-  // Parse CSV line handling quoted values
-  const parseCSVLine = (line: string): string[] => {
-    const values: string[] = [];
-    let current = '';
-    let inQuotes = false;
-    
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i];
-      if (char === '"') {
-        inQuotes = !inQuotes;
-      } else if (char === ',' && !inQuotes) {
-        values.push(current.trim());
-        current = '';
-      } else {
-        current += char;
-      }
-    }
-    values.push(current.trim());
-    
-    return values;
-  };
-
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (!selectedFile) return;
-    
+
     if (!selectedFile.name.endsWith('.csv')) {
       setError('Please select a CSV file');
       return;
     }
-    
+
     setFile(selectedFile);
     setError(null);
     setImportSuccess(false);
     setDetectedAccountName('');
-    
+
     const reader = new FileReader();
     reader.onload = (event) => {
       const content = event.target?.result as string;
-      const lines = content.split('\n').filter(line => line.trim());
-      const headers = lines[0]?.split(',').map(h => h.trim().replace(/"/g, '').toLowerCase()) || [];
-      
-      // Try to detect account from filename and headers
-      const detectedAccount = detectAccount(selectedFile.name, headers);
-      if (detectedAccount) {
-        setSelectedAccountId(detectedAccount.id);
-        setDetectedAccountName(detectedAccount.name);
-      }
-      
       const parsed = parseCSV(content);
       setParsedData(parsed);
+
+      // The filename is a real signal ("amex_activity_2024.csv") and is often the ONLY
+      // one: Amex's "Account #" column holds an opaque "-42003" that matches nothing.
+      // So it is always consulted, and used as the fallback for any CSV account label
+      // we could not resolve on its own.
+      const fromFilename = detectAccount(selectedFile.name);
+
+      const labels = [...new Set(parsed.map(t => t.csvAccount).filter(Boolean))];
+      const seeded: Record<string, string> = {};
+      for (const name of labels) {
+        // The filename only stands in when the file describes ONE account. In a
+        // multi-account Monarch export it would silently attribute an unrecognised
+        // label (say "Vanguard Brokerage") to whatever the filename hinted at, and
+        // the unmapped-rows warning would stay hidden because it looks mapped.
+        const match = matchAccountByName(name) || (labels.length === 1 ? fromFilename : null);
+        if (match) seeded[name] = match.id;
+      }
+      setAccountMap(seeded);
+
+      if (fromFilename) {
+        setDetectedAccountName(fromFilename.name);
+        // Single-account exports (Chase, Discover, ...) carry no Account column at all.
+        if (!parsed.some(t => t.csvAccount)) setSelectedAccountId(fromFilename.id);
+      }
     };
     reader.readAsText(selectedFile);
   };
@@ -440,31 +566,50 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
       setError('No valid transactions to import');
       return;
     }
-    
+
+    // Rows already imported are skipped rather than rewritten, so a category the user
+    // corrected by hand survives every future import of the same Monarch export.
+    const alreadyImported = new Set(transactions.map(t => t.id));
+    const fresh = validTransactions.filter(t => !alreadyImported.has(t.id));
+    if (fresh.length === 0) {
+      setError(`All ${validTransactions.length} transactions were already imported.`);
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
-    
+
     try {
-      // Get the selected account for payment method
-      const linkedAccount = profile?.paymentAccounts?.find(a => a.id === selectedAccountId);
-      
-      const transactionsToAdd: Omit<Transaction, 'id'>[] = validTransactions.map(t => ({
-        title: t.title,
-        amount: t.amount,
-        type: t.type,
-        category: t.category,
-        paymentMethod: linkedAccount?.provider || t.paymentMethod,
-        date: t.date,
-        description: t.description,
-        merchant: t.merchant,
-        accountId: selectedAccountId || undefined, // Link to selected account
-        isRecurring: false,
-        isProjected: false,
-      }));
-      
-      await addBulkTransactions(transactionsToAdd);
+      const transactionsToAdd = fresh.map(t => {
+        // Per-row account: a Monarch export contains every account in one file, so a
+        // single global selection would mis-attribute all but one of them.
+        const accountId = t.csvAccount ? accountMap[t.csvAccount] : selectedAccountId;
+        const linkedAccount = profile?.paymentAccounts?.find(a => a.id === accountId);
+        return {
+          id: t.id,
+          title: t.title,
+          amount: t.amount,
+          type: t.type,
+          transferDirection: t.transferDirection,
+          category: t.category,
+          sourceCategory: t.sourceCategory,
+          paymentMethod: linkedAccount?.provider || t.paymentMethod,
+          date: t.date,
+          // Undefined rather than '' / false: the write merges, so only fields the CSV
+          // genuinely carries should overwrite what is already stored.
+          description: t.description || undefined,
+          merchant: t.merchant,
+          accountId: accountId || undefined,
+        };
+      });
+
+      const result = await addBulkTransactions(transactionsToAdd);
+      setSkippedCount(validTransactions.length - fresh.length);
+      setImportedCount(fresh.length);
+      // Never claim a clean import when the rows only reached this browser.
+      setSavedToCloud(result?.persisted ?? false);
       setImportSuccess(true);
-      
+
       // Reset after 2 seconds
       setTimeout(() => {
         onClose();
@@ -580,8 +725,19 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
           <div className="text-center py-8">
             <CheckCircle className="w-16 h-16 mx-auto mb-4 text-emerald-500" />
             <p className="text-xl font-semibold text-[var(--foreground)]">
-              Successfully imported {validCount} transactions
+              Successfully imported {importedCount} transactions
             </p>
+            {skippedCount > 0 && (
+              <p className="text-sm text-[var(--foreground-muted)] mt-2">
+                {skippedCount} were already imported and were left untouched.
+              </p>
+            )}
+            {!savedToCloud && (
+              <p className="text-sm text-amber-500 mt-2">
+                Saved on this device only — the cloud sync failed. They will upload when
+                the connection recovers, but do not clear your browser data before then.
+              </p>
+            )}
           </div>
         )}
 
@@ -622,57 +778,79 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
               )}
             </div>
 
-            {/* Account Linking */}
+            {/* Account Linking — one picker per account found in the file. A Monarch
+                export lists every account in a single CSV, so a single global choice
+                would attribute all of them to one card. */}
             {profile?.paymentAccounts && profile.paymentAccounts.length > 0 && (
-              <div className="p-4 rounded-lg bg-[var(--background-tertiary)] border border-[var(--border-color)]">
-                <div className="flex items-center gap-2 mb-3">
+              <div className="p-4 rounded-lg bg-[var(--background-tertiary)] border border-[var(--border-color)] space-y-4">
+                <div className="flex items-center gap-2">
                   <Link2 className="w-4 h-4 text-[var(--accent-primary)]" />
                   <span className="font-medium text-[var(--foreground)]">Link to Account</span>
-                  {detectedAccountName && (
+                  {(detectedAccountName || (csvAccounts.length > 0 && csvAccounts.every(n => accountMap[n]))) && (
                     <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-500">
                       Auto-detected
                     </span>
                   )}
                 </div>
-                <p className="text-sm text-[var(--foreground-muted)] mb-3">
-                  Link these transactions to an account for better tracking and filtering.
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={() => setSelectedAccountId('')}
-                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                      !selectedAccountId
-                        ? 'bg-[var(--accent-primary)] text-white'
-                        : 'bg-[var(--background-secondary)] text-[var(--foreground-secondary)] border border-[var(--border-color)]'
-                    }`}
-                  >
-                    No Link
-                  </button>
-                  {profile.paymentAccounts.map((account) => (
-                    <button
-                      key={account.id}
-                      onClick={() => setSelectedAccountId(account.id)}
-                      className={`px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
-                        selectedAccountId === account.id
-                          ? 'text-white'
-                          : 'text-[var(--foreground-secondary)] border'
-                      }`}
-                      style={{
-                        backgroundColor: selectedAccountId === account.id 
-                          ? account.color 
-                          : 'var(--background-secondary)',
-                        borderColor: selectedAccountId !== account.id ? account.color : 'transparent',
-                      }}
-                    >
-                      <CreditCard className="w-4 h-4" />
-                      {account.name}
-                      {account.lastFourDigits && <span className="opacity-70">••{account.lastFourDigits}</span>}
-                    </button>
-                  ))}
-                </div>
-                {selectedAccountId && (
-                  <p className="text-xs text-emerald-500 mt-2">
-                    All {validCount} transactions will be linked to this account
+
+                {(csvAccounts.length > 0 ? csvAccounts : ['']).map((csvName) => {
+                  const current = csvName ? accountMap[csvName] : selectedAccountId;
+                  const choose = (id: string) =>
+                    csvName
+                      ? setAccountMap((m) => ({ ...m, [csvName]: id }))
+                      : setSelectedAccountId(id);
+                  return (
+                    <div key={csvName || '__single__'}>
+                      <p className="text-sm text-[var(--foreground-secondary)] mb-2">
+                        {csvName || 'All transactions in this file'}
+                        <span className="text-[var(--foreground-muted)]">
+                          {' '}({csvName
+                            ? parsedData.filter(t => t.csvAccount === csvName).length
+                            : validCount} rows)
+                        </span>
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => choose('')}
+                          className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                            !current
+                              ? 'bg-[var(--accent-primary)] text-white'
+                              : 'bg-[var(--background-secondary)] text-[var(--foreground-secondary)] border border-[var(--border-color)]'
+                          }`}
+                        >
+                          No Link
+                        </button>
+                        {profile.paymentAccounts.map((account) => (
+                          <button
+                            key={account.id}
+                            onClick={() => choose(account.id)}
+                            className={`px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
+                              current === account.id
+                                ? 'text-white'
+                                : 'text-[var(--foreground-secondary)] border'
+                            }`}
+                            style={{
+                              backgroundColor: current === account.id ? account.color : 'var(--background-secondary)',
+                              borderColor: current !== account.id ? account.color : 'transparent',
+                            }}
+                          >
+                            <CreditCard className="w-4 h-4" />
+                            {account.name}
+                            {account.lastFourDigits && <span className="opacity-70">••{account.lastFourDigits}</span>}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* An unlinked card export is the dangerous case: without a linked
+                    account nothing can tell a card payment from real income. */}
+                {csvAccounts.some(n => !accountMap[n]) && (
+                  <p className="text-xs text-amber-500">
+                    {parsedData.filter(t => t.csvAccount && !accountMap[t.csvAccount]).length} transactions
+                    have no linked account. They will import unlinked, and any card payments
+                    among them cannot be recognised as transfers.
                   </p>
                 )}
               </div>
@@ -699,11 +877,17 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
                         {new Date(t.date).toLocaleDateString()}
                       </td>
                       <td className="p-3 text-[var(--foreground)]">{t.title}</td>
-                      <td className={`p-3 text-right font-medium ${t.type === 'income' ? 'text-emerald-500' : 'text-[var(--foreground)]'}`}>
-                        {t.type === 'income' ? '+' : '-'}${t.amount.toFixed(2)}
+                      {/* 3-way: a binary ternary would render every transfer as an
+                          outgoing expense, including the receiving leg. */}
+                      <td className={`p-3 text-right font-medium ${
+                        t.type === 'income' || t.transferDirection === 'in'
+                          ? 'text-emerald-500'
+                          : 'text-[var(--foreground)]'
+                      }`}>
+                        {t.type === 'income' || t.transferDirection === 'in' ? '+' : '-'}${t.amount.toFixed(2)}
                       </td>
                       <td className="p-3">
-                        <span className={`text-xs px-2 py-1 rounded-full ${t.type === 'income' ? 'bg-emerald-500/20 text-emerald-500' : 'bg-[var(--background-tertiary)] text-[var(--foreground-secondary)]'}`}>
+                        <span className={`text-xs px-2 py-1 rounded-full ${t.type === 'income' ? 'bg-emerald-500/20 text-emerald-500' : t.type === 'transfer' ? 'bg-blue-500/20 text-blue-400' : 'bg-[var(--background-tertiary)] text-[var(--foreground-secondary)]'}`}>
                           {t.type}
                         </span>
                       </td>

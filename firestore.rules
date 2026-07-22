@@ -121,8 +121,10 @@ service cloud.firestore {
           request.resource.data.keys().hasAll(['title', 'amount', 'type', 'category', 'paymentMethod', 'date']) &&
           isValidString(request.resource.data.title, 1, 200) &&
           request.resource.data.amount is number &&
-          request.resource.data.amount > 0 &&
-          request.resource.data.type in ['expense', 'income'];
+          // >= 0: real exports contain $0.00 rows (fee reversals, balance adjustments)
+          // and one rejected row fails its entire write batch.
+          request.resource.data.amount >= 0 &&
+          request.resource.data.type in ['expense', 'income', 'transfer'];
         
         // Users can update their transactions
         allow update: if isOwner(userId);

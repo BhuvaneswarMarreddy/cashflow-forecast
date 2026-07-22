@@ -17,6 +17,7 @@ import {
   ArrowDownRight,
 } from 'lucide-react';
 import { Transaction, PaymentAccount, EXPENSE_CATEGORIES, getMerchantColor } from '@/types';
+import { isPositive } from '@/lib/classify';
 import { format, parseISO, startOfMonth, endOfMonth, isWithinInterval } from 'date-fns';
 
 interface AccountTransactionsProps {
@@ -46,16 +47,19 @@ export default function AccountTransactions({ account, transactions }: AccountTr
       return isWithinInterval(txnDate, { start: monthStart, end: monthEnd });
     });
     
+    // Keyed off the display sign, not the raw type: a card payment is stored as a
+    // 'transfer', so filtering on 'income' made these tiles read $0 for every
+    // payment the user made.
     const spent = monthTransactions
-      .filter(t => t.type === 'expense')
+      .filter(t => !isPositive(t, [account]))
       .reduce((sum, t) => sum + t.amount, 0);
-    
+
     const payments = monthTransactions
-      .filter(t => t.type === 'income')
+      .filter(t => isPositive(t, [account]))
       .reduce((sum, t) => sum + t.amount, 0);
     
     return { spent, payments, count: monthTransactions.length };
-  }, [accountTransactions]);
+  }, [accountTransactions, account]);
 
   // Display transactions (limited or all)
   const displayTransactions = showAll 
@@ -159,7 +163,7 @@ export default function AccountTransactions({ account, transactions }: AccountTr
               <p className="text-xs text-[var(--foreground-muted)]">Total Spent</p>
               <p className="text-lg font-bold text-red-400">
                 ${accountTransactions
-                  .filter(t => t.type === 'expense')
+                  .filter(t => !isPositive(t, [account]))
                   .reduce((sum, t) => sum + t.amount, 0)
                   .toLocaleString()}
               </p>
@@ -168,7 +172,7 @@ export default function AccountTransactions({ account, transactions }: AccountTr
               <p className="text-xs text-[var(--foreground-muted)]">Total Payments</p>
               <p className="text-lg font-bold text-emerald-500">
                 ${accountTransactions
-                  .filter(t => t.type === 'income')
+                  .filter(t => isPositive(t, [account]))
                   .reduce((sum, t) => sum + t.amount, 0)
                   .toLocaleString()}
               </p>
@@ -238,16 +242,21 @@ export default function AccountTransactions({ account, transactions }: AccountTr
                   
                   {/* Amount */}
                   <div className="flex items-center gap-2">
-                    {txn.type === 'income' ? (
-                      <ArrowUpRight className="w-4 h-4 text-emerald-500" />
+                    {isPositive(txn, account ? [account] : undefined) ? (
+                      <>
+                        <ArrowUpRight className="w-4 h-4 text-emerald-500" />
+                        <p className="font-semibold text-emerald-500">
+                          +${txn.amount.toLocaleString()}
+                        </p>
+                      </>
                     ) : (
-                      <ArrowDownRight className="w-4 h-4 text-red-400" />
+                      <>
+                        <ArrowDownRight className="w-4 h-4 text-red-400" />
+                        <p className="font-semibold text-[var(--foreground)]">
+                          -${txn.amount.toLocaleString()}
+                        </p>
+                      </>
                     )}
-                    <p className={`font-semibold ${
-                      txn.type === 'income' ? 'text-emerald-500' : 'text-[var(--foreground)]'
-                    }`}>
-                      {txn.type === 'income' ? '+' : '-'}${txn.amount.toLocaleString()}
-                    </p>
                   </div>
                 </div>
               );

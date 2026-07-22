@@ -24,7 +24,16 @@ export type ExpenseCategory =
   | 'investments'
   | 'other';
 
-export type TransactionType = 'expense' | 'income';
+// 'transfer' = movement between the user's own accounts. It is NOT income and NOT
+// spending, so it must be excluded from every income/expense total. Set at import time
+// from the source data (e.g. Monarch's own "Transfer" / "Credit Card Payment" category)
+// rather than re-guessed from the title on every render. See src/lib/classify.ts.
+export type TransactionType = 'expense' | 'income' | 'transfer';
+
+// A transfer's amount is stored unsigned like every other transaction, so the leg
+// direction has nowhere else to live: without this, both legs of a $5,000 move render
+// identically and the receiving side looks like money leaving.
+export type TransferDirection = 'in' | 'out';
 
 export type AccountType = 'credit_card' | 'debit_card' | 'bank_account' | 'cash' | 'personal_loan';
 
@@ -37,7 +46,8 @@ export interface PlannedTransaction {
   id: string;
   title: string;
   amount: number;
-  type: TransactionType;
+  // A planned *transfer* is not a thing this panel offers, so it stays two-valued.
+  type: Exclude<TransactionType, 'transfer'>;
   category: ExpenseCategory;
   accountId?: string;
   dueDate: string; // ISO date - when this payment is expected
@@ -215,7 +225,7 @@ export interface UserProfile {
 // Forecast types for cash flow prediction
 export interface ForecastEvent {
   date: string;
-  type: 'income' | 'bill' | 'expense' | 'starting_balance' | 'credit_card_payment' | 'income_ends' | 'payment_ends';
+  type: 'income' | 'bill' | 'expense' | 'transfer' | 'starting_balance' | 'credit_card_payment' | 'income_ends' | 'payment_ends';
   description: string;
   amount: number; // Positive for income, negative for expenses
   balanceAfter: number;
@@ -284,6 +294,12 @@ export interface Transaction {
   date: string; // ISO date string
   description?: string;
   merchant?: string; // Store/merchant name (Amazon, Walmart, Starbucks, etc.)
+  // The category exactly as the source (Monarch, etc.) labelled it — "AI Tools",
+  // "Coffee Shops", "Send to India". `category` above stays a coarse 13-value bucket
+  // that budgets/forecasts need a closed set for; this is the user's own fine-grained
+  // label for display, grouping and filtering. Absent on manually-added rows.
+  sourceCategory?: string;
+  transferDirection?: TransferDirection; // Only meaningful when type === 'transfer'
   isRecurring?: boolean;
   recurringFrequency?: 'weekly' | 'monthly' | 'yearly';
   recurringEndDate?: string; // When recurring payments end (ISO date)
@@ -439,6 +455,13 @@ export function getMerchantColor(merchantName: string): string {
   }
   const hue = Math.abs(hash % 360);
   return `hsl(${hue}, 65%, 45%)`;
+}
+
+// The label to show/group/filter a transaction by: the source's own category if it
+// carried one, otherwise the coarse enum's label. One place so every screen agrees.
+export function displayCategory(t: { sourceCategory?: string; category: ExpenseCategory }): string {
+  if (t.sourceCategory) return t.sourceCategory;
+  return EXPENSE_CATEGORIES.find(c => c.value === t.category)?.label || t.category;
 }
 
 // Suggest category based on merchant

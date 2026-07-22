@@ -3,13 +3,30 @@
  * Tests type definitions and validation logic
  */
 
-import { 
+import {
   EXPENSE_CATEGORIES,
   getMerchantColor,
+  displayCategory,
   AccountType,
   PaymentMethod,
   ExpenseCategory,
 } from '@/types';
+
+describe('displayCategory', () => {
+  test('prefers the source category verbatim', () => {
+    expect(displayCategory({ sourceCategory: 'AI Tools', category: 'other' })).toBe('AI Tools');
+    expect(displayCategory({ sourceCategory: 'Coffee Shops', category: 'food' })).toBe('Coffee Shops');
+  });
+
+  test('falls back to the enum label when there is no source category', () => {
+    expect(displayCategory({ category: 'food' })).toBe('Food & Dining');
+    expect(displayCategory({ category: 'shopping' })).toBe('Shopping');
+  });
+
+  test('an empty source category is treated as absent, not shown blank', () => {
+    expect(displayCategory({ sourceCategory: '', category: 'food' })).toBe('Food & Dining');
+  });
+});
 
 describe('Type System', () => {
   describe('Expense Categories', () => {
@@ -87,8 +104,9 @@ describe('Type System', () => {
   describe('Payment Methods', () => {
     test('should support all payment methods', () => {
       const paymentMethods: PaymentMethod[] = [
-        'credit',
-        'debit',
+        'amex',
+        'chase',
+        'discover',
         'cash',
         'bank-transfer',
         'apple',
@@ -135,7 +153,7 @@ describe('Transaction Validation', () => {
     amount: 100,
     type: 'expense' as const,
     category: 'shopping' as ExpenseCategory,
-    paymentMethod: 'credit' as PaymentMethod,
+    paymentMethod: 'amex' as PaymentMethod,
     date: '2025-12-01',
   };
 
@@ -154,8 +172,8 @@ describe('Transaction Validation', () => {
     expect(typeof validTransaction.amount).toBe('number');
   });
 
-  test('type should be income or expense', () => {
-    expect(['income', 'expense']).toContain(validTransaction.type);
+  test('type should be income, expense or transfer', () => {
+    expect(['income', 'expense', 'transfer']).toContain(validTransaction.type);
   });
 
   test('date should be valid ISO string', () => {

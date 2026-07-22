@@ -446,8 +446,8 @@ describe('Transaction History Scenarios', () => {
   describe('Grouping', () => {
     test('should group transactions by month', () => {
       const transactions: Transaction[] = [
-        { id: '1', title: 'T1', amount: 100, type: 'expense', category: 'food', paymentMethod: 'debit', date: '2025-12-15' },
-        { id: '2', title: 'T2', amount: 200, type: 'expense', category: 'shopping', paymentMethod: 'credit', date: '2025-12-20' },
+        { id: '1', title: 'T1', amount: 100, type: 'expense', category: 'food', paymentMethod: 'bank-transfer', date: '2025-12-15' },
+        { id: '2', title: 'T2', amount: 200, type: 'expense', category: 'shopping', paymentMethod: 'amex', date: '2025-12-20' },
         { id: '3', title: 'T3', amount: 150, type: 'expense', category: 'food', paymentMethod: 'cash', date: '2025-11-10' },
       ];
 
@@ -466,8 +466,8 @@ describe('Transaction History Scenarios', () => {
 
     test('should group transactions by year', () => {
       const transactions: Transaction[] = [
-        { id: '1', title: 'T1', amount: 100, type: 'expense', category: 'food', paymentMethod: 'debit', date: '2025-12-15' },
-        { id: '2', title: 'T2', amount: 200, type: 'expense', category: 'shopping', paymentMethod: 'credit', date: '2024-06-20' },
+        { id: '1', title: 'T1', amount: 100, type: 'expense', category: 'food', paymentMethod: 'bank-transfer', date: '2025-12-15' },
+        { id: '2', title: 'T2', amount: 200, type: 'expense', category: 'shopping', paymentMethod: 'amex', date: '2024-06-20' },
       ];
 
       const groups: { [key: string]: Transaction[] } = {};
@@ -486,9 +486,9 @@ describe('Transaction History Scenarios', () => {
 
   describe('Filtering', () => {
     const transactions: Transaction[] = [
-      { id: '1', title: 'Salary', amount: 5000, type: 'income', category: 'salary', paymentMethod: 'bank-transfer', date: '2025-12-01', accountId: 'acc-1' },
-      { id: '2', title: 'Groceries', amount: 150, type: 'expense', category: 'groceries', paymentMethod: 'debit', date: '2025-12-05', accountId: 'acc-1' },
-      { id: '3', title: 'Amazon', amount: 75, type: 'expense', category: 'shopping', paymentMethod: 'credit', date: '2025-12-10', accountId: 'cc-1' },
+      { id: '1', title: 'Salary', amount: 5000, type: 'income', category: 'other', paymentMethod: 'bank-transfer', date: '2025-12-01', accountId: 'acc-1' },
+      { id: '2', title: 'Groceries', amount: 150, type: 'expense', category: 'food', paymentMethod: 'bank-transfer', date: '2025-12-05', accountId: 'acc-1' },
+      { id: '3', title: 'Amazon', amount: 75, type: 'expense', category: 'shopping', paymentMethod: 'amex', date: '2025-12-10', accountId: 'cc-1' },
     ];
 
     test('should filter by type = income', () => {
@@ -519,8 +519,8 @@ describe('Transaction History Scenarios', () => {
 
   describe('Sorting', () => {
     const transactions: Transaction[] = [
-      { id: '1', title: 'T1', amount: 100, type: 'expense', category: 'food', paymentMethod: 'debit', date: '2025-12-15' },
-      { id: '2', title: 'T2', amount: 300, type: 'expense', category: 'shopping', paymentMethod: 'credit', date: '2025-12-10' },
+      { id: '1', title: 'T1', amount: 100, type: 'expense', category: 'food', paymentMethod: 'bank-transfer', date: '2025-12-15' },
+      { id: '2', title: 'T2', amount: 300, type: 'expense', category: 'shopping', paymentMethod: 'amex', date: '2025-12-10' },
       { id: '3', title: 'T3', amount: 200, type: 'expense', category: 'food', paymentMethod: 'cash', date: '2025-12-20' },
     ];
 

@@ -641,12 +641,16 @@ export async function getTransactions(
     
     return transactions;
   } catch (error) {
+    // Must throw, never return []. The caller writes whatever comes back straight over
+    // the localStorage mirror, so returning [] for a failed read erased the user's
+    // entire cached history. Throwing is also the only way the caller can tell a
+    // failed read apart from a genuinely empty collection.
     if (isOfflineError(error)) {
       console.warn('Firestore offline - using local transactions');
-      return [];
+    } else {
+      console.error('Error getting transactions:', error);
     }
-    console.error('Error getting transactions:', error);
-    return [];
+    throw error;
   }
 }
 
@@ -691,30 +695,51 @@ export async function deleteTransaction(userId: string, transactionId: string): 
   }
 }
 
+/**
+ * A transaction supplying its own `id` is written to that exact document, so
+ * re-importing a row the user already has overwrites it instead of duplicating.
+ * Rows without an id keep Firestore's auto-generated ids.
+ */
 export async function addBulkTransactions(
   userId: string,
-  transactions: Omit<Transaction, 'id'>[]
+  transactions: (Omit<Transaction, 'id'> & { id?: string })[]
 ): Promise<void> {
   try {
-    const batch = writeBatch(db);
     const transactionsRef = collection(db, 'users', userId, 'transactions');
-    const now = serverTimestamp();
-    
-    transactions.forEach((transaction) => {
-      const docRef = doc(transactionsRef);
-      batch.set(docRef, {
-        ...transaction,
-        date: Timestamp.fromDate(new Date(transaction.date)),
-        createdAt: now,
-        updatedAt: now,
+
+    // Firestore rejects a batch of more than 500 writes, and a Monarch export can be
+    // 5,000 rows. Each chunk commits independently: a failure part-way leaves earlier
+    // chunks committed, which is safe precisely because the ids are deterministic —
+    // re-running the import finishes the job rather than duplicating it.
+    for (let i = 0; i < transactions.length; i += 500) {
+      const batch = writeBatch(db);
+      const now = serverTimestamp();
+
+      transactions.slice(i, i + 500).forEach(({ id, ...transaction }) => {
+        const docRef = id ? doc(transactionsRef, id) : doc(transactionsRef);
+        batch.set(
+          docRef,
+          {
+            ...removeUndefined(transaction),
+            date: Timestamp.fromDate(new Date(transaction.date)),
+            updatedAt: now,
+            ...(id ? {} : { createdAt: now }),
+          },
+          // merge so a re-import cannot blank fields the CSV does not carry
+          // (a description the user typed, isRecurring they set by hand).
+          { merge: true }
+        );
       });
-    });
-    
-    await batch.commit();
+
+      await batch.commit();
+    }
   } catch (error) {
+    // Deliberately NOT swallowing an offline error here. Returning void made a failed
+    // bulk write indistinguishable from a successful one, so the importer reported
+    // "Successfully imported N" for rows that reached neither Firestore nor the local
+    // mirror. The caller needs to know so it can fall back to a local-only write.
     if (isOfflineError(error)) {
-      console.warn('Firestore offline - transactions will sync when online');
-      return;
+      console.warn('Firestore offline - bulk write did not land');
     }
     throw error;
   }

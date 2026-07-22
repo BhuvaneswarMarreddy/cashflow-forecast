@@ -46,6 +46,56 @@ describe('Forecast Engine', () => {
 
   const mockTransactions: Transaction[] = [];
 
+  describe('Transfers in the cash forecast', () => {
+    // This forecast tracks the CASH pool. A transfer only nets to zero when BOTH legs
+    // sit inside that pool — money moved to a card, to untracked savings, or to an
+    // external recipient has genuinely left and must reduce the projection.
+    const future = () => {
+      const d = new Date();
+      d.setDate(d.getDate() + 5);
+      return d.toISOString();
+    };
+    const transfer = (direction: 'in' | 'out'): Transaction => ({
+      id: 'tr-1',
+      title: 'Transfer to Ally Savings',
+      amount: 500,
+      type: 'transfer',
+      transferDirection: direction,
+      category: 'other',
+      paymentMethod: 'bank-transfer',
+      accountId: 'checking-1',
+      date: future(),
+    });
+    const run = (transactions: Transaction[]) =>
+      generateForecast(5000, mockAccounts, mockIncomeSources, transactions, 1000, 30);
+
+    test('an outbound transfer to an untracked destination reduces the projection', () => {
+      expect(run([transfer('out')]).endingBalance).toBe(run([]).endingBalance - 500);
+    });
+
+    test('an inbound transfer increases it by the same amount', () => {
+      expect(run([transfer('in')]).endingBalance).toBe(run([]).endingBalance + 500);
+    });
+
+    test('a transfer sitting on a credit card does not touch the cash pool', () => {
+      // The card is not part of calculateCurrentCash, so its leg must not move the
+      // cash projection — only the checking-side leg does.
+      const onCard: Transaction = { ...transfer('in'), accountId: 'credit-1' };
+      expect(run([onCard]).endingBalance).toBe(run([]).endingBalance);
+    });
+
+    test('falls back to the title when transferDirection is absent', () => {
+      // Old rows and hand-created ones carry no direction; the forecast must read them
+      // the same way every screen does, via isPositive().
+      const untyped: Transaction = {
+        id: 'tr-2', title: 'Online Transfer to Savings', amount: 500, type: 'transfer',
+        category: 'other', paymentMethod: 'bank-transfer', accountId: 'checking-1',
+        date: future(),
+      };
+      expect(run([untyped]).endingBalance).toBe(run([]).endingBalance - 500);
+    });
+  });
+
   describe('generateForecast', () => {
     test('should generate forecast with correct starting balance', () => {
       const forecast = generateForecast(

@@ -4,25 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { X, DollarSign, Calendar, CreditCard, Tag, FileText, Building2, Wallet, Store, ChevronDown } from 'lucide-react';
 import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
-import { PAYMENT_METHODS, EXPENSE_CATEGORIES, COMMON_MERCHANTS, TransactionType, PaymentMethod, ExpenseCategory, AccountType, suggestCategoryFromMerchant, getMerchantColor } from '@/types';
-
-interface Transaction {
-  id: string;
-  title: string;
-  amount: number;
-  type: 'income' | 'expense';
-  category: ExpenseCategory;
-  paymentMethod: PaymentMethod;
-  accountId?: string;
-  date: string;
-  description?: string;
-  merchant?: string;
-  isProjected?: boolean;
-  isRecurring?: boolean;
-  recurringFrequency?: 'weekly' | 'monthly' | 'yearly';
-  recurringEndDate?: string;
-  recurringCount?: number;
-}
+import { PAYMENT_METHODS, EXPENSE_CATEGORIES, COMMON_MERCHANTS, Transaction, TransactionType, TransferDirection, PaymentMethod, ExpenseCategory, AccountType, suggestCategoryFromMerchant, getMerchantColor } from '@/types';
 
 interface AddTransactionModalProps {
   isOpen: boolean;
@@ -38,6 +20,7 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
     title: '',
     amount: '',
     type: 'expense' as TransactionType,
+    transferDirection: 'out' as TransferDirection,
     category: 'other' as ExpenseCategory,
     paymentMethod: 'chase' as PaymentMethod,
     accountId: '',
@@ -114,6 +97,7 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
         title: editTransaction.title,
         amount: editTransaction.amount.toString(),
         type: editTransaction.type,
+        transferDirection: editTransaction.transferDirection || 'out',
         category: editTransaction.category,
         paymentMethod: editTransaction.paymentMethod,
         accountId: editTransaction.accountId || '',
@@ -176,6 +160,7 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
       title: formData.title,
       amount: parseFloat(formData.amount),
       type: formData.type,
+      transferDirection: formData.type === 'transfer' ? formData.transferDirection : undefined,
       category: formData.category,
       paymentMethod: formData.paymentMethod,
       accountId: formData.accountId || undefined,
@@ -209,6 +194,7 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
       title: '',
       amount: '',
       type: 'expense',
+      transferDirection: 'out',
       category: 'other',
       paymentMethod: firstAccount?.provider || 'chase',
       accountId: firstAccount?.id || '',
@@ -283,7 +269,41 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
             >
               Income
             </button>
+            {/* Without this, opening a transfer to fix a typo highlights neither
+                button and saving silently rewrites its type. */}
+            <button
+              type="button"
+              onClick={() => setFormData({ ...formData, type: 'transfer' })}
+              className={`flex-1 py-3 rounded-xl font-medium transition-all ${
+                formData.type === 'transfer'
+                  ? 'bg-[var(--accent-primary)] text-white'
+                  : 'bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'
+              }`}
+            >
+              Transfer
+            </button>
           </div>
+
+          {/* A transfer's amount is stored unsigned, so the leg direction is the only
+              thing that says whether this account gained or lost the money. */}
+          {formData.type === 'transfer' && (
+            <div className="flex gap-3">
+              {(['out', 'in'] as TransferDirection[]).map((dir) => (
+                <button
+                  key={dir}
+                  type="button"
+                  onClick={() => setFormData({ ...formData, transferDirection: dir })}
+                  className={`flex-1 py-2 rounded-xl text-sm font-medium transition-all ${
+                    formData.transferDirection === dir
+                      ? 'bg-[var(--background-secondary)] text-[var(--foreground)] border border-[var(--accent-primary)]'
+                      : 'bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'
+                  }`}
+                >
+                  {dir === 'out' ? 'Money out of this account' : 'Money into this account'}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Title */}
           <div>

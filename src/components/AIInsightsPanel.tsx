@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { Transaction, PaymentAccount, IncomeSource } from '@/types';
+import { classifyTransaction } from '@/lib/classify';
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -49,30 +50,6 @@ export default function AIInsightsPanel({
   const [expandedMonth, setExpandedMonth] = useState<string | null>(null);
   const [showAllMonths, setShowAllMonths] = useState(false);
 
-  // Helper to classify transaction
-  const classifyTransaction = (t: Transaction): 'income' | 'expense' | 'transfer' => {
-    const titleLower = t.title.toLowerCase();
-    const linkedAccount = t.accountId ? accounts.find(a => a.id === t.accountId) : null;
-    const isCreditCard = linkedAccount?.type === 'credit_card';
-    
-    if (titleLower.includes('transfer from') || titleLower.includes('transfer to') || 
-        titleLower.includes('online transfer')) {
-      return 'transfer';
-    }
-    
-    const paymentKeywords = ['payment', 'autopay', 'auto pay'];
-    if (isCreditCard && paymentKeywords.some(kw => titleLower.includes(kw))) {
-      return 'transfer';
-    }
-    
-    if (titleLower.includes('deposit') || titleLower.includes('direct dep') || 
-        titleLower.includes('payroll') || titleLower.includes('salary')) {
-      return 'income';
-    }
-    
-    return t.type === 'income' ? 'income' : 'expense';
-  };
-
   // Calculate monthly data for the last 6 months
   const monthlyData: MonthlyData[] = useMemo(() => {
     const months: MonthlyData[] = [];
@@ -92,7 +69,7 @@ export default function AIInsightsPanel({
       const merchantTotals: { [key: string]: number } = {};
       
       monthTxns.forEach(t => {
-        const classification = classifyTransaction(t);
+        const classification = classifyTransaction(t, accounts);
         
         if (classification === 'income') {
           income += t.amount;

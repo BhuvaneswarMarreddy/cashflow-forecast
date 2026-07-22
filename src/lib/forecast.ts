@@ -16,6 +16,7 @@ import {
   AccountForecast 
 } from '@/types';
 import { addDays, format, parseISO, startOfDay, isBefore, isAfter, isSameDay } from 'date-fns';
+import { isPositive } from '@/lib/classify';
 
 const DEFAULT_SAFETY_THRESHOLD = 500;
 const FORECAST_DAYS = 90;
@@ -269,14 +270,39 @@ function transactionsToEvents(
     // For expenses: add all
     const isCreditCardPayment = t.type === 'income' && isCreditCardAccount(t.accountId);
     const isActualIncome = t.type === 'income' && !t.isProjected && !isCreditCardPayment;
-    const shouldInclude = t.type === 'expense' || isActualIncome;
-    
+    // This forecast tracks the CASH pool (calculateCurrentCash excludes credit cards),
+    // so a transfer is only invisible to it when both legs sit inside that pool. A
+    // transfer out of checking — to a card, to savings the user has not set up, to an
+    // external Zelle recipient — is real money leaving and must be counted.
+    // A transfer sitting ON a card is not cash and is skipped by the same test.
+    //
+    // ponytail: no attempt to suppress a transfer that generateBillEvents also
+    // synthesises. Only FUTURE-dated rows reach this branch (see the isAfter test
+    // below) and imported statements are historical, so the overlap needs a
+    // hand-entered future card payment to occur — and over-counting an outflow is the
+    // safe direction for a runway. Suppress it here if that ever stops being true.
+    const transferAccount = t.accountId ? accounts.find(a => a.id === t.accountId) : undefined;
+    const isCountableTransfer =
+      t.type === 'transfer' &&
+      !!transferAccount &&
+      transferAccount.type !== 'credit_card' &&
+      transferAccount.type !== 'personal_loan';
+
+    const shouldInclude = t.type === 'expense' || isActualIncome || isCountableTransfer;
+
     if (shouldInclude && isAfter(txnDate, startDate) && isBefore(txnDate, endDate)) {
+      // A transfer's direction decides its sign. isPositive() resolves it from the
+      // title ("transfer from", deposits) when transferDirection is absent, which is
+      // the same rule every UI surface uses — the forecast must not disagree.
+      const signedAmount = isCountableTransfer
+        ? (isPositive(t, accounts) ? t.amount : -t.amount)
+        : (t.type === 'income' ? t.amount : -t.amount);
+
       events.push({
         date: t.date.split('T')[0],
-        type: t.type === 'income' ? 'income' : 'expense' as const,
+        type: isCountableTransfer ? 'transfer' : signedAmount >= 0 ? 'income' : 'expense',
         description: t.title,
-        amount: t.type === 'income' ? t.amount : -t.amount,
+        amount: signedAmount,
         balanceAfter: 0,
         source: t.isRecurring ? 'recurring' : 'manual' as const,
         accountId: t.accountId,
@@ -438,11 +464,15 @@ export function generateForecast(
       }
     }
     
-    // Track totals
-    if (event.amount > 0) {
-      totalIncome += event.amount;
-    } else {
-      totalExpenses += Math.abs(event.amount);
+    // Track totals. A transfer moves the running balance above but is NOT spending:
+    // totalExpenses feeds monthlyExpenses -> the emergency-fund target and runway, so
+    // counting a savings sweep here inflates the target and shortens the runway.
+    if (event.type !== 'transfer') {
+      if (event.amount > 0) {
+        totalIncome += event.amount;
+      } else {
+        totalExpenses += Math.abs(event.amount);
+      }
     }
   });
   
@@ -885,9 +915,12 @@ export function generateAccountForecast(
   
   // For credit cards, show spending and incoming payments
   if (account.type === 'credit_card') {
-    // Add transactions made on this credit card
+    // Add transactions made on this credit card. Transfers are excluded because the
+    // synthetic payment below already models them, and line 900's
+    // `type === 'expense' ? +amount : -amount` would push an inbound payment the
+    // wrong way against this card's balance.
     transactions
-      .filter(t => t.accountId === account.id)
+      .filter(t => t.accountId === account.id && t.type !== 'transfer')
       .filter(t => {
         const txnDate = parseISO(t.date);
         return isAfter(txnDate, today) && isBefore(txnDate, endDate);
@@ -934,7 +967,12 @@ export function generateAccountForecast(
     }
   }
   
-  // Add account-linked transactions
+  // Add account-linked transactions. NOTE this branch uses the OPPOSITE sign
+  // convention to the credit-card branch above (`type === 'income' ? +amount
+  // : -amount`), so a transfer's sign must come from isPositive(), not from t.type.
+  // Transfers ARE included here: this account really did gain or lose the money, and
+  // excluding them made the per-account card read "safe" while the all-accounts chart
+  // on the same screen dipped.
   transactions
     .filter(t => t.accountId === account.id && account.type !== 'credit_card')
     .filter(t => {
@@ -942,11 +980,12 @@ export function generateAccountForecast(
       return isAfter(txnDate, today) && isBefore(txnDate, endDate);
     })
     .forEach(t => {
+      const inflow = t.type === 'transfer' ? isPositive(t, [account]) : t.type === 'income';
       events.push({
         date: t.date.split('T')[0],
-        type: t.type === 'income' ? 'income' : 'expense',
+        type: t.type === 'transfer' ? 'transfer' : inflow ? 'income' : 'expense',
         description: t.title,
-        amount: t.type === 'income' ? t.amount : -t.amount,
+        amount: inflow ? t.amount : -t.amount,
         balanceAfter: 0,
         source: 'manual',
         accountId: account.id,

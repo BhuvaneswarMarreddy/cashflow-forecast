@@ -4,9 +4,11 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useTransactions } from '@/context/TransactionContext';
+import { useUserProfile } from '@/context/UserProfileContext';
 import Navbar from '@/components/Navbar';
 import AddTransactionModal from '@/components/AddTransactionModal';
 import { PAYMENT_METHODS, EXPENSE_CATEGORIES, Transaction } from '@/types';
+import { isPositive } from '@/lib/classify';
 import {
   TrendingUp,
   Plus,
@@ -34,6 +36,7 @@ import {
 export default function CalendarPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const { transactions, isLoading: txnLoading, deleteTransaction, getTransactionsByDate } = useTransactions();
+  const { profile } = useUserProfile();
   const router = useRouter();
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
@@ -301,7 +304,7 @@ export default function CalendarPage() {
                 selectedDateTransactions.map((txn) => {
                   const category = EXPENSE_CATEGORIES.find((c) => c.value === txn.category);
                   const paymentMethod = PAYMENT_METHODS.find((m) => m.value === txn.paymentMethod);
-                  const isExpense = txn.type === 'expense';
+                  const isExpense = !isPositive(txn, profile?.paymentAccounts);
 
                   return (
                     <div

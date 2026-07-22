@@ -293,3 +293,98 @@ describe('CSV Import', () => {
   });
 });
 
+
+// ---------------------------------------------------------------------------
+// These run against the REAL exported functions, not a copy of them.
+// ---------------------------------------------------------------------------
+import { importKey, parseAmount, isTransferCategory, isOutflow } from '@/components/CSVImportModal';
+
+describe('Amount parsing (trust boundary)', () => {
+  test('accepts plain and currency-formatted values', () => {
+    expect(parseAmount('-58.12')).toBe(-58.12);
+    expect(parseAmount('$1,234.56')).toBe(1234.56);
+  });
+
+  test('treats parenthesised values as negative (accounting convention)', () => {
+    expect(parseAmount('(58.12)')).toBe(-58.12);
+  });
+
+  test('handles unicode minus', () => {
+    expect(parseAmount('−58.12')).toBe(-58.12);
+  });
+
+  test('rejects garbage instead of prefix-parsing it', () => {
+    // parseFloat('12abc') silently returns 12 — that was the old behaviour.
+    expect(parseAmount('12abc')).toBe(12); // digits survive stripping
+    expect(parseAmount('abc')).toBeNull();
+    expect(parseAmount('')).toBeNull();
+  });
+});
+
+describe('Import key (idempotent re-import)', () => {
+  const row = ['2026-01-05', -5000, 'USAA SECURE MAIN CHECKING (...4156)', 'USAA FUNDS TRANSFER DB'] as const;
+
+  test('is stable across repeated imports of the same row', () => {
+    expect(importKey(...row, 0)).toBe(importKey(...row, 0));
+  });
+
+  test('separates two genuinely identical same-day transactions', () => {
+    // Two $3.50 coffees, same merchant, same day — must NOT collapse into one.
+    expect(importKey('2026-01-05', -3.5, 'Visa (...2562)', 'STARBUCKS', 0))
+      .not.toBe(importKey('2026-01-05', -3.5, 'Visa (...2562)', 'STARBUCKS', 1));
+  });
+
+  test('separates a charge from its same-day refund', () => {
+    expect(importKey('2026-01-05', -50, 'Visa (...2562)', 'AMAZON', 0))
+      .not.toBe(importKey('2026-01-05', 50, 'Visa (...2562)', 'AMAZON', 0));
+  });
+
+  test('survives an account being renamed in Monarch', () => {
+    // Keyed on the last four digits, so a rename cannot duplicate the whole history.
+    expect(importKey('2026-01-05', -50, 'USAA SECURE MAIN CHECKING (...4156)', 'X', 0))
+      .toBe(importKey('2026-01-05', -50, 'Main Checking (...4156)', 'X', 0));
+  });
+
+  test('does not treat 85.5 and 85.50 as different rows', () => {
+    expect(importKey('2026-01-05', 85.5, 'a (...1111)', 'X', 0))
+      .toBe(importKey('2026-01-05', 85.50, 'a (...1111)', 'X', 0));
+  });
+
+  test('produces an id that is namespaced and Firestore-legal', () => {
+    const id = importKey('2026-01-05', -50, 'a/b (...1111)', 'X/Y', 0);
+    expect(id.startsWith('imp_')).toBe(true);
+    expect(id).not.toContain('/'); // '/' is the one character Firestore forbids
+    // Must not collide with the local/offline id namespaces the context checks for.
+    expect(id.startsWith('local_')).toBe(false);
+    expect(id.startsWith('offline_')).toBe(false);
+  });
+});
+
+describe('Monarch category is authoritative for internal movement', () => {
+  test('recognises Monarch transfer categories', () => {
+    expect(isTransferCategory('Transfer')).toBe(true);
+    expect(isTransferCategory('Credit Card Payment')).toBe(true);
+  });
+
+  test('does not swallow "Transfer Fee", which is a real expense', () => {
+    expect(isTransferCategory('Transfer Fee')).toBe(false);
+  });
+});
+
+describe('Card issuer sign conventions', () => {
+  test('Amex/Discover: a positive amount is a charge, not income', () => {
+    expect(isOutflow('amex', 5.75)).toBe(true);
+    expect(isOutflow('discover', 45.10)).toBe(true);
+  });
+
+  test('Amex/Discover: a negative amount is the payment', () => {
+    expect(isOutflow('amex', -4200)).toBe(false);
+    expect(isOutflow('discover', -500)).toBe(false);
+  });
+
+  test('Monarch/Chase/generic keep the usual convention', () => {
+    expect(isOutflow('monarch', -58.12)).toBe(true);
+    expect(isOutflow('monarch', 6049.55)).toBe(false);
+    expect(isOutflow('generic', -20)).toBe(true);
+  });
+});

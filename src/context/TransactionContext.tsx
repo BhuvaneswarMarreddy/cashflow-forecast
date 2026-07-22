@@ -11,7 +11,9 @@ interface TransactionContextType {
   isLoading: boolean;
   error: string | null;
   addTransaction: (transaction: Omit<Transaction, 'id'>) => Promise<void>;
-  addBulkTransactions: (transactions: Omit<Transaction, 'id'>[]) => Promise<void>;
+  addBulkTransactions: (
+    transactions: (Omit<Transaction, 'id'> & { id?: string })[]
+  ) => Promise<{ persisted: boolean } | undefined>;
   updateTransaction: (id: string, updates: Partial<Transaction>) => Promise<void>;
   deleteTransaction: (id: string) => Promise<void>;
   refreshTransactions: () => Promise<void>;
@@ -66,10 +68,23 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
     isFetching.current = true;
 
     try {
+      // A failed read now throws rather than returning [], so an empty result here is
+      // a genuinely empty collection. Inferring failure from the row count instead
+      // would pin a user with local-only history offline forever.
       const userTransactions = await firestoreService.getTransactions(userId);
+
+      // Firestore is authoritative for rows it knows about, but rows created while
+      // offline live only in the mirror and have never been written. Dropping them
+      // here — which a plain overwrite does — destroys the user's only copy.
+      const synced = new Set(userTransactions.map((t) => t.id));
+      const unsynced = loadLocalTransactions(userId).filter(
+        (t) => /^(local|offline)_/.test(t.id) && !synced.has(t.id)
+      );
+      const merged = [...unsynced, ...userTransactions];
+
       setIsFirestoreOnline(true);
-      setTransactions(userTransactions);
-      saveLocalTransactions(userId, userTransactions);
+      setTransactions(merged);
+      saveLocalTransactions(userId, merged);
       setError(null);
     } catch (err) {
       console.warn('Firestore sync failed, using cached data:', err);
@@ -77,7 +92,7 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
     } finally {
       isFetching.current = false;
     }
-  }, [saveLocalTransactions]);
+  }, [saveLocalTransactions, loadLocalTransactions]);
 
   // Handle auth state changes - FAST path with localStorage first
   useEffect(() => {
@@ -149,32 +164,44 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const addBulkTransactions = async (newTransactions: Omit<Transaction, 'id'>[]) => {
+  // `id` is optional: the CSV importer supplies deterministic ids so re-importing the
+  // same rows overwrites instead of duplicating. Everything else keeps auto-ids.
+  const addBulkTransactions = async (
+    newTransactions: (Omit<Transaction, 'id'> & { id?: string })[]
+  ) => {
     if (!user?.id || newTransactions.length === 0) return;
 
-    // Create temp IDs for all transactions
+    // Commit to Firestore BEFORE touching local state. The previous order inserted all
+    // N rows optimistically and swallowed a failed write, so the mirror claimed rows
+    // that were never persisted and the caller reported success either way.
+    if (isFirestoreOnline) {
+      try {
+        await firestoreService.addBulkTransactions(user.id, newTransactions);
+        await syncFromFirestore(user.id);
+        return { persisted: true };
+      } catch (err) {
+        // The write did not land. Fall through to the local mirror so the rows still
+        // exist somewhere, and tell the caller it was not a clean import.
+        console.warn('Bulk write failed, keeping rows locally:', err);
+        setIsFirestoreOnline(false);
+      }
+    }
+
+    // Local-only rows keep a `local_` id so syncFromFirestore preserves them until
+    // they are written. Caller-supplied import ids are NOT used here: an `imp_` id in
+    // the mirror would look already-synced and be dropped on the next read.
     const transactionsWithIds: Transaction[] = newTransactions.map((t, i) => ({
       ...t,
       id: `local_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 9)}`,
     }));
 
-    // Update local state immediately
     setTransactions((prev) => {
       const updated = [...transactionsWithIds, ...prev];
       saveLocalTransactions(user.id, updated);
       return updated;
     });
 
-    // Try to sync with Firestore
-    if (isFirestoreOnline) {
-      try {
-        await firestoreService.addBulkTransactions(user.id, newTransactions);
-        // Refresh to get Firestore IDs
-        await syncFromFirestore(user.id);
-      } catch (err) {
-        console.warn('Firestore bulk sync failed, using localStorage:', err);
-      }
-    }
+    return { persisted: false };
   };
 
   const updateTransaction = async (id: string, updates: Partial<Transaction>) => {
@@ -299,9 +326,11 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
         monthlyData[monthKey] = { income: 0, expenses: 0 };
       }
       
+      // Bare `else` would bucket every transfer as spending. This drives the
+      // dashboard's Monthly Overview chart.
       if (t.type === 'income') {
         monthlyData[monthKey].income += t.amount;
-      } else {
+      } else if (t.type === 'expense') {
         monthlyData[monthKey].expenses += t.amount;
       }
     });

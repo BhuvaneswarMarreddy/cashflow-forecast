@@ -8,6 +8,7 @@ import { useUserProfile } from '@/context/UserProfileContext';
 import Navbar from '@/components/Navbar';
 import AddTransactionModal from '@/components/AddTransactionModal';
 import { PAYMENT_METHODS, EXPENSE_CATEGORIES, AccountType } from '@/types';
+import { isPositive } from '@/lib/classify';
 import {
   TrendingUp,
   TrendingDown,
@@ -45,7 +46,7 @@ import {
   Line,
   Legend,
 } from 'recharts';
-import { format, parseISO, isAfter, startOfDay, addDays } from 'date-fns';
+import { format, parseISO, isAfter, startOfDay, addDays, isWithinInterval, startOfMonth, endOfMonth } from 'date-fns';
 import { generateForecast, calculateCurrentCash } from '@/lib/forecast';
 
 export default function DashboardPage() {
@@ -96,23 +97,19 @@ export default function DashboardPage() {
   const pastTransactions = getPastTransactions();
   const futureTransactions = getFutureTransactions();
   
-  const totalIncome = transactions
-    .filter((t) => t.type === 'income')
-    .reduce((sum, t) => sum + t.amount, 0);
-  
-  const totalExpenses = transactions
-    .filter((t) => t.type === 'expense')
-    .reduce((sum, t) => sum + t.amount, 0);
-  
+  // Scoped to THIS MONTH because it is compared against profile.monthlyBudget below.
+  // Summing every past expense ever worked only while all data was hand-entered;
+  // importing a year of history made "Budget Remaining" a six-figure negative.
   const pastExpenses = pastTransactions
     .filter((t) => t.type === 'expense')
+    .filter((t) =>
+      isWithinInterval(parseISO(t.date), {
+        start: startOfMonth(new Date()),
+        end: endOfMonth(new Date()),
+      })
+    )
     .reduce((sum, t) => sum + t.amount, 0);
   
-  const projectedExpenses = futureTransactions
-    .filter((t) => t.type === 'expense')
-    .reduce((sum, t) => sum + t.amount, 0);
-
-  const balance = totalIncome - totalExpenses;
 
   const paymentMethodTotals = getTotalByPaymentMethod();
   const categoryTotals = getTotalByCategory();
@@ -718,7 +715,9 @@ export default function DashboardPage() {
               recentTransactions.map((txn) => {
                 const category = EXPENSE_CATEGORIES.find((c) => c.value === txn.category);
                 const paymentMethod = PAYMENT_METHODS.find((m) => m.value === txn.paymentMethod);
-                const isExpense = txn.type === 'expense';
+                // Not `type === 'expense'`: that renders a transfer green with a '+'
+                // regardless of which way the money actually moved.
+                const isExpense = !isPositive(txn, profile?.paymentAccounts);
                 const isFuture = isAfter(parseISO(txn.date), today) || txn.isProjected;
 
                 return (

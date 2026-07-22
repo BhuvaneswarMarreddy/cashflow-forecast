@@ -11,7 +11,8 @@ import CSVImportModal from '@/components/CSVImportModal';
 import ReceiptScannerModal from '@/components/ReceiptScannerModal';
 import RunwayCalculator from '@/components/RunwayCalculator';
 import { generateForecast, calculateCurrentCash } from '@/lib/forecast';
-import { EXPENSE_CATEGORIES, Transaction, getMerchantColor } from '@/types';
+import { classifyTransaction, isPositive } from '@/lib/classify';
+import { EXPENSE_CATEGORIES, Transaction, TransactionType, getMerchantColor, displayCategory } from '@/types';
 import {
   TrendingUp,
   Plus,
@@ -36,7 +37,7 @@ import { format, parseISO, startOfMonth, endOfMonth, subMonths, isWithinInterval
 
 type ViewMode = 'history' | 'runway';
 type DateFilter = 'all' | 'thisMonth' | 'lastMonth' | 'last3Months' | 'last6Months';
-type GroupBy = 'month' | 'year';
+type GroupBy = 'month' | 'year' | 'category';
 
 export default function HistoryPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
@@ -50,8 +51,9 @@ export default function HistoryPage() {
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [dateFilter, setDateFilter] = useState<DateFilter>('all');
-  const [typeFilter, setTypeFilter] = useState<'all' | 'income' | 'expense'>('all');
+  const [typeFilter, setTypeFilter] = useState<'all' | TransactionType>('all');
   const [accountFilter, setAccountFilter] = useState<string>('all');
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest' | 'highest' | 'lowest'>('newest');
   const [groupBy, setGroupBy] = useState<GroupBy>('month');
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
@@ -105,7 +107,9 @@ export default function HistoryPage() {
 
     // Type filter
     if (typeFilter !== 'all') {
-      filtered = filtered.filter(t => t.type === typeFilter);
+      // Must match the classifier, not the stored type — otherwise a card payment
+      // stored as 'income' shows under the In chip while contributing $0 to the In total.
+      filtered = filtered.filter(t => classifyTransaction(t, profile?.paymentAccounts) === typeFilter);
     }
 
     // Account filter
@@ -117,13 +121,19 @@ export default function HistoryPage() {
       }
     }
 
+    // Category filter — matches the label the user actually sees (their own Monarch
+    // category when present), not the coarse enum underneath.
+    if (categoryFilter !== 'all') {
+      filtered = filtered.filter(t => displayCategory(t) === categoryFilter);
+    }
+
     // Search filter
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(t => 
+      filtered = filtered.filter(t =>
         t.title.toLowerCase().includes(query) ||
         t.description?.toLowerCase().includes(query) ||
-        t.category.toLowerCase().includes(query) ||
+        displayCategory(t).toLowerCase().includes(query) ||
         t.merchant?.toLowerCase().includes(query)
       );
     }
@@ -145,51 +155,37 @@ export default function HistoryPage() {
     }
 
     return filtered;
-  }, [transactions, dateFilter, typeFilter, accountFilter, searchQuery, sortOrder]);
+  }, [transactions, dateFilter, typeFilter, accountFilter, categoryFilter, searchQuery, sortOrder, profile?.paymentAccounts]);
+
+  // Every distinct category present, most-used first — drives the filter dropdown so
+  // it lists the user's own labels ("AI Tools", "Coffee Shops") rather than the enum.
+  const categoryOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    transactions.forEach(t => {
+      const label = displayCategory(t);
+      counts.set(label, (counts.get(label) || 0) + 1);
+    });
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([label]) => label);
+  }, [transactions]);
 
   // Group transactions by month or year
   // Transfers between accounts don't count as real income/expense
   const groupedTransactions = useMemo(() => {
     const groups: { [key: string]: { transactions: Transaction[]; income: number; expenses: number } } = {};
     
-    // Helper to classify transaction
-    const classifyTransaction = (t: Transaction): 'income' | 'expense' | 'transfer' => {
-      const titleLower = t.title.toLowerCase();
-      const linkedAccount = t.accountId ? profile?.paymentAccounts?.find(a => a.id === t.accountId) : null;
-      const isCreditCard = linkedAccount?.type === 'credit_card';
-      
-      // Internal transfers between accounts - don't count in totals
-      if (titleLower.includes('transfer from') || titleLower.includes('transfer to') || 
-          titleLower.includes('online transfer')) {
-        return 'transfer';
-      }
-      
-      // Credit card payments - also transfers (from bank to card)
-      const paymentKeywords = ['payment', 'autopay', 'auto pay'];
-      if (isCreditCard && paymentKeywords.some(kw => titleLower.includes(kw))) {
-        return 'transfer';
-      }
-      
-      // Real deposits/income
-      if (titleLower.includes('deposit') || titleLower.includes('direct dep') || 
-          titleLower.includes('payroll') || titleLower.includes('salary')) {
-        return 'income';
-      }
-      
-      return t.type === 'income' ? 'income' : 'expense';
-    };
-    
     filteredTransactions.forEach(t => {
-      const groupKey = groupBy === 'month' 
+      const groupKey = groupBy === 'month'
         ? format(parseISO(t.date), 'yyyy-MM')
-        : format(parseISO(t.date), 'yyyy');
-      
+        : groupBy === 'year'
+        ? format(parseISO(t.date), 'yyyy')
+        : displayCategory(t);
+
       if (!groups[groupKey]) {
         groups[groupKey] = { transactions: [], income: 0, expenses: 0 };
       }
       groups[groupKey].transactions.push(t);
-      
-      const classification = classifyTransaction(t);
+
+      const classification = classifyTransaction(t, profile?.paymentAccounts);
       if (classification === 'income') {
         groups[groupKey].income += t.amount;
       } else if (classification === 'expense') {
@@ -198,51 +194,26 @@ export default function HistoryPage() {
       // 'transfer' transactions don't add to income or expense totals
     });
 
-    return Object.entries(groups)
-      .sort(([a], [b]) => b.localeCompare(a))
-      .map(([key, data]) => ({
-        key,
-        label: groupBy === 'month' 
-          ? format(parseISO(key + '-01'), 'MMMM yyyy')
-          : key,
-        ...data,
-      }));
+    const entries = Object.entries(groups).map(([key, data]) => ({
+      key,
+      label: groupBy === 'month' ? format(parseISO(key + '-01'), 'MMMM yyyy') : key,
+      ...data,
+    }));
+
+    // Time groups read newest-first; category groups read biggest-spend-first, which is
+    // what "sort my categories" means when you are looking at where money went.
+    return groupBy === 'category'
+      ? entries.sort((a, b) => (b.expenses + b.income) - (a.expenses + a.income))
+      : entries.sort((a, b) => b.key.localeCompare(a.key));
   }, [filteredTransactions, groupBy, profile?.paymentAccounts]);
 
   // Calculate totals for stats - excludes transfers between own accounts
   const totals = useMemo(() => {
-    // Helper to classify transaction
-    const classifyTransaction = (t: Transaction): 'income' | 'expense' | 'transfer' => {
-      const titleLower = t.title.toLowerCase();
-      const linkedAccount = t.accountId ? profile?.paymentAccounts?.find(a => a.id === t.accountId) : null;
-      const isCreditCard = linkedAccount?.type === 'credit_card';
-      
-      // Internal transfers - don't count
-      if (titleLower.includes('transfer from') || titleLower.includes('transfer to') || 
-          titleLower.includes('online transfer')) {
-        return 'transfer';
-      }
-      
-      // Credit card payments - transfers from bank to card
-      const paymentKeywords = ['payment', 'autopay', 'auto pay'];
-      if (isCreditCard && paymentKeywords.some(kw => titleLower.includes(kw))) {
-        return 'transfer';
-      }
-      
-      // Real deposits/income
-      if (titleLower.includes('deposit') || titleLower.includes('direct dep') || 
-          titleLower.includes('payroll') || titleLower.includes('salary')) {
-        return 'income';
-      }
-      
-      return t.type === 'income' ? 'income' : 'expense';
-    };
-    
     let income = 0;
     let expenses = 0;
-    
+
     filteredTransactions.forEach(t => {
-      const classification = classifyTransaction(t);
+      const classification = classifyTransaction(t, profile?.paymentAccounts);
       if (classification === 'income') {
         income += t.amount;
       } else if (classification === 'expense') {
@@ -261,19 +232,17 @@ export default function HistoryPage() {
       return { avgExpenses: profile?.monthlyBudget || 3000, avgIncome: 0 };
     }
 
-    // Helper to check if transaction is real income (not credit card payment)
-    const isRealIncome = (t: Transaction) => {
-      if (t.type !== 'income') return false;
-      if (t.accountId && profile?.paymentAccounts) {
-        const account = profile.paymentAccounts.find(a => a.id === t.accountId);
-        if (account?.type === 'credit_card') return false;
-      }
-      return true;
-    };
-
+    // Both sides go through the one classifier. Previously expenses used the raw
+    // `t.type` (so transfers inflated it) while income used a separate credit-card
+    // check — a row could therefore be excluded from expenses AND rejected by the
+    // income test, evaporating from both. These numbers drive the runway headline.
     const months = new Set(pastTxns.map(t => format(parseISO(t.date), 'yyyy-MM'))).size || 1;
-    const totalExpenses = pastTxns.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
-    const totalIncome = pastTxns.filter(isRealIncome).reduce((sum, t) => sum + t.amount, 0);
+    const totalExpenses = pastTxns
+      .filter(t => classifyTransaction(t, profile?.paymentAccounts) === 'expense')
+      .reduce((sum, t) => sum + t.amount, 0);
+    const totalIncome = pastTxns
+      .filter(t => classifyTransaction(t, profile?.paymentAccounts) === 'income')
+      .reduce((sum, t) => sum + t.amount, 0);
 
     return {
       avgExpenses: totalExpenses / months,
@@ -518,7 +487,29 @@ export default function HistoryPage() {
                   >
                     Year
                   </button>
+                  <button
+                    onClick={() => setGroupBy('category')}
+                    className={`px-2.5 py-1 rounded text-xs font-medium transition-all ${
+                      groupBy === 'category'
+                        ? 'bg-[var(--accent-primary)] text-white'
+                        : 'text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]'
+                    }`}
+                  >
+                    Category
+                  </button>
                 </div>
+
+                {/* Category filter — populated from the user's own labels */}
+                <select
+                  value={categoryFilter}
+                  onChange={(e) => setCategoryFilter(e.target.value)}
+                  className="px-3 py-2 rounded-lg bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground-secondary)] cursor-pointer max-w-[180px]"
+                >
+                  <option value="all">All categories</option>
+                  {categoryOptions.map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
 
                 {/* Sort */}
                 <select
@@ -650,7 +641,7 @@ export default function HistoryPage() {
                                   <p className="text-sm text-[var(--foreground-muted)]">
                                     {format(parseISO(txn.date), 'MMM d, yyyy')}
                                     {' • '}
-                                    <span className="text-xs">{category?.icon} {category?.label || txn.category}</span>
+                                    <span className="text-xs">{category?.icon} {displayCategory(txn)}</span>
                                     {txn.description && ` • ${txn.description}`}
                                   </p>
                                 </div>
@@ -658,38 +649,10 @@ export default function HistoryPage() {
                               <div className="flex items-center gap-4">
                                 {/* Smart display based on transaction type and account */}
                                 {(() => {
-                                  const isCreditCard = linkedAccount?.type === 'credit_card';
-                                  const isLoan = linkedAccount?.type === 'personal_loan';
-                                  const isDebtAccount = isCreditCard || isLoan;
-                                  const titleLower = txn.title.toLowerCase();
-                                  
-                                  // Detect transaction nature from title
-                                  const paymentKeywords = ['payment', 'autopay', 'auto pay', 'statement credit'];
-                                  const isPaymentByName = paymentKeywords.some(kw => titleLower.includes(kw));
-                                  
-                                  // Transfers: "from" = money IN, "to" = money OUT
-                                  const isTransferIn = titleLower.includes('transfer from') || titleLower.includes('online transfer from');
-                                  const isTransferOut = titleLower.includes('transfer to') || titleLower.includes('online transfer to');
-                                  
-                                  // Deposits
-                                  const isDeposit = titleLower.includes('deposit') || titleLower.includes('direct dep');
-                                  
-                                  // Determine if this should show as positive (green)
-                                  let isPositive = txn.type === 'income';
-                                  
-                                  // Override based on transaction description
-                                  if (isTransferIn || isDeposit) {
-                                    isPositive = true;
-                                  } else if (isTransferOut) {
-                                    isPositive = false;
-                                  } else if (isDebtAccount && isPaymentByName) {
-                                    // Credit card/loan payment = reduces debt = positive
-                                    isPositive = true;
-                                  }
-                                  
+                                  const positive = isPositive(txn, profile?.paymentAccounts);
                                   return (
-                                    <p className={`font-semibold ${isPositive ? 'text-emerald-500' : 'text-[var(--foreground)]'}`}>
-                                      {isPositive ? '+' : '-'}${txn.amount.toLocaleString()}
+                                    <p className={`font-semibold ${positive ? 'text-emerald-500' : 'text-[var(--foreground)]'}`}>
+                                      {positive ? '+' : '-'}${txn.amount.toLocaleString()}
                                     </p>
                                   );
                                 })()}

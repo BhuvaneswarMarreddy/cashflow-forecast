@@ -56,6 +56,7 @@ interface ExportRequest {
     title: string;
     amount: number;
     type: string;
+    transferDirection?: 'in' | 'out';
     category: string;
     paymentMethod: string;
     accountId?: string;
@@ -174,7 +175,11 @@ export async function POST(request: NextRequest) {
             t.merchant || '',
             t.category,
             t.type,
-            t.type === 'expense' ? -t.amount : t.amount,
+            // A transfer is not income: without the direction check an outbound
+            // $5,000 move exports as +$5,000 and the Amount column is off by $10,000.
+            t.type === 'expense' || (t.type === 'transfer' && t.transferDirection === 'out')
+              ? -t.amount
+              : t.amount,
             t.paymentMethod,
             account?.name || 'Unlinked',
             t.isRecurring ? 'Yes' : 'No',
@@ -206,7 +211,11 @@ export async function POST(request: NextRequest) {
             t.merchant || '',
             t.category,
             t.type,
-            t.type === 'expense' ? -t.amount : t.amount,
+            // A transfer is not income: without the direction check an outbound
+            // $5,000 move exports as +$5,000 and the Amount column is off by $10,000.
+            t.type === 'expense' || (t.type === 'transfer' && t.transferDirection === 'out')
+              ? -t.amount
+              : t.amount,
             t.isRecurring ? 'Yes' : 'No',
           ]);
         const sheet = XLSX.utils.aoa_to_sheet([

@@ -6,7 +6,8 @@ import { useAuth } from '@/context/AuthContext';
 import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import Navbar from '@/components/Navbar';
-import { EXPENSE_CATEGORIES, getMerchantColor } from '@/types';
+import { EXPENSE_CATEGORIES, Transaction, getMerchantColor, displayCategory } from '@/types';
+import { classifyTransaction } from '@/lib/classify';
 import {
   TrendingUp,
   TrendingDown,
@@ -89,16 +90,12 @@ export default function AnalyticsPage() {
     }
   }, [isAuthenticated, isOnboarded, authLoading, profileLoading, router]);
 
-  // Helper to check if a transaction is real income (not credit card payment)
-  // Credit card payments show as "income" on the card but are NOT actual income
-  const isRealIncome = (t: { type: string; accountId?: string }) => {
-    if (t.type !== 'income') return false;
-    if (t.accountId && profile?.paymentAccounts) {
-      const account = profile.paymentAccounts.find(a => a.id === t.accountId);
-      if (account?.type === 'credit_card') return false;
-    }
-    return true;
-  };
+  // The one classifier — this screen used to carry its own copy, so the same month
+  // could report three different Income/Expense figures across three pages.
+  const isRealIncome = (t: Transaction) =>
+    classifyTransaction(t, profile?.paymentAccounts) === 'income';
+  const isRealExpense = (t: Transaction) =>
+    classifyTransaction(t, profile?.paymentAccounts) === 'expense';
 
   // Calculate date range based on view mode
   const dateRange = useMemo(() => {
@@ -134,7 +131,7 @@ export default function AnalyticsPage() {
       );
       
       const expenses = dayTransactions
-        .filter(t => t.type === 'expense')
+        .filter(isRealExpense)
         .reduce((sum, t) => sum + t.amount, 0);
       
       const income = dayTransactions
@@ -170,7 +167,7 @@ export default function AnalyticsPage() {
         return isWithinInterval(txnDate, { start: weekStart, end: weekEnd });
       });
       
-      const expenses = weekTxns.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
+      const expenses = weekTxns.filter(isRealExpense).reduce((sum, t) => sum + t.amount, 0);
       const income = weekTxns.filter(isRealIncome).reduce((sum, t) => sum + t.amount, 0);
       
       weeks.push({
@@ -196,7 +193,7 @@ export default function AnalyticsPage() {
         return isWithinInterval(txnDate, { start: monthStart, end: monthEnd });
       });
       
-      const expenses = monthTxns.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
+      const expenses = monthTxns.filter(isRealExpense).reduce((sum, t) => sum + t.amount, 0);
       const income = monthTxns.filter(isRealIncome).reduce((sum, t) => sum + t.amount, 0);
       
       months.push({
@@ -210,26 +207,27 @@ export default function AnalyticsPage() {
     return months;
   }, [transactions, profile?.monthlyBudget]);
 
-  // Calculate category breakdown
+  // Calculate category breakdown — grouped by the user's own label (Monarch's real
+  // category when present) so the pie stops collapsing a third of spend into "Other".
   const categoryBreakdown = useMemo(() => {
-    const categories: { [key: string]: number } = {};
-    
+    const categories: { [key: string]: { amount: number; icon: string } } = {};
+
     periodTransactions
-      .filter(t => t.type === 'expense')
+      .filter(isRealExpense)
       .forEach(t => {
-        categories[t.category] = (categories[t.category] || 0) + t.amount;
+        const name = displayCategory(t);
+        const icon = EXPENSE_CATEGORIES.find(c => c.value === t.category)?.icon || '📋';
+        categories[name] ??= { amount: 0, icon };
+        categories[name].amount += t.amount;
       });
-    
+
     return Object.entries(categories)
-      .map(([category, amount], index) => {
-        const catInfo = EXPENSE_CATEGORIES.find(c => c.value === category);
-        return {
-          name: catInfo?.label || category,
-          value: amount,
-          icon: catInfo?.icon || '📋',
-          color: CHART_COLORS[index % CHART_COLORS.length],
-        };
-      })
+      .map(([name, { amount, icon }], index) => ({
+        name,
+        value: amount,
+        icon,
+        color: CHART_COLORS[index % CHART_COLORS.length],
+      }))
       .sort((a, b) => b.value - a.value);
   }, [periodTransactions]);
 
@@ -238,7 +236,7 @@ export default function AnalyticsPage() {
     const merchants: { [key: string]: { amount: number; count: number } } = {};
     
     periodTransactions
-      .filter(t => t.type === 'expense' && t.merchant)
+      .filter(t => isRealExpense(t) && t.merchant)
       .forEach(t => {
         const merchantName = t.merchant!;
         if (!merchants[merchantName]) {
@@ -273,7 +271,7 @@ export default function AnalyticsPage() {
   // Calculate totals
   // Only count real income (not credit card payments)
   const totals = useMemo(() => {
-    const expenses = periodTransactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
+    const expenses = periodTransactions.filter(isRealExpense).reduce((sum, t) => sum + t.amount, 0);
     const income = periodTransactions.filter(isRealIncome).reduce((sum, t) => sum + t.amount, 0);
     const budget = viewMode === 'weekly' 
       ? (profile?.monthlyBudget || 3000) / 4 
@@ -305,7 +303,7 @@ export default function AnalyticsPage() {
     const prevExpenses = transactions
       .filter(t => {
         const txnDate = parseISO(t.date);
-        return isWithinInterval(txnDate, { start: prevStart, end: prevEnd }) && t.type === 'expense';
+        return isWithinInterval(txnDate, { start: prevStart, end: prevEnd }) && isRealExpense(t);
       })
       .reduce((sum, t) => sum + t.amount, 0);
     

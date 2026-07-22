@@ -4,74 +4,9 @@
  */
 
 import { Transaction, PaymentAccount } from '@/types';
-
-// Helper function to classify transactions (mirrors the logic in history page)
-function classifyTransaction(
-  transaction: Transaction,
-  accounts: PaymentAccount[]
-): 'income' | 'expense' | 'transfer' {
-  const titleLower = transaction.title.toLowerCase();
-  const linkedAccount = transaction.accountId 
-    ? accounts.find(a => a.id === transaction.accountId) 
-    : null;
-  const isCreditCard = linkedAccount?.type === 'credit_card';
-  
-  // Internal transfers between accounts - don't count in totals
-  if (titleLower.includes('transfer from') || titleLower.includes('transfer to') || 
-      titleLower.includes('online transfer')) {
-    return 'transfer';
-  }
-  
-  // Credit card payments - also transfers (from bank to card)
-  const paymentKeywords = ['payment', 'autopay', 'auto pay'];
-  if (isCreditCard && paymentKeywords.some(kw => titleLower.includes(kw))) {
-    return 'transfer';
-  }
-  
-  // Real deposits/income
-  if (titleLower.includes('deposit') || titleLower.includes('direct dep') || 
-      titleLower.includes('payroll') || titleLower.includes('salary')) {
-    return 'income';
-  }
-  
-  return transaction.type === 'income' ? 'income' : 'expense';
-}
-
-// Helper to determine display sign
-function getDisplaySign(
-  transaction: Transaction,
-  accounts: PaymentAccount[]
-): { isPositive: boolean; amount: string } {
-  const titleLower = transaction.title.toLowerCase();
-  const linkedAccount = transaction.accountId 
-    ? accounts.find(a => a.id === transaction.accountId) 
-    : null;
-  const isCreditCard = linkedAccount?.type === 'credit_card';
-  const isLoan = linkedAccount?.type === 'personal_loan';
-  const isDebtAccount = isCreditCard || isLoan;
-  
-  const paymentKeywords = ['payment', 'autopay', 'auto pay', 'statement credit'];
-  const isPaymentByName = paymentKeywords.some(kw => titleLower.includes(kw));
-  
-  const isTransferIn = titleLower.includes('transfer from') || titleLower.includes('online transfer from');
-  const isTransferOut = titleLower.includes('transfer to') || titleLower.includes('online transfer to');
-  const isDeposit = titleLower.includes('deposit') || titleLower.includes('direct dep');
-  
-  let isPositive = transaction.type === 'income';
-  
-  if (isTransferIn || isDeposit) {
-    isPositive = true;
-  } else if (isTransferOut) {
-    isPositive = false;
-  } else if (isDebtAccount && isPaymentByName) {
-    isPositive = true;
-  }
-  
-  return {
-    isPositive,
-    amount: `${isPositive ? '+' : '-'}$${transaction.amount.toLocaleString()}`
-  };
-}
+// The real production classifier. These assertions are only worth anything because
+// they run against the shipped code rather than a copy of it.
+import { classifyTransaction, isPositive } from '@/lib/classify';
 
 describe('Transaction Classification', () => {
   const mockAccounts: PaymentAccount[] = [
@@ -160,6 +95,34 @@ describe('Transaction Classification', () => {
       expect(classifyTransaction(txn, mockAccounts)).toBe('transfer');
     });
 
+    test('should trust a stored transfer type over any title heuristic', () => {
+      // Monarch's own Category column already said this is internal movement.
+      // "Zelle J Smith" contains no transfer/payment keyword at all.
+      const txn: Transaction = {
+        id: 't1',
+        title: 'Zelle J Smith',
+        amount: 800,
+        type: 'transfer',
+        category: 'other',
+        paymentMethod: 'bank-transfer',
+        accountId: 'checking-1',
+        date: '2025-12-01',
+      };
+
+      expect(classifyTransaction(txn, mockAccounts)).toBe('transfer');
+    });
+
+    test('should not throw on a missing account list or a dangling accountId', () => {
+      const noAccount: Transaction = {
+        id: 't2', title: 'Whole Foods', amount: 50, type: 'expense',
+        category: 'food', paymentMethod: 'bank-transfer', date: '2025-12-01',
+      };
+      const dangling: Transaction = { ...noAccount, id: 't3', accountId: 'deleted-99' };
+
+      expect(classifyTransaction(noAccount)).toBe('expense');
+      expect(classifyTransaction(dangling, mockAccounts)).toBe('expense');
+    });
+
     test('should classify autopay as transfer on credit card', () => {
       const txn: Transaction = {
         id: '4',
@@ -183,7 +146,7 @@ describe('Transaction Classification', () => {
         title: 'Direct Deposit - ACME Corp',
         amount: 5000,
         type: 'income',
-        category: 'salary',
+        category: 'other',
         paymentMethod: 'bank-transfer',
         accountId: 'checking-1',
         date: '2025-12-01',
@@ -198,7 +161,7 @@ describe('Transaction Classification', () => {
         title: 'Payroll Deposit',
         amount: 3000,
         type: 'income',
-        category: 'salary',
+        category: 'other',
         paymentMethod: 'bank-transfer',
         accountId: 'checking-1',
         date: '2025-12-01',
@@ -213,7 +176,7 @@ describe('Transaction Classification', () => {
         title: 'Salary Payment',
         amount: 4500,
         type: 'income',
-        category: 'salary',
+        category: 'other',
         paymentMethod: 'bank-transfer',
         accountId: 'checking-1',
         date: '2025-12-01',
@@ -231,7 +194,7 @@ describe('Transaction Classification', () => {
         amount: 150,
         type: 'expense',
         category: 'shopping',
-        paymentMethod: 'credit',
+        paymentMethod: 'amex',
         accountId: 'credit-1',
         date: '2025-12-01',
         merchant: 'Amazon',
@@ -247,7 +210,7 @@ describe('Transaction Classification', () => {
         amount: 6.50,
         type: 'expense',
         category: 'food',
-        paymentMethod: 'debit',
+        paymentMethod: 'bank-transfer',
         accountId: 'checking-1',
         date: '2025-12-01',
         merchant: 'Starbucks',
@@ -270,9 +233,7 @@ describe('Transaction Classification', () => {
         date: '2025-12-01',
       };
 
-      const result = getDisplaySign(txn, mockAccounts);
-      expect(result.isPositive).toBe(true);
-      expect(result.amount).toBe('+$500');
+      expect(isPositive(txn, mockAccounts)).toBe(true);
     });
 
     test('should show - for transfer TO (money going out)', () => {
@@ -287,9 +248,7 @@ describe('Transaction Classification', () => {
         date: '2025-12-01',
       };
 
-      const result = getDisplaySign(txn, mockAccounts);
-      expect(result.isPositive).toBe(false);
-      expect(result.amount).toBe('-$500');
+      expect(isPositive(txn, mockAccounts)).toBe(false);
     });
 
     test('should show + for credit card payment (reduces debt)', () => {
@@ -304,9 +263,7 @@ describe('Transaction Classification', () => {
         date: '2025-12-01',
       };
 
-      const result = getDisplaySign(txn, mockAccounts);
-      expect(result.isPositive).toBe(true);
-      expect(result.amount).toBe('+$1,500');
+      expect(isPositive(txn, mockAccounts)).toBe(true);
     });
 
     test('should show + for deposits', () => {
@@ -315,15 +272,38 @@ describe('Transaction Classification', () => {
         title: 'Direct Deposit',
         amount: 5000,
         type: 'income',
-        category: 'salary',
+        category: 'other',
         paymentMethod: 'bank-transfer',
         accountId: 'checking-1',
         date: '2025-12-01',
       };
 
-      const result = getDisplaySign(txn, mockAccounts);
-      expect(result.isPositive).toBe(true);
-      expect(result.amount).toBe('+$5,000');
+      expect(isPositive(txn, mockAccounts)).toBe(true);
+    });
+
+    test('should use transferDirection when the title carries no direction word', () => {
+      // Both legs of a USAA move are titled "...TRANSFER DB" / "...TRANSFER CR".
+      // Without the stored direction they would both render as money leaving.
+      const out: Transaction = {
+        id: 's1', title: 'USAA FUNDS TRANSFER DB', amount: 5000, type: 'transfer',
+        transferDirection: 'out', category: 'other', paymentMethod: 'bank-transfer',
+        accountId: 'checking-1', date: '2025-12-01',
+      };
+      const incoming: Transaction = { ...out, id: 's2', title: 'USAA FUNDS TRANSFER CR', transferDirection: 'in' };
+
+      expect(isPositive(out, mockAccounts)).toBe(false);
+      expect(isPositive(incoming, mockAccounts)).toBe(true);
+    });
+
+    test('should show + for a loan payment (reduces debt)', () => {
+      // The personal_loan half of isDebtAccount had no coverage at all.
+      const txn: Transaction = {
+        id: 's3', title: 'Upstart Loan Payment', amount: 450, type: 'expense',
+        category: 'other', paymentMethod: 'bank-transfer',
+        accountId: 'loan-1', date: '2025-12-01',
+      };
+
+      expect(isPositive(txn, mockAccounts)).toBe(true);
     });
 
     test('should show - for regular expenses', () => {
@@ -332,15 +312,13 @@ describe('Transaction Classification', () => {
         title: 'Grocery Store',
         amount: 150,
         type: 'expense',
-        category: 'groceries',
-        paymentMethod: 'debit',
+        category: 'food',
+        paymentMethod: 'bank-transfer',
         accountId: 'checking-1',
         date: '2025-12-01',
       };
 
-      const result = getDisplaySign(txn, mockAccounts);
-      expect(result.isPositive).toBe(false);
-      expect(result.amount).toBe('-$150');
+      expect(isPositive(txn, mockAccounts)).toBe(false);
     });
   });
 
@@ -366,6 +344,17 @@ describe('Transaction Classification', () => {
           paymentMethod: 'bank-transfer',
           accountId: 'savings-1',
           date: '2025-12-02',
+        },
+        {
+          // Stored transfer with no keyword in the title — the Monarch case.
+          id: '16b',
+          title: 'Zelle J Smith',
+          amount: 800,
+          type: 'transfer',
+          category: 'other',
+          paymentMethod: 'bank-transfer',
+          accountId: 'savings-1',
+          date: '2025-12-03',
         },
       ];
 
@@ -393,7 +382,7 @@ describe('Transaction Classification', () => {
           title: 'Direct Deposit',
           amount: 5000,
           type: 'income',
-          category: 'salary',
+          category: 'other',
           paymentMethod: 'bank-transfer',
           accountId: 'checking-1',
           date: '2025-12-01',
@@ -403,8 +392,8 @@ describe('Transaction Classification', () => {
           title: 'Grocery Store',
           amount: 150,
           type: 'expense',
-          category: 'groceries',
-          paymentMethod: 'debit',
+          category: 'food',
+          paymentMethod: 'bank-transfer',
           accountId: 'checking-1',
           date: '2025-12-02',
         },

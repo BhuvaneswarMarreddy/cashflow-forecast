@@ -4,9 +4,11 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useTransactions } from '@/context/TransactionContext';
+import { useUserProfile } from '@/context/UserProfileContext';
 import Navbar from '@/components/Navbar';
 import AddTransactionModal from '@/components/AddTransactionModal';
 import { PAYMENT_METHODS, EXPENSE_CATEGORIES, PaymentMethod, Transaction } from '@/types';
+import { isPositive } from '@/lib/classify';
 import {
   TrendingUp,
   Plus,
@@ -24,6 +26,7 @@ import { format, parseISO } from 'date-fns';
 export default function PaymentMethodsPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const { transactions, isLoading: txnLoading, deleteTransaction, getTransactionsByPaymentMethod } = useTransactions();
+  const { profile } = useUserProfile();
   const router = useRouter();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [expandedMethod, setExpandedMethod] = useState<PaymentMethod | null>(null);
@@ -261,7 +264,7 @@ export default function PaymentMethodsPage() {
                     <div className="space-y-3 max-h-[400px] overflow-y-auto">
                       {method.stats.transactions.map((txn) => {
                         const category = EXPENSE_CATEGORIES.find((c) => c.value === txn.category);
-                        const isExpense = txn.type === 'expense';
+                        const isExpense = !isPositive(txn, profile?.paymentAccounts);
                         const isFuture = new Date(txn.date) >= today || txn.isProjected;
 
                         return (
