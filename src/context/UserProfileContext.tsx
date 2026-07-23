@@ -82,11 +82,15 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
     isFetching.current = true;
 
     try {
-      // Fetch all data in parallel - no connection check needed
+      // Fetch all data in parallel. Do NOT swallow errors into [] here: a failed
+      // accounts read must reject the whole sync (outer catch keeps the cached
+      // profile) — otherwise one hiccup renders "you have zero accounts" and even
+      // caches that empty state to localStorage. Same bug class as the old
+      // getTransactions empty-read wipe.
       const [firestoreUser, accounts, incomeSources] = await Promise.all([
         firestoreService.getUserProfile(userId),
-        firestoreService.getAccounts(userId).catch(() => []),
-        firestoreService.getIncomeSources(userId).catch(() => []),
+        firestoreService.getAccounts(userId),
+        firestoreService.getIncomeSources(userId),
       ]);
 
       setIsFirestoreOnline(true);
