@@ -75,3 +75,17 @@ Every direct DB change, so nothing is a mystery later. All writes go via Firesto
   preserves loan accounts, balances, Carvana). Lets History show/search the real payee
   (e.g. "Zelle payment to SRIDEVI GOGINENI") and lets the cashflow dashboard tell a
   self-transfer ("to Bhuvaneswar / to me") from money actually sent to a person.
+
+## 2026-07-23 — Flow page shipped (/flow, branch feat/flow-page)
+- New **Flow** page traces income → between accounts → out as a Sankey with explicit
+  ⚠ missing-export nodes (BofA $4,832.95 · TOTAL CHECKING $3,830.00 · Visa $2,117.31);
+  the "Does it add up?" table ties to net worth **−$3,641.38** to the cent.
+- Bank↔bank moves route through a "⇄ between accounts" hub (the real data has a bank
+  3-cycle d3-sankey can't draw); the gross both-direction matrix sits under the chart.
+- People: Remitly ($120,562 sent to India) + top-5 Zelle counterparties as named nodes;
+  self-Zelle (incl. Chase's "NAME BACxxxx" shape — 13 rows, $23,300) never counts as
+  people-flow. Recurring detector + 12-month net-worth projection included.
+- Engine: `src/lib/flows.ts` (integer cents). Audit replay:
+  `src/__tests__/flows.integration.test.ts` re-runs the 9 real CSVs against frozen
+  ground truth on every `npm test`; `scripts/verify_flow_groundtruth.py` is the
+  standalone Phase-0 loop. Both pass (232 tests).
