@@ -69,15 +69,23 @@ def find_uid(email):
     raise SystemExit(f"No user for {email!r} (found {len(docs)} users). Sign up + import first.")
 
 
-def all_tx(uid):
-    out, url = [], f"{BASE}/users/{uid}/transactions?pageSize=300"
+def list_sub(uid, sub):
+    out, url = [], f"{BASE}/users/{uid}/{sub}?pageSize=300"
     while True:
         r = api("GET", url)
         out += r.get("documents", [])
         tok = r.get("nextPageToken")
         if not tok:
             return out
-        url = f"{BASE}/users/{uid}/transactions?pageSize=300&pageToken={tok}"
+        url = f"{BASE}/users/{uid}/{sub}?pageSize=300&pageToken={tok}"
+
+
+def all_tx(uid):
+    return list_sub(uid, "transactions")
+
+
+# Every data subcollection the app writes under a user (from firestore.ts).
+DATA_SUBS = ["accounts", "income", "transactions", "goals", "reminders"]
 
 
 def matches(f, eqs, contains):
@@ -137,6 +145,27 @@ def cmd_reclassify(args):
     print(f"applied to {len(hits)} docs. backup: {bpath}")
 
 
+def cmd_purge(args):
+    uid = find_uid(args.email)
+    docs = {s: list_sub(uid, s) for s in DATA_SUBS}
+    counts = {s: len(d) for s, d in docs.items()}
+    total = sum(counts.values())
+    print(f"uid={uid}  would delete: {counts}  (total {total})")
+    if total == 0:
+        print("Nothing to delete — already clean.")
+        return
+    if not args.apply:
+        print("\nDRY RUN — re-run with --apply to delete (a full backup is taken first).")
+        return
+    os.makedirs("scripts/backups", exist_ok=True)
+    bpath = f"scripts/backups/{uid}_purge_{args.stamp}.json"
+    json.dump(docs, open(bpath, "w"), indent=2)
+    for s, ds in docs.items():
+        for d in ds:
+            api("DELETE", f"https://firestore.googleapis.com/v1/{d['name']}")
+    print(f"deleted {total} docs across {DATA_SUBS}. backup: {bpath}")
+
+
 def kv(s):
     k, _, v = s.partition("=")
     return (k, v) if "=" in s else (s, "")
@@ -145,9 +174,11 @@ def kv(s):
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("summary", "backup", "reclassify"):
+    for name in ("summary", "backup", "reclassify", "purge"):
         p = sub.add_parser(name)
         p.add_argument("--email", required=True)
+        if name == "purge":
+            p.add_argument("--apply", action="store_true")
         if name == "reclassify":
             p.add_argument("--eq", nargs=2, action="append", default=[], metavar=("FIELD", "VALUE"))
             p.add_argument("--contains", nargs=2, action="append", default=[], metavar=("FIELD", "SUBSTR"))
@@ -156,7 +187,7 @@ def main():
     args = ap.parse_args()
     # ponytail: caller passes a stamp so runs are traceable (Date.now() is fine in a CLI).
     args.stamp = time.strftime("%Y%m%d-%H%M%S")
-    {"summary": cmd_summary, "backup": cmd_backup, "reclassify": cmd_reclassify}[args.cmd](args)
+    {"summary": cmd_summary, "backup": cmd_backup, "reclassify": cmd_reclassify, "purge": cmd_purge}[args.cmd](args)
 
 
 if __name__ == "__main__":
