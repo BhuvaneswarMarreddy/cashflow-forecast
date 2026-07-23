@@ -53,9 +53,15 @@ export function deriveAccountBalance(account: PaymentAccount, transactions: Tran
   return isDebt ? opening - net : opening + net;
 }
 
-/** Each account with its .balance replaced by the value derived from its transactions. */
-export function withDerivedBalances(accounts: PaymentAccount[], transactions: Transaction[]): PaymentAccount[] {
-  return accounts.map(a => ({ ...a, balance: deriveAccountBalance(a, transactions) }));
+/**
+ * Balances are the CURRENT balance the user sets per account — that is the truth.
+ * The CSV carries no balance, and summing transactions from $0 over an incomplete
+ * history produced a wrong net worth (the reason this used to derive). So this now
+ * returns the stored balances unchanged; deriveAccountBalance() is only an ESTIMATE
+ * the Accounts page offers as a starting point, never the source of truth.
+ */
+export function withDerivedBalances(accounts: PaymentAccount[], _transactions: Transaction[]): PaymentAccount[] {
+  return accounts;
 }
 
 /**

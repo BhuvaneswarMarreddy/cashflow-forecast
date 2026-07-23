@@ -476,9 +476,22 @@ export default function AccountsPage() {
                       </div>
                       <div className="flex items-center gap-4">
                         <div className="text-right">
-                          <p className={`text-lg font-semibold ${account.type === 'credit_card' ? 'text-[var(--accent-danger)]' : 'text-[var(--accent-success)]'}`}>
-                            {account.type === 'credit_card' ? '-' : ''}${deriveAccountBalance(account, transactions).toLocaleString()}
+                          {/* The balance YOU set is the truth (the CSV has no balance). */}
+                          <p className={`text-lg font-semibold ${account.type === 'credit_card' || account.type === 'personal_loan' ? 'text-[var(--accent-danger)]' : 'text-[var(--accent-success)]'}`}>
+                            {account.type === 'credit_card' || account.type === 'personal_loan' ? '-' : ''}${Math.abs(account.balance).toLocaleString()}
                           </p>
+                          {(() => {
+                            const est = deriveAccountBalance(account, transactions);
+                            return Math.round(est) !== Math.round(account.balance) ? (
+                              <button
+                                onClick={() => updatePaymentAccount(account.id, { balance: est })}
+                                className="text-xs text-[var(--accent-primary)] hover:underline"
+                                title="Set the balance to the value estimated from transactions (edit the account to enter your real balance instead)"
+                              >
+                                set ≈ ${Math.abs(est).toLocaleString()} from txns
+                              </button>
+                            ) : null;
+                          })()}
                           {account.creditLimit && (
                             <p className="text-xs text-[var(--foreground-muted)]">
                               Limit: ${account.creditLimit.toLocaleString()}
