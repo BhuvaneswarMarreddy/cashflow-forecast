@@ -60,13 +60,17 @@ def fields(doc):
 
 
 def find_uid(email):
-    docs = api("GET", BASE + "/users").get("documents", [])
-    for d in docs:
-        if to_py(d.get("fields", {}).get("email", {})) == email:
-            return d["name"].split("/")[-1]
-    if len(docs) == 1:
-        return docs[0]["name"].split("/")[-1]
-    raise SystemExit(f"No user for {email!r} (found {len(docs)} users). Sign up + import first.")
+    # Resolve via Firebase Auth, not the users collection: a user's transactions/accounts
+    # subcollections can exist under a profile doc that was never created, and Firestore's
+    # listDocuments does NOT return such a "missing parent" — so an email lookup there sees 0.
+    r = api("POST", "https://identitytoolkit.googleapis.com/v1/projects/marreddy-cashflow/accounts:query", {})
+    for u in r.get("userInfo", []):
+        if (u.get("email") or "").lower() == email.lower():
+            return u["localId"]
+    infos = r.get("userInfo", [])
+    if len(infos) == 1:
+        return infos[0]["localId"]
+    raise SystemExit(f"No Firebase Auth user for {email!r} ({len(infos)} users). Sign up first.")
 
 
 def list_sub(uid, sub):

@@ -118,6 +118,20 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
 
         // Update last login in background - fire and forget
         firestoreService.updateLastLogin(userId).catch(() => {});
+      } else if (user) {
+        // No profile doc exists yet. Without this, `profile` stays null and EVERY
+        // profile-dependent write silently no-ops — account creation, onboarding,
+        // settings — which is how a CSV import can land 2000+ rows completely unlinked.
+        // Seed a profile immediately (with any accounts/income already in Firestore) and
+        // create the backing doc in the background.
+        const seeded: UserProfile = { ...createDefaultProfile(user), paymentAccounts: accounts, incomeSources };
+        setProfile(seeded);
+        saveLocalProfile(userId, seeded);
+        firestoreService.createUserProfile(userId, {
+          email: user.email,
+          displayName: user.name || user.email.split('@')[0] || 'User',
+          signUpMethod: 'email',
+        }).catch(err => console.warn('Failed to create missing profile doc:', err));
       }
     } catch (err) {
       console.warn('Firestore sync failed, using cached data:', err);
@@ -125,7 +139,7 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
     } finally {
       isFetching.current = false;
     }
-  }, [saveLocalProfile]);
+  }, [saveLocalProfile, user]);
 
   // Handle auth state changes - FAST path with localStorage first
   useEffect(() => {
