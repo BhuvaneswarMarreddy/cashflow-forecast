@@ -11,7 +11,7 @@ import CSVImportModal from '@/components/CSVImportModal';
 import ReceiptScannerModal from '@/components/ReceiptScannerModal';
 import RunwayCalculator from '@/components/RunwayCalculator';
 import { generateForecast, calculateCurrentCash, withDerivedBalances } from '@/lib/forecast';
-import { classifyTransaction, isPositive } from '@/lib/classify';
+import { classifyTransaction, isPositive, isReward } from '@/lib/classify';
 import { EXPENSE_CATEGORIES, Transaction, TransactionType, getMerchantColor, displayCategory } from '@/types';
 import {
   TrendingUp,
@@ -231,17 +231,17 @@ export default function HistoryPage() {
   const accountSummary = useMemo(() => {
     const acct = profile?.paymentAccounts?.find(a => a.id === accountFilter);
     if (!acct) return null;
-    let spent = 0, income = 0, inbound = 0, outbound = 0;
+    let spent = 0, income = 0, inbound = 0, outbound = 0, rewards = 0;
     filteredTransactions.forEach(t => {
       const cls = classifyTransaction(t, profile?.paymentAccounts);
       if (cls === 'expense') spent += t.amount;
-      else if (cls === 'income') income += t.amount;
+      else if (cls === 'income') { income += t.amount; if (isReward(t)) rewards += t.amount; }
       else if (cls === 'transfer') {
         if (isPositive(t, profile?.paymentAccounts)) inbound += t.amount;
         else outbound += t.amount;
       }
     });
-    return { acct, spent, income, inbound, outbound };
+    return { acct, spent, income, inbound, outbound, rewards };
   }, [accountFilter, filteredTransactions, profile?.paymentAccounts]);
 
   // Calculate monthly averages for runway
@@ -553,7 +553,7 @@ export default function HistoryPage() {
 
             {/* Per-account summary — metrics adapt to the account type */}
             {accountSummary && (() => {
-              const { acct, spent, income, inbound, outbound } = accountSummary;
+              const { acct, spent, income, inbound, outbound, rewards } = accountSummary;
               const money = (n: number) => `$${n.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
               // (label, value, color) tiles, chosen by account type
               let tiles: [string, string, string][];
@@ -568,7 +568,7 @@ export default function HistoryPage() {
                 tiles = [
                   ['Spent (purchases)', money(spent), 'text-[var(--foreground)]'],
                   ['Paid to card', money(inbound), 'text-emerald-500'],
-                  ['Refunds', money(income), 'text-emerald-500'],
+                  ['Rewards earned', money(rewards), 'text-[var(--accent-primary)]'],
                   ['Balance owed', acct.balance > 0 ? money(acct.balance) : 'Paid off', acct.balance > 0 ? 'text-[var(--accent-danger)]' : 'text-emerald-500'],
                 ];
               } else {

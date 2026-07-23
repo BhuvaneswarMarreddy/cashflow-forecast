@@ -64,6 +64,15 @@ export function classifyTransaction(
  *
  * Callers format the number themselves — this returns the sign only.
  */
+// Card rewards / cashback / statement credits — a positive on a card that is earnings,
+// not a refund of a purchase. Used to surface "rewards earned" per card.
+const REWARD = /reward|cashback|cash back|redemption|redeem|points|statement credit|bonus/i;
+export function isReward(
+  t: Pick<Transaction, 'title'> & Partial<Pick<Transaction, 'merchant' | 'sourceCategory'>>
+): boolean {
+  return REWARD.test(`${t.title} ${t.merchant || ''} ${t.sourceCategory || ''}`);
+}
+
 export function isPositive(t: Classifiable & { amount?: number }, accounts?: PaymentAccount[]): boolean {
   // The source told us which leg this is. Authoritative — titles like
   // "USAA FUNDS TRANSFER DB"/"...CR" carry no direction word at all.

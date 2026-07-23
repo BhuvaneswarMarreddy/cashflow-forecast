@@ -38,6 +38,7 @@ export default function Navbar() {
   // Analytics removed from primary nav - it's backward-looking, not decision-focused
   const navItems = [
     { href: '/forecast', label: 'Forecast', icon: LineChart },
+    { href: '/cashflow', label: 'Cashflow', icon: BarChart3 },
     { href: '/dashboard', label: 'Overview', icon: LayoutDashboard },
     { href: '/history', label: 'History', icon: History },
     { href: '/accounts', label: 'Accounts', icon: CreditCard },
