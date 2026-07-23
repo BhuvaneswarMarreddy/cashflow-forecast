@@ -41,3 +41,15 @@ Every direct DB change, so nothing is a mystery later. All writes go via Firesto
 - The 7 "Zelle … for upstart" self-funding inflows were NOT touched (their "upstart" text is
   only in Original Statement, which isn't stored). Minor; reclassify to transfer-in if they
   bother you in income.
+
+## 2026-07-23 (later) — Upstart rows moved onto the loan account + made visible
+- Moved all **22 Upstart rows** from BofA checking → **Upstart Loan** account (accountId
+  = acct_upstart), so the loan's activity (disbursement + 21 payments) lives under the loan,
+  where you'd expect to find it.
+- Made the account **visible** again: the app hard-filters `where isActive == true`, so a
+  truly-closed account disappears entirely. Kept it active but named
+  **"Upstart Loan (closed · paid off)"**, balance $0 (no net-worth impact).
+- Note: this shifts BofA checking's CSV-net-change reconciliation (those 22 rows left it),
+  but balances are user-entered so nothing displayed changes.
+- **Reminder:** the browser keeps a Firestore offline cache — after any server-side change,
+  clear site data (DevTools → Application → Clear site data) or use Incognito to see it.
