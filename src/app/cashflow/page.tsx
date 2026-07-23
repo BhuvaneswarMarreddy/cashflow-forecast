@@ -48,34 +48,38 @@ export default function CashflowPage() {
   // Money that actually LEFT your accounts as transfers with no matching leg in one of
   // your own accounts — i.e. sent to other people / abroad. This is real money gone, and
   // the reason "income − spending" overstates what you kept.
-  const sentOut = useMemo(() => {
+  const flows = useMemo(() => {
     const m = matchTransfers(rows, accounts || []);
-    // A transfer to YOURSELF (recipient is your own name, or "to me") is moving money
-    // between your own accounts — even if the other account isn't imported. That is not
-    // money sent away, so it must not count against what you kept.
+    // Exclusions, so "given away" is only money that truly left to other people:
+    // - self-transfers (own name / "to me") = moving between your own accounts
+    // - card/loan payments = settling spending already counted in "Spent"
+    // And critically we NET money received against money sent — your big two-way family
+    // flows (send to India, get repaid) cancel, leaving only what actually left.
     const nameParts = (profile?.name || '').toLowerCase().split(/\s+/).filter(w => w.length > 3);
     const isSelf = (t: typeof rows[number]) => {
       const txt = `${t.title} ${t.description || ''} ${t.merchant || ''}`.toLowerCase();
-      return /\bto me\b/.test(txt) || nameParts.some(n => txt.includes(n));
+      return /\bto me\b|from me\b/.test(txt) || nameParts.some(n => txt.includes(n));
+    };
+    const isCardLoan = (t: typeof rows[number]) => {
+      const a = accounts?.find(x => x.id === t.accountId);
+      return a?.type === 'credit_card' || a?.type === 'personal_loan';
     };
     const detail: Record<string, number> = {};
-    let total = 0, selfInternal = 0;
+    let grossOut = 0, grossIn = 0;
     m.unmatchedOut.forEach(t => {
-      if (isSelf(t)) { selfInternal += t.amount; return; }
-      total += t.amount;
+      if (isSelf(t) || isCardLoan(t)) return;
+      grossOut += t.amount;
       const ti = `${t.title} ${t.description || ''} ${t.merchant || ''}`.toLowerCase();
-      const acct = accounts?.find(a => a.id === t.accountId);
-      const key =
-        /remitly|rmtly/.test(ti) ? 'Remitly (India)' :
-        /zelle/.test(ti) ? 'Zelle to a person' :
-        (acct?.type === 'credit_card' || acct?.type === 'personal_loan') ? 'Card / loan payoff' :
-        'Other sent out';
+      const key = /remitly|rmtly/.test(ti) ? 'Remitly (India)' : /zelle/.test(ti) ? 'Zelle to a person' : 'Other sent out';
       detail[key] = (detail[key] || 0) + t.amount;
     });
-    return { total, selfInternal, detail: Object.entries(detail).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value) };
+    m.unmatchedIn.forEach(t => {
+      if (isSelf(t) || isCardLoan(t)) return;
+      grossIn += t.amount;
+    });
+    return { grossOut, grossIn, net: grossOut - grossIn, detail: Object.entries(detail).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value) };
   }, [rows, accounts, profile?.name]);
 
-  // Income vs spending (consumption). "Kept" also subtracts money sent out of your accounts.
   const totals = useMemo(() => {
     let income = 0, spending = 0;
     rows.forEach(t => {
@@ -83,8 +87,8 @@ export default function CashflowPage() {
       if (c === 'income') income += t.amount;
       else if (c === 'expense') spending += t.amount;
     });
-    return { income, spending, kept: income - spending - sentOut.total };
-  }, [rows, accounts, sentOut.total]);
+    return { income, spending, kept: income - spending - flows.net };
+  }, [rows, accounts, flows.net]);
 
   // Month-by-month income vs spending
   const monthly = useMemo(() => {
@@ -158,8 +162,8 @@ export default function CashflowPage() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <Tile icon={<ArrowUpRight className="w-5 h-5" />} label="Income in" value={money(totals.income)} color="text-emerald-500" />
           <Tile icon={<ArrowDownRight className="w-5 h-5" />} label="Spent (on yourself)" value={money(totals.spending)} color="text-[var(--accent-danger)]" />
-          <Tile icon={<TrendingUp className="w-5 h-5" />} label="Sent out (to others)" value={money(sentOut.total)} color="text-amber-500" sub="Remitly, Zelle, payoffs — money gone" />
-          <Tile icon={<Wallet className="w-5 h-5" />} label="Actually kept" value={money(totals.kept)} color={totals.kept >= 0 ? 'text-emerald-500' : 'text-[var(--accent-danger)]'} sub={`${keptRate}% of income · income − spent − sent out`} />
+          <Tile icon={<TrendingUp className="w-5 h-5" />} label="Net to family / others" value={money(flows.net)} color="text-amber-500" sub={`sent ${money(flows.grossOut)} · got back ${money(flows.grossIn)}`} />
+          <Tile icon={<Wallet className="w-5 h-5" />} label="Actually kept" value={money(totals.kept)} color={totals.kept >= 0 ? 'text-emerald-500' : 'text-[var(--accent-danger)]'} sub={`${keptRate}% · income − spent − net given`} />
         </div>
 
         {/* Monthly income vs spending */}
@@ -196,17 +200,17 @@ export default function CashflowPage() {
         </div>
 
         {/* Where your money left to */}
-        {sentOut.detail.length > 0 && (
+        {flows.detail.length > 0 && (
           <div className="glass-card p-5 mt-8">
             <div className="flex items-baseline justify-between mb-4">
               <div>
-                <h3 className="font-semibold text-[var(--foreground)]">Where your money left to</h3>
-                <p className="text-sm text-[var(--foreground-secondary)]">Transfers OUT to accounts and people that aren&apos;t yours — this is why &quot;saved&quot; isn&apos;t what stayed.</p>
+                <h3 className="font-semibold text-[var(--foreground)]">Money sent to family &amp; others</h3>
+                <p className="text-sm text-[var(--foreground-secondary)]">Gross sent out (you also got {money(flows.grossIn)} back, so net given ≈ {money(flows.net)}). Card/loan payments and moves between your own accounts are excluded.</p>
               </div>
-              <p className="text-2xl font-bold text-amber-500">{money(sentOut.total)}</p>
+              <p className="text-2xl font-bold text-amber-500">{money(flows.grossOut)}</p>
             </div>
             <div className="divide-y divide-[var(--border-color)]">
-              {sentOut.detail.map(r => (
+              {flows.detail.map(r => (
                 <div key={r.name} className="flex items-center justify-between py-2.5">
                   <span className="text-[var(--foreground)]">{r.name}</span>
                   <span className="font-semibold text-amber-500">{money(r.value)}</span>
