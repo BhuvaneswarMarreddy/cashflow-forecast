@@ -292,3 +292,104 @@ export function buildFlowGraph(
     reconciliation, between,
   };
 }
+
+// ============================================================
+// detectRecurring — the four rules exist because each killed a
+// verified false result on the real data (see design spec).
+// ============================================================
+export interface RecurringItem {
+  merchant: string;
+  cadence: 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'yearly';
+  medianCents: number; monthlyCents: number;
+  occurrences: number; firstSeen: string; lastSeen: string; active: boolean;
+}
+
+const BANDS: Array<[RecurringItem['cadence'], number, number, number]> = [
+  ['weekly', 6, 8, 4.33], ['biweekly', 12, 16, 2.17], ['monthly', 26, 35, 1],
+  ['quarterly', 80, 100, 1 / 3], ['yearly', 350, 380, 1 / 12],
+];
+
+const median = (xs: number[]) => {
+  const s = [...xs].sort((a, b) => a - b);
+  const n = s.length;
+  return n % 2 ? s[(n - 1) / 2] : Math.round((s[n / 2 - 1] + s[n / 2]) / 2);
+};
+const daysBetween = (a: string, b: string) =>
+  Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
+
+// Strip #…/*… suffixes and TRAILING digit runs only — "650 INDUSTRIES" is a real brand.
+const normalizeMerchant = (s: string) =>
+  s.toUpperCase().replace(/[#*]\S*/g, '').replace(/\s+\d{3,}$/, '').replace(/\s+/g, ' ').trim();
+
+export function detectRecurring(
+  transactions: Transaction[], accounts: PaymentAccount[], todayISO: string
+): RecurringItem[] {
+  const groups = new Map<string, Transaction[]>();
+  for (const t of transactions) {
+    if (classifyTransaction(t, accounts) !== 'expense') continue;
+    const m = normalizeMerchant(t.merchant || t.title);
+    if (!m) continue;
+    const g = groups.get(m);
+    if (g) g.push(t); else groups.set(m, [t]);
+  }
+  const out: RecurringItem[] = [];
+  for (const [merchant, txs] of groups) {
+    const dates = [...new Set(txs.map((t) => day(t.date)))].sort();
+    if (dates.length < 3) continue;                                  // rule 1: unique days
+    const amts = txs.map((t) => toCents(t.amount));
+    const med = median(amts);
+    if (med < 500) continue;                                         // rule 3: >= $5
+    if (median(amts.map((a) => Math.abs(a - med))) > med * 0.25) continue;
+    const gaps = dates.slice(1).map((d, i) => daysBetween(dates[i], d));
+    const mg = median(gaps);
+    const band = BANDS.find(([, lo, hi]) => mg >= lo && mg <= hi);
+    if (!band) continue;
+    const [cadence, lo, hi, mult] = band;
+    if (gaps.filter((g) => g >= lo && g <= hi).length / gaps.length < 0.6) continue; // rule 2
+    const lastSeen = dates[dates.length - 1];
+    out.push({
+      merchant, cadence, medianCents: med, monthlyCents: Math.round(med * mult),
+      occurrences: dates.length, firstSeen: dates[0], lastSeen,
+      active: daysBetween(lastSeen, day(todayISO)) <= 45,
+    });
+  }
+  return out.sort((a, b) => b.monthlyCents - a.monthlyCents);
+}
+
+// ============================================================
+// projectNetWorth — "at this rate": trailing 6 full calendar
+// months of (income − expenses − net person outflow).
+// ============================================================
+export function projectNetWorth(
+  transactions: Transaction[], accounts: PaymentAccount[], todayISO: string, months = 12
+): { monthlyRateCents: number; startCents: number; points: Array<{ month: string; cents: number }> } {
+  const currentMonth = day(todayISO).slice(0, 7);
+  const monthKey = (offsetFromCurrent: number) => {
+    const [y, m] = currentMonth.split('-').map(Number);
+    const d = new Date(Date.UTC(y, m - 1 + offsetFromCurrent, 1));
+    return d.toISOString().slice(0, 7);
+  };
+  const window = new Set([-6, -5, -4, -3, -2, -1].map(monthKey));
+
+  let net = 0;
+  const { unmatchedOut, unmatchedIn } = matchTransfers(transactions, accounts);
+  const personLeg = (t: Transaction) => {
+    const p = personFrom(t.description ?? t.title);
+    return p !== null && !isSelfPerson(p);
+  };
+  for (const t of transactions) {
+    if (!window.has(day(t.date).slice(0, 7))) continue;
+    const cls = classifyTransaction(t, accounts);
+    if (cls === 'income') net += toCents(t.amount);
+    else if (cls === 'expense') net -= toCents(t.amount);
+  }
+  for (const t of unmatchedOut) if (window.has(day(t.date).slice(0, 7)) && personLeg(t)) net -= toCents(t.amount);
+  for (const t of unmatchedIn) if (window.has(day(t.date).slice(0, 7)) && personLeg(t)) net += toCents(t.amount);
+
+  const monthlyRateCents = Math.round(net / 6);
+  const startCents = accounts.reduce((s, a) => s + signedRealNowCents(a), 0);
+  const points = Array.from({ length: months + 1 }, (_, i) => ({
+    month: monthKey(i), cents: startCents + monthlyRateCents * i,
+  }));
+  return { monthlyRateCents, startCents, points };
+}

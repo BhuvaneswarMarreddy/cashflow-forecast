@@ -181,3 +181,77 @@ describe('buildFlowGraph', () => {
     expect(r.openingCents).toBe(22000);
   });
 });
+
+import { detectRecurring, projectNetWorth } from '@/lib/flows';
+
+describe('detectRecurring', () => {
+  const accounts = [acct({ id: 'A', balance: 100 })];
+  const monthly = (id: string, merchant: string, amount: number, months: number[]) =>
+    months.map((m) => tx({
+      id: `${id}${m}`, amount, merchant,
+      date: `2026-${String(m).padStart(2, '0')}-14`, accountId: 'A',
+    }));
+
+  it('detects a stable monthly subscription and normalizes trailing store numbers', () => {
+    const txns = monthly('v', 'VERIZON 800123', 49.99, [1, 2, 3, 4, 5, 6, 7]);
+    const [item] = detectRecurring(txns, accounts, '2026-07-23');
+    expect(item).toMatchObject({
+      merchant: 'VERIZON', cadence: 'monthly', medianCents: 4999,
+      monthlyCents: 4999, occurrences: 7, active: true,
+    });
+  });
+
+  it('does not let leading digits be stripped from a brand', () => {
+    const txns = monthly('e', '650 INDUSTRIES', 19, [4, 5, 6, 7]);
+    expect(detectRecurring(txns, accounts, '2026-07-23')[0].merchant).toBe('650 INDUSTRIES');
+  });
+
+  it('rejects ad-hoc spending whose gap MEDIAN happens to look monthly', () => {
+    const dates = ['2024-01-05', '2025-08-01', '2025-10-26', '2025-11-08', '2025-11-30', '2025-12-29'];
+    const txns = dates.map((d, i) => tx({ id: `q${i}`, amount: 32, merchant: 'QUIKTRIP', date: d, accountId: 'A' }));
+    expect(detectRecurring(txns, accounts, '2026-07-23')).toHaveLength(0);
+  });
+
+  it('dedupes same-day double charges before cadence math', () => {
+    const txns = [
+      tx({ id: 'p1', amount: 20, merchant: 'PERPLEXITY', date: '2026-02-14', accountId: 'A' }),
+      tx({ id: 'p2', amount: 20, merchant: 'PERPLEXITY', date: '2026-02-14', accountId: 'A' }),
+      tx({ id: 'p3', amount: 20, merchant: 'PERPLEXITY', date: '2026-03-14', accountId: 'A' }),
+    ];
+    expect(detectRecurring(txns, accounts, '2026-07-23')).toHaveLength(0); // 2 unique dates < 3
+  });
+
+  it('rejects sub-$5 artifacts and marks lapsed subscriptions inactive', () => {
+    const cents = detectRecurring(monthly('w', 'WITHHOLD', 0.01, [1, 2, 3]), accounts, '2026-07-23');
+    expect(cents).toHaveLength(0);
+    const lapsed = detectRecurring(monthly('g', 'GYM', 26.92, [1, 2, 3]), accounts, '2026-07-23');
+    expect(lapsed[0].active).toBe(false); // last seen 03-14, today 07-23
+  });
+});
+
+describe('projectNetWorth', () => {
+  const accounts = [acct({ id: 'A', balance: 1000 }), acct({ id: 'C', balance: 400, type: 'credit_card', provider: 'amex' })];
+  // Jan..Jun 2026: +500 income, −200 expense each month; net +300/mo. July is current (ignored).
+  const txns = [1, 2, 3, 4, 5, 6].flatMap((m) => [
+    tx({ id: `i${m}`, amount: 500, type: 'income', accountId: 'A', date: `2026-0${m}-05` }),
+    tx({ id: `e${m}`, amount: 200, type: 'expense', accountId: 'A', date: `2026-0${m}-10` }),
+  ]).concat([tx({ id: 'ijul', amount: 9999, type: 'income', accountId: 'A', date: '2026-07-05' })]);
+
+  it('averages the 6 full months before the current one', () => {
+    const p = projectNetWorth(txns, accounts, '2026-07-23');
+    expect(p.startCents).toBe(60000); // 1000 − 400 debt
+    expect(p.monthlyRateCents).toBe(30000);
+    expect(p.points).toHaveLength(13);
+    expect(p.points[0]).toEqual({ month: '2026-07', cents: 60000 });
+    expect(p.points[12]).toEqual({ month: '2027-07', cents: 60000 + 12 * 30000 });
+  });
+
+  it('counts unmatched person outflows (remittance) against the rate', () => {
+    const withRemit = txns.concat([2, 3, 4].map((m) => tx({
+      id: `r${m}`, amount: 100, type: 'transfer', transferDirection: 'out', accountId: 'A',
+      description: 'RMTLY* REMITLY', date: `2026-0${m}-20`,
+    })));
+    const p = projectNetWorth(withRemit, accounts, '2026-07-23');
+    expect(p.monthlyRateCents).toBe(30000 - 5000); // 300/mo remittance over 6 months
+  });
+});
