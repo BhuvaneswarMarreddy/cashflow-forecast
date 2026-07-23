@@ -61,3 +61,11 @@ Every direct DB change, so nothing is a mystery later. All writes go via Firesto
   Total paid in the data: $5,357.39 ($2,000 down + $9.79 fee + 4 × $836.90). No
   disbursement (auto loan financed the car directly), and Feb/Mar payments are missing
   from the export.
+
+## 2026-07-23 — Carvana payoff added to Mercedes (manual, approximate)
+- Not in any CSV (export gap / after window). Added a manual row `manual_carvana_payoff`
+  to the Mercedes loan account: **$5,000 (approx), 2026-05-15**, type transfer/out
+  (loan payoff, per owner's choice — not counted as income/expense).
+- ⚠️ Amount + date are placeholders from "close to $5,000" — update when the owner gives
+  the exact figures. Mercedes total then reads: 4×$836.90 + $2,000 down + $9.79 fee +
+  $5,000 payoff ≈ $10,357 sunk into the car.
