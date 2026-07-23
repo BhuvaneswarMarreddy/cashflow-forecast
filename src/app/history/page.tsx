@@ -225,17 +225,23 @@ export default function HistoryPage() {
     return { income, expenses, net: income - expenses };
   }, [filteredTransactions, profile?.paymentAccounts]);
 
-  // Loan summary — only when History is filtered to a single loan account. Shows what
-  // you took (money in) vs what you paid (money out) and the cost above principal.
-  const loanSummary = useMemo(() => {
+  // Per-account summary — appears when History is filtered to one account. The metrics
+  // shown differ by account type (loan / credit card / bank), computed from the filtered
+  // rows with the same classifier the rest of the app uses.
+  const accountSummary = useMemo(() => {
     const acct = profile?.paymentAccounts?.find(a => a.id === accountFilter);
-    if (!acct || acct.type !== 'personal_loan') return null;
-    let borrowed = 0, paid = 0;
+    if (!acct) return null;
+    let spent = 0, income = 0, inbound = 0, outbound = 0;
     filteredTransactions.forEach(t => {
-      const inbound = isPositive(t, profile?.paymentAccounts);
-      if (inbound) borrowed += t.amount; else paid += t.amount;
+      const cls = classifyTransaction(t, profile?.paymentAccounts);
+      if (cls === 'expense') spent += t.amount;
+      else if (cls === 'income') income += t.amount;
+      else if (cls === 'transfer') {
+        if (isPositive(t, profile?.paymentAccounts)) inbound += t.amount;
+        else outbound += t.amount;
+      }
     });
-    return { name: acct.name, borrowed, paid, interest: Math.max(0, paid - borrowed), balance: acct.balance };
+    return { acct, spent, income, inbound, outbound };
   }, [accountFilter, filteredTransactions, profile?.paymentAccounts]);
 
   // Calculate monthly averages for runway
@@ -545,35 +551,51 @@ export default function HistoryPage() {
               </div>
             </div>
 
-            {/* Loan summary — shows when filtered to a loan account */}
-            {loanSummary && (
-              <div className="mb-6 p-5 rounded-xl bg-[var(--background-secondary)] border border-[var(--border-color)]">
-                <div className="flex items-center gap-2 mb-4">
-                  <DollarSign className="w-5 h-5 text-[var(--accent-primary)]" />
-                  <h3 className="font-semibold text-[var(--foreground)]">{loanSummary.name} — summary</h3>
+            {/* Per-account summary — metrics adapt to the account type */}
+            {accountSummary && (() => {
+              const { acct, spent, income, inbound, outbound } = accountSummary;
+              const money = (n: number) => `$${n.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+              // (label, value, color) tiles, chosen by account type
+              let tiles: [string, string, string][];
+              if (acct.type === 'personal_loan') {
+                tiles = [
+                  ['Borrowed', money(inbound), 'text-[var(--foreground)]'],
+                  ['Paid back', money(outbound), 'text-[var(--foreground)]'],
+                  ['Interest / cost', money(Math.max(0, outbound - inbound)), 'text-amber-500'],
+                  ['Balance owed', acct.balance > 0 ? money(acct.balance) : 'Paid off', acct.balance > 0 ? 'text-[var(--accent-danger)]' : 'text-emerald-500'],
+                ];
+              } else if (acct.type === 'credit_card') {
+                tiles = [
+                  ['Spent (purchases)', money(spent), 'text-[var(--foreground)]'],
+                  ['Paid to card', money(inbound), 'text-emerald-500'],
+                  ['Refunds', money(income), 'text-emerald-500'],
+                  ['Balance owed', acct.balance > 0 ? money(acct.balance) : 'Paid off', acct.balance > 0 ? 'text-[var(--accent-danger)]' : 'text-emerald-500'],
+                ];
+              } else {
+                tiles = [
+                  ['Income in', money(income), 'text-emerald-500'],
+                  ['Spent', money(spent), 'text-[var(--accent-danger)]'],
+                  ['Transfers in / out', `${money(inbound)} / ${money(outbound)}`, 'text-[var(--foreground-secondary)]'],
+                  ['Balance', money(acct.balance), 'text-[var(--foreground)]'],
+                ];
+              }
+              return (
+                <div className="mb-6 p-5 rounded-xl bg-[var(--background-secondary)] border border-[var(--border-color)]">
+                  <div className="flex items-center gap-2 mb-4">
+                    <DollarSign className="w-5 h-5 text-[var(--accent-primary)]" />
+                    <h3 className="font-semibold text-[var(--foreground)]">{acct.name} — summary</h3>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    {tiles.map(([label, value, color]) => (
+                      <div key={label}>
+                        <p className="text-xs text-[var(--foreground-muted)]">{label}</p>
+                        <p className={`text-lg font-bold ${color}`}>{value}</p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                  <div>
-                    <p className="text-xs text-[var(--foreground-muted)]">Borrowed</p>
-                    <p className="text-lg font-bold text-[var(--foreground)]">${loanSummary.borrowed.toLocaleString('en-US',{maximumFractionDigits:2})}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-[var(--foreground-muted)]">Paid back</p>
-                    <p className="text-lg font-bold text-[var(--foreground)]">${loanSummary.paid.toLocaleString('en-US',{maximumFractionDigits:2})}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-[var(--foreground-muted)]">Interest / cost</p>
-                    <p className="text-lg font-bold text-amber-500">${loanSummary.interest.toLocaleString('en-US',{maximumFractionDigits:2})}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-[var(--foreground-muted)]">Balance owed</p>
-                    <p className={`text-lg font-bold ${loanSummary.balance > 0 ? 'text-[var(--accent-danger)]' : 'text-emerald-500'}`}>
-                      {loanSummary.balance > 0 ? `$${loanSummary.balance.toLocaleString()}` : 'Paid off'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Transactions List */}
             {filteredTransactions.length === 0 ? (
