@@ -7,6 +7,7 @@ import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import Navbar from '@/components/Navbar';
 import { classifyTransaction, isPositive, isReward } from '@/lib/classify';
+import { matchTransfers } from '@/lib/transfers';
 import { displayCategory } from '@/types';
 import { format, parseISO, subMonths, startOfMonth } from 'date-fns';
 import { TrendingUp, ArrowDownRight, ArrowUpRight, Wallet } from 'lucide-react';
@@ -44,21 +45,46 @@ export default function CashflowPage() {
     return transactions.filter(t => parseISO(t.date) >= start && parseISO(t.date) <= now);
   }, [transactions, range]);
 
-  // Headline: income vs spending (transfers excluded — moving money isn't spending)
+  // Money that actually LEFT your accounts as transfers with no matching leg in one of
+  // your own accounts — i.e. sent to other people / abroad. This is real money gone, and
+  // the reason "income − spending" overstates what you kept.
+  const sentOut = useMemo(() => {
+    const m = matchTransfers(rows, accounts || []);
+    // A transfer to YOURSELF (recipient is your own name, or "to me") is moving money
+    // between your own accounts — even if the other account isn't imported. That is not
+    // money sent away, so it must not count against what you kept.
+    const nameParts = (profile?.name || '').toLowerCase().split(/\s+/).filter(w => w.length > 3);
+    const isSelf = (t: typeof rows[number]) => {
+      const txt = `${t.title} ${t.description || ''} ${t.merchant || ''}`.toLowerCase();
+      return /\bto me\b/.test(txt) || nameParts.some(n => txt.includes(n));
+    };
+    const detail: Record<string, number> = {};
+    let total = 0, selfInternal = 0;
+    m.unmatchedOut.forEach(t => {
+      if (isSelf(t)) { selfInternal += t.amount; return; }
+      total += t.amount;
+      const ti = `${t.title} ${t.description || ''} ${t.merchant || ''}`.toLowerCase();
+      const acct = accounts?.find(a => a.id === t.accountId);
+      const key =
+        /remitly|rmtly/.test(ti) ? 'Remitly (India)' :
+        /zelle/.test(ti) ? 'Zelle to a person' :
+        (acct?.type === 'credit_card' || acct?.type === 'personal_loan') ? 'Card / loan payoff' :
+        'Other sent out';
+      detail[key] = (detail[key] || 0) + t.amount;
+    });
+    return { total, selfInternal, detail: Object.entries(detail).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value) };
+  }, [rows, accounts, profile?.name]);
+
+  // Income vs spending (consumption). "Kept" also subtracts money sent out of your accounts.
   const totals = useMemo(() => {
-    let income = 0, spending = 0, toCards = 0, toLoans = 0;
+    let income = 0, spending = 0;
     rows.forEach(t => {
       const c = cls(t);
       if (c === 'income') income += t.amount;
       else if (c === 'expense') spending += t.amount;
-      else if (c === 'transfer' && isPositive(t, accounts)) {
-        const acct = accounts?.find(a => a.id === t.accountId);
-        if (acct?.type === 'credit_card') toCards += t.amount;
-        else if (acct?.type === 'personal_loan') toLoans += t.amount;
-      }
     });
-    return { income, spending, toCards, toLoans, net: income - spending };
-  }, [rows, accounts]);
+    return { income, spending, kept: income - spending - sentOut.total };
+  }, [rows, accounts, sentOut.total]);
 
   // Month-by-month income vs spending
   const monthly = useMemo(() => {
@@ -106,7 +132,7 @@ export default function CashflowPage() {
   }
   if (!isAuthenticated) return null;
 
-  const savedRate = totals.income > 0 ? Math.round((totals.net / totals.income) * 100) : 0;
+  const keptRate = totals.income > 0 ? Math.round((totals.kept / totals.income) * 100) : 0;
 
   return (
     <div className="min-h-screen relative">
@@ -131,9 +157,9 @@ export default function CashflowPage() {
         {/* Summary tiles */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <Tile icon={<ArrowUpRight className="w-5 h-5" />} label="Income in" value={money(totals.income)} color="text-emerald-500" />
-          <Tile icon={<ArrowDownRight className="w-5 h-5" />} label="Spent" value={money(totals.spending)} color="text-[var(--accent-danger)]" />
-          <Tile icon={<Wallet className="w-5 h-5" />} label="Net saved" value={money(totals.net)} color={totals.net >= 0 ? 'text-emerald-500' : 'text-[var(--accent-danger)]'} sub={`${savedRate}% of income`} />
-          <Tile icon={<TrendingUp className="w-5 h-5" />} label="Paid to cards + loans" value={money(totals.toCards + totals.toLoans)} color="text-[var(--foreground)]" sub="not counted as spending" />
+          <Tile icon={<ArrowDownRight className="w-5 h-5" />} label="Spent (on yourself)" value={money(totals.spending)} color="text-[var(--accent-danger)]" />
+          <Tile icon={<TrendingUp className="w-5 h-5" />} label="Sent out (to others)" value={money(sentOut.total)} color="text-amber-500" sub="Remitly, Zelle, payoffs — money gone" />
+          <Tile icon={<Wallet className="w-5 h-5" />} label="Actually kept" value={money(totals.kept)} color={totals.kept >= 0 ? 'text-emerald-500' : 'text-[var(--accent-danger)]'} sub={`${keptRate}% of income · income − spent − sent out`} />
         </div>
 
         {/* Monthly income vs spending */}
@@ -168,6 +194,27 @@ export default function CashflowPage() {
             </BarChart>
           </ResponsiveContainer>
         </div>
+
+        {/* Where your money left to */}
+        {sentOut.detail.length > 0 && (
+          <div className="glass-card p-5 mt-8">
+            <div className="flex items-baseline justify-between mb-4">
+              <div>
+                <h3 className="font-semibold text-[var(--foreground)]">Where your money left to</h3>
+                <p className="text-sm text-[var(--foreground-secondary)]">Transfers OUT to accounts and people that aren&apos;t yours — this is why &quot;saved&quot; isn&apos;t what stayed.</p>
+              </div>
+              <p className="text-2xl font-bold text-amber-500">{money(sentOut.total)}</p>
+            </div>
+            <div className="divide-y divide-[var(--border-color)]">
+              {sentOut.detail.map(r => (
+                <div key={r.name} className="flex items-center justify-between py-2.5">
+                  <span className="text-[var(--foreground)]">{r.name}</span>
+                  <span className="font-semibold text-amber-500">{money(r.value)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Credit-card rewards earned */}
         {rewardsByCard.length > 0 && (
