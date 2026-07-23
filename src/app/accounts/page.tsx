@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useUserProfile } from '@/context/UserProfileContext';
@@ -12,6 +12,7 @@ import BudgetStatusPanel from '@/components/BudgetStatusPanel';
 import DebtPlannerPanel from '@/components/DebtPlannerPanel';
 import { PAYMENT_METHODS, ACCOUNT_TYPES, PaymentAccount, IncomeSource, AccountType, PaymentMethod, CategoryBudget } from '@/types';
 import { deriveAccountBalance, withDerivedBalances } from '@/lib/forecast';
+import { matchTransfers } from '@/lib/transfers';
 import {
   TrendingUp,
   CreditCard,
@@ -30,6 +31,8 @@ import {
   Percent,
   Receipt,
   BarChart3,
+  ArrowLeftRight,
+  AlertTriangle,
 } from 'lucide-react';
 
 export default function AccountsPage() {
@@ -48,7 +51,29 @@ export default function AccountsPage() {
   const { transactions } = useTransactions();
   const router = useRouter();
   
-  const [activeTab, setActiveTab] = useState<'accounts' | 'spending' | 'income' | 'budget' | 'budgets' | 'debt'>('accounts');
+  const [activeTab, setActiveTab] = useState<'accounts' | 'spending' | 'transfers' | 'income' | 'budget' | 'budgets' | 'debt'>('accounts');
+
+  // Live transfer pairing: match each leg leaving an account to the leg arriving in
+  // another, so an internal move reads as ONE net-zero movement. Unpaired legs = the
+  // other side is in an account you didn't import (external / a Zelle to a person).
+  const transfers = useMemo(
+    () => matchTransfers(transactions, withDerivedBalances(profile?.paymentAccounts || [], transactions)),
+    [transactions, profile?.paymentAccounts]
+  );
+  const acctName = (id?: string) => profile?.paymentAccounts?.find(a => a.id === id)?.name || 'Untracked';
+  const transferRoutes = useMemo(() => {
+    const m = new Map<string, { from: string; to: string; total: number; count: number }>();
+    transfers.pairs.forEach(p => {
+      const key = `${p.fromAccountId}->${p.toAccountId}`;
+      const r = m.get(key) || { from: acctName(p.fromAccountId), to: acctName(p.toAccountId), total: 0, count: 0 };
+      r.total += p.amount; r.count += 1;
+      m.set(key, r);
+    });
+    return [...m.values()].sort((a, b) => b.total - a.total);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transfers, profile?.paymentAccounts]);
+  const unmatchedOutTotal = transfers.unmatchedOut.reduce((s, t) => s + t.amount, 0);
+  const unmatchedInTotal = transfers.unmatchedIn.reduce((s, t) => s + t.amount, 0);
   const [showAccountModal, setShowAccountModal] = useState(false);
   const [showIncomeModal, setShowIncomeModal] = useState(false);
   const [editingAccount, setEditingAccount] = useState<PaymentAccount | null>(null);
@@ -357,6 +382,7 @@ export default function AccountsPage() {
           {[
             { key: 'accounts', label: 'Accounts', fullLabel: 'Payment Accounts', icon: CreditCard },
             { key: 'spending', label: 'Spending', fullLabel: 'Account Spending', icon: Receipt },
+            { key: 'transfers', label: 'Transfers', fullLabel: 'Transfers', icon: ArrowLeftRight },
             { key: 'income', label: 'Income', fullLabel: 'Income Sources', icon: Banknote },
             { key: 'budget', label: 'Budget', fullLabel: 'Monthly Budget', icon: DollarSign },
             { key: 'budgets', label: 'Categories', fullLabel: 'Category Budgets', icon: BarChart3 },
@@ -550,6 +576,106 @@ export default function AccountsPage() {
                   <button onClick={() => setActiveTab('accounts')} className="btn-primary">
                     Add Accounts
                   </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Transfers Tab — paired internal movements + unmatched review */}
+          {activeTab === 'transfers' && (
+            <div>
+              <div className="mb-6">
+                <h2 className="text-xl font-semibold text-[var(--foreground)]">Transfers between your accounts</h2>
+                <p className="text-sm text-[var(--foreground-secondary)] mt-1">
+                  Each leg leaving one account is matched to the leg arriving in another. Matched
+                  moves net to zero and are excluded from income and expenses — money changing
+                  pockets, not coming in or going out.
+                </p>
+              </div>
+
+              {/* Summary */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+                <div className="stat-card">
+                  <p className="text-sm text-[var(--foreground-secondary)] mb-1">Matched (net zero)</p>
+                  <p className="text-2xl font-bold text-[var(--foreground)]">
+                    ${transfers.matchedTotal.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                  </p>
+                  <p className="text-xs text-[var(--foreground-muted)]">{transfers.pairs.length} paired moves</p>
+                </div>
+                <div className="stat-card">
+                  <p className="text-sm text-[var(--foreground-secondary)] mb-1">Left to untracked</p>
+                  <p className="text-2xl font-bold text-[var(--accent-danger)]">
+                    ${unmatchedOutTotal.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                  </p>
+                  <p className="text-xs text-[var(--foreground-muted)]">{transfers.unmatchedOut.length} unmatched out</p>
+                </div>
+                <div className="stat-card">
+                  <p className="text-sm text-[var(--foreground-secondary)] mb-1">Arrived from untracked</p>
+                  <p className="text-2xl font-bold text-[var(--accent-success)]">
+                    ${unmatchedInTotal.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                  </p>
+                  <p className="text-xs text-[var(--foreground-muted)]">{transfers.unmatchedIn.length} unmatched in</p>
+                </div>
+              </div>
+
+              {/* Matched routes */}
+              {transferRoutes.length > 0 ? (
+                <div className="glass-card divide-y divide-[var(--border-color)] mb-6">
+                  {transferRoutes.map((r, i) => (
+                    <div key={i} className="flex items-center justify-between p-4">
+                      <div className="flex items-center gap-2 text-[var(--foreground)]">
+                        <span className="font-medium">{r.from}</span>
+                        <ArrowLeftRight className="w-4 h-4 text-[var(--accent-primary)]" />
+                        <span className="font-medium">{r.to}</span>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-semibold text-[var(--foreground)]">
+                          ${r.total.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                        </p>
+                        <p className="text-xs text-[var(--foreground-muted)]">{r.count} moves</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-12 bg-[var(--background-secondary)] rounded-xl border border-[var(--border-color)] mb-6">
+                  <ArrowLeftRight className="w-12 h-12 mx-auto mb-3 text-[var(--foreground-muted)]" />
+                  <p className="text-[var(--foreground-secondary)]">
+                    No matched transfers yet. Import your accounts — moves between two imported
+                    accounts pair up here automatically.
+                  </p>
+                </div>
+              )}
+
+              {/* Unmatched review */}
+              {(transfers.unmatchedOut.length > 0 || transfers.unmatchedIn.length > 0) && (
+                <div className="glass-card p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <AlertTriangle className="w-4 h-4 text-amber-500" />
+                    <span className="font-medium text-[var(--foreground)]">Needs a look — unmatched legs</span>
+                  </div>
+                  <p className="text-sm text-[var(--foreground-secondary)] mb-3">
+                    The other side of these is in an account you didn&apos;t import (external savings,
+                    a Zelle to a person, a loan servicer) — so they may be real money in/out, or a
+                    mislabel to reclassify.
+                  </p>
+                  <div className="max-h-[280px] overflow-y-auto divide-y divide-[var(--border-color)]">
+                    {[...transfers.unmatchedOut.map(t => ({ t, dir: 'out' as const })),
+                      ...transfers.unmatchedIn.map(t => ({ t, dir: 'in' as const }))]
+                      .sort((a, b) => b.t.date.localeCompare(a.t.date))
+                      .slice(0, 40)
+                      .map(({ t, dir }) => (
+                        <div key={t.id} className="flex items-center justify-between py-2 text-sm">
+                          <div>
+                            <span className="text-[var(--foreground)]">{t.title}</span>
+                            <span className="text-[var(--foreground-muted)]"> · {acctName(t.accountId)}</span>
+                          </div>
+                          <span className={dir === 'in' ? 'text-emerald-500' : 'text-[var(--accent-danger)]'}>
+                            {dir === 'in' ? '+' : '-'}${t.amount.toLocaleString()}
+                          </span>
+                        </div>
+                      ))}
+                  </div>
                 </div>
               )}
             </div>
