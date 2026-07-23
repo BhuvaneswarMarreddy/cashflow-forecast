@@ -14,13 +14,17 @@ interface AddTransactionModalProps {
 }
 
 export default function AddTransactionModal({ isOpen, onClose, defaultDate, editTransaction }: AddTransactionModalProps) {
-  const { addTransaction, updateTransaction, transactions } = useTransactions();
+  const { addTransaction, updateTransaction, addBulkTransactions, transactions } = useTransactions();
   const { profile } = useUserProfile();
   const [formData, setFormData] = useState({
     title: '',
     amount: '',
     type: 'expense' as TransactionType,
     transferDirection: 'out' as TransferDirection,
+    // From/To only apply to a NEW transfer (which creates both legs); editing keeps the
+    // single-account + direction path via accountId/transferDirection above.
+    fromAccountId: '',
+    toAccountId: '',
     category: 'other' as ExpenseCategory,
     paymentMethod: 'chase' as PaymentMethod,
     accountId: '',
@@ -98,6 +102,8 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
         amount: editTransaction.amount.toString(),
         type: editTransaction.type,
         transferDirection: editTransaction.transferDirection || 'out',
+        fromAccountId: '',
+        toAccountId: '',
         category: editTransaction.category,
         paymentMethod: editTransaction.paymentMethod,
         accountId: editTransaction.accountId || '',
@@ -156,6 +162,52 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
     today.setHours(0, 0, 0, 0);
     const transactionDate = new Date(formData.date);
 
+    // NEW transfer: create BOTH legs (out of From, into To) instead of one row.
+    if (formData.type === 'transfer' && !editTransaction) {
+      const accounts = profile?.paymentAccounts || [];
+      const from = accounts.find((a) => a.id === formData.fromAccountId);
+      const to = accounts.find((a) => a.id === formData.toAccountId);
+      if (!from || !to) {
+        setIsSubmitting(false);
+        return; // both required; the To picker excludes From so they can't match
+      }
+
+      const shared = {
+        amount: parseFloat(formData.amount),
+        type: 'transfer' as const,
+        category: formData.category,
+        date: transactionDate.toISOString(),
+        description: formData.description,
+        merchant: formData.merchant || undefined,
+        isProjected: transactionDate >= today || formData.isProjected,
+      };
+      const fromLeg = {
+        ...shared,
+        transferDirection: 'out' as TransferDirection,
+        accountId: from.id,
+        paymentMethod: from.provider,
+        title: `Transfer to ${to.name}`,
+      };
+      const toLeg = {
+        ...shared,
+        transferDirection: 'in' as TransferDirection,
+        accountId: to.id,
+        paymentMethod: to.provider,
+        title: `Transfer from ${from.name}`,
+      };
+
+      try {
+        // No ids passed, so both legs get auto-ids.
+        await addBulkTransactions([fromLeg, toLeg]);
+      } catch (error) {
+        console.error('❌ Error saving transfer:', error);
+      }
+      resetForm();
+      setIsSubmitting(false);
+      onClose();
+      return;
+    }
+
     const transactionData = {
       title: formData.title,
       amount: parseFloat(formData.amount),
@@ -188,13 +240,20 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
       console.error('❌ Error saving transaction:', error);
     }
 
-    // Reset form
+    resetForm();
+    setIsSubmitting(false);
+    onClose();
+  };
+
+  const resetForm = () => {
     const firstAccount = profile?.paymentAccounts?.[0];
     setFormData({
       title: '',
       amount: '',
       type: 'expense',
       transferDirection: 'out',
+      fromAccountId: '',
+      toAccountId: '',
       category: 'other',
       paymentMethod: firstAccount?.provider || 'chase',
       accountId: firstAccount?.id || '',
@@ -208,9 +267,6 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
       recurringCount: '',
     });
     setMerchantFilter('');
-
-    setIsSubmitting(false);
-    onClose();
   };
 
   const getAccountIcon = (type: AccountType) => {
@@ -228,6 +284,10 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
   if (!isOpen) return null;
 
   const hasAccounts = profile?.paymentAccounts && profile.paymentAccounts.length > 0;
+  // A NEW transfer picks From + To and creates both legs; editing keeps the old
+  // single-account + in/out behavior untouched.
+  const isNewTransfer = formData.type === 'transfer' && !editTransaction;
+  const accountsList = profile?.paymentAccounts || [];
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -273,8 +333,10 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
                 button and saving silently rewrites its type. */}
             <button
               type="button"
+              disabled={!editTransaction && accountsList.length < 2}
+              title={!editTransaction && accountsList.length < 2 ? 'Transfers need at least two accounts' : undefined}
               onClick={() => setFormData({ ...formData, type: 'transfer' })}
-              className={`flex-1 py-3 rounded-xl font-medium transition-all ${
+              className={`flex-1 py-3 rounded-xl font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
                 formData.type === 'transfer'
                   ? 'bg-[var(--accent-primary)] text-white'
                   : 'bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'
@@ -284,9 +346,10 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
             </button>
           </div>
 
-          {/* A transfer's amount is stored unsigned, so the leg direction is the only
-              thing that says whether this account gained or lost the money. */}
-          {formData.type === 'transfer' && (
+          {/* Editing a transfer keeps the single-account in/out toggle. A transfer's
+              amount is stored unsigned, so the leg direction is the only thing that says
+              whether this account gained or lost the money. */}
+          {formData.type === 'transfer' && editTransaction && (
             <div className="flex gap-3">
               {(['out', 'in'] as TransferDirection[]).map((dir) => (
                 <button
@@ -305,7 +368,60 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
             </div>
           )}
 
-          {/* Title */}
+          {/* NEW transfer: pick From + To. Submitting creates both legs. The To list
+              excludes the chosen From so the two can never be the same account. */}
+          {isNewTransfer && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">
+                  From account
+                </label>
+                <select
+                  value={formData.fromAccountId}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      fromAccountId: e.target.value,
+                      // If To now equals From, clear it so the user re-picks a valid target.
+                      toAccountId: formData.toAccountId === e.target.value ? '' : formData.toAccountId,
+                    })
+                  }
+                  className="select-field"
+                  required
+                >
+                  <option value="">Select account</option>
+                  {accountsList.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}{a.lastFourDigits ? ` ••••${a.lastFourDigits}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">
+                  To account
+                </label>
+                <select
+                  value={formData.toAccountId}
+                  onChange={(e) => setFormData({ ...formData, toAccountId: e.target.value })}
+                  className="select-field"
+                  required
+                >
+                  <option value="">Select account</option>
+                  {accountsList
+                    .filter((a) => a.id !== formData.fromAccountId)
+                    .map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}{a.lastFourDigits ? ` ••••${a.lastFourDigits}` : ''}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            </div>
+          )}
+
+          {/* Title — auto-generated ("Transfer to/from …") for a new transfer, so optional there */}
+          {!isNewTransfer && (
           <div>
             <label className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">
               Title
@@ -322,6 +438,7 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
               />
             </div>
           </div>
+          )}
 
           {/* Merchant */}
           <div className="relative">
@@ -473,8 +590,9 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
             </div>
           </div>
 
-          {/* Payment Account - Show user's accounts if available */}
-          {hasAccounts ? (
+          {/* Payment Account - Show user's accounts if available. A new transfer already
+              chose From/To above, so the single-account picker is hidden for it. */}
+          {isNewTransfer ? null : hasAccounts ? (
             <div>
               <label className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">
                 Account
@@ -561,7 +679,9 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
             </label>
           </div>
 
-          {/* Recurring Transaction Section */}
+          {/* Recurring Transaction Section — hidden for a new transfer, whose two-leg
+              submit path doesn't carry the recurring flag (the control would be a no-op). */}
+          {!isNewTransfer && (
           <div className="p-4 rounded-xl bg-[var(--background-tertiary)] border border-[var(--border-color)]">
             <div className="flex items-center gap-3 mb-4">
               <input
@@ -654,6 +774,7 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
               </div>
             )}
           </div>
+          )}
 
           {/* Submit Button */}
           <button

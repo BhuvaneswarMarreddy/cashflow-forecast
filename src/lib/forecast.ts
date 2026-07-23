@@ -31,6 +31,34 @@ export function calculateCurrentCash(accounts: PaymentAccount[]): number {
 }
 
 /**
+ * Derive an account's CURRENT balance from its own PAST transactions.
+ * account.balance is treated as an OPENING balance (0 for auto-created accounts,
+ * which yields pure derivation). Future/projected rows are the forecast, not the
+ * balance, so they are excluded here using the same today-boundary the forecast uses.
+ */
+export function deriveAccountBalance(account: PaymentAccount, transactions: Transaction[]): number {
+  const todayKey = format(new Date(), 'yyyy-MM-dd');
+  const isDebt = account.type === 'credit_card' || account.type === 'personal_loan';
+  const net = transactions.reduce((sum, t) => {
+    if (t.accountId !== account.id) return sum;
+    // Compare calendar days, not instants. A today-dated row is stored at UTC midnight,
+    // so an instant comparison against local start-of-day dropped it for users east of
+    // UTC (e.g. IST) until the next calendar day. yyyy-MM-dd is what the forecast uses too.
+    if (t.date.split('T')[0] > todayKey) return sum; // future = forecast, not current balance
+    return sum + (isPositive(t, [account]) ? t.amount : -t.amount);
+  }, 0);
+  const opening = account.balance || 0;
+  // Debt is stored as a positive number: a purchase (signedEffect < 0) raises it,
+  // a payment (signedEffect > 0) lowers it — the opposite sign to a cash account.
+  return isDebt ? opening - net : opening + net;
+}
+
+/** Each account with its .balance replaced by the value derived from its transactions. */
+export function withDerivedBalances(accounts: PaymentAccount[], transactions: Transaction[]): PaymentAccount[] {
+  return accounts.map(a => ({ ...a, balance: deriveAccountBalance(a, transactions) }));
+}
+
+/**
  * Generate recurring bill events for the forecast period
  */
 function generateBillEvents(
@@ -39,35 +67,15 @@ function generateBillEvents(
   endDate: Date
 ): ForecastEvent[] {
   const events: ForecastEvent[] = [];
-  
-  // Credit card payments (based on due dates)
-  accounts
-    .filter(a => a.type === 'credit_card' && a.dueDate && a.balance > 0)
-    .forEach(card => {
-      let currentDate = new Date(startDate);
-      
-      while (isBefore(currentDate, endDate)) {
-        const month = currentDate.getMonth();
-        const year = currentDate.getFullYear();
-        const dueDate = new Date(year, month, card.dueDate!);
-        
-        // If due date hasn't passed this month, add it
-        if (isAfter(dueDate, startDate) && isBefore(dueDate, endDate)) {
-          events.push({
-            date: format(dueDate, 'yyyy-MM-dd'),
-            type: 'bill',
-            description: `${card.name} Payment`,
-            amount: -card.balance, // Full balance as minimum
-            balanceAfter: 0, // Will be calculated later
-            source: 'recurring',
-          });
-        }
-        
-        // Move to next month
-        currentDate = new Date(year, month + 1, 1);
-      }
-    });
-  
+
+  // NOTE: no synthetic credit-card payment here. Card payments are recorded as real
+  // transfer transactions (bank -> card), which already move the forecast. Once account
+  // balances are DERIVED from those transactions, a card with debt would otherwise fire
+  // a synthetic full-balance payment on top of the recorded transfer — double-counting
+  // the same money. To project a FUTURE card payment, record it as a (recurring) transfer.
+  // ponytail: this assumes the user records card payments (the app's transfer-based model);
+  // a smarter projection would be one recurring payment gated on "no real payment this cycle".
+
   // Loan payments
   accounts
     .filter(a => a.type === 'personal_loan' && a.monthlyPayment && a.dueDate)
@@ -851,38 +859,10 @@ export function generateAccountForecast(
       }
     });
     
-    // Add credit card payment events (money going OUT of checking to pay credit cards)
-    allAccounts
-      .filter(a => a.type === 'credit_card' && a.dueDate && a.paymentFromAccountId === account.id)
-      .forEach(card => {
-        let currentDate = new Date(today);
-        
-        while (isBefore(currentDate, endDate)) {
-          const month = currentDate.getMonth();
-          const year = currentDate.getFullYear();
-          const dueDate = new Date(year, month, card.dueDate!);
-          
-          if (isAfter(dueDate, today) && isBefore(dueDate, endDate)) {
-            // Calculate expected payment (current balance + estimated spending)
-            const estimatedPayment = card.balance || 0;
-            
-            events.push({
-              date: format(dueDate, 'yyyy-MM-dd'),
-              type: 'credit_card_payment',
-              description: `Pay ${card.name}`,
-              amount: -estimatedPayment,
-              balanceAfter: 0,
-              source: 'recurring',
-              accountId: account.id,
-              relatedAccountId: card.id,
-              relatedAccountName: card.name,
-            });
-          }
-          
-          currentDate = new Date(year, month + 1, 1);
-        }
-      });
-    
+    // No synthetic credit-card payment on the paying account either — same reason as
+    // generateBillEvents: with derived balances it would double-count the recorded
+    // transfer that actually pays the card. Recorded transfers are the source of truth.
+
     // Add loan payments if paid from this account
     allAccounts
       .filter(a => a.type === 'personal_loan' && a.monthlyPayment && a.dueDate && a.paymentFromAccountId === account.id)

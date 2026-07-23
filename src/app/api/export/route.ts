@@ -14,6 +14,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import * as XLSX from 'xlsx';
+import { withDerivedBalances } from '@/lib/forecast';
+import { PaymentAccount, Transaction } from '@/types';
 
 interface ExportRequest {
   profile: {
@@ -94,7 +96,15 @@ interface ExportRequest {
 export async function POST(request: NextRequest) {
   try {
     const data: ExportRequest = await request.json();
-    
+
+    // Export the balances the app shows (derived from transactions), not the raw
+    // opening figures — otherwise auto-created accounts export as $0. The route's local
+    // shapes are looser than the domain types, but derivation only reads type/id/balance.
+    const accounts = withDerivedBalances(
+      data.accounts as unknown as PaymentAccount[],
+      data.transactions as unknown as Transaction[]
+    );
+
     // Create workbook
     const wb = XLSX.utils.book_new();
     
@@ -113,9 +123,9 @@ export async function POST(request: NextRequest) {
       [''],
       ['Account Totals'],
       ['Total Accounts', data.accounts.length],
-      ['Total Bank Balance', data.accounts.filter(a => a.type === 'bank_account' || a.type === 'debit_card').reduce((sum, a) => sum + a.balance, 0)],
-      ['Total Credit Card Debt', data.accounts.filter(a => a.type === 'credit_card').reduce((sum, a) => sum + a.balance, 0)],
-      ['Total Loan Balance', data.accounts.filter(a => a.type === 'personal_loan').reduce((sum, a) => sum + a.balance, 0)],
+      ['Total Bank Balance', accounts.filter(a => a.type === 'bank_account' || a.type === 'debit_card').reduce((sum, a) => sum + a.balance, 0)],
+      ['Total Credit Card Debt', accounts.filter(a => a.type === 'credit_card').reduce((sum, a) => sum + a.balance, 0)],
+      ['Total Loan Balance', accounts.filter(a => a.type === 'personal_loan').reduce((sum, a) => sum + a.balance, 0)],
       [''],
       ['Income Summary'],
       ['Total Income Sources', data.incomeSources.length],
@@ -132,7 +142,7 @@ export async function POST(request: NextRequest) {
     // 2. Accounts Sheet
     if (data.accounts.length > 0) {
       const accountHeaders = ['Name', 'Type', 'Provider', 'Balance', 'Credit Limit', 'APR (%)', 'Due Date', 'Last 4 Digits', 'Active'];
-      const accountRows = data.accounts.map(a => [
+      const accountRows = accounts.map(a => [
         a.name,
         a.type,
         a.provider,

@@ -10,7 +10,7 @@ import AddTransactionModal from '@/components/AddTransactionModal';
 import CSVImportModal from '@/components/CSVImportModal';
 import ReceiptScannerModal from '@/components/ReceiptScannerModal';
 import RunwayCalculator from '@/components/RunwayCalculator';
-import { generateForecast, calculateCurrentCash } from '@/lib/forecast';
+import { generateForecast, calculateCurrentCash, withDerivedBalances } from '@/lib/forecast';
 import { classifyTransaction, isPositive } from '@/lib/classify';
 import { EXPENSE_CATEGORIES, Transaction, TransactionType, getMerchantColor, displayCategory } from '@/types';
 import {
@@ -250,13 +250,15 @@ export default function HistoryPage() {
     };
   }, [transactions, profile?.monthlyBudget, profile?.paymentAccounts]);
 
-  // Generate forecast for runway
+  // Generate forecast for runway. Balances derived from linked transactions so the
+  // runway starts from the real current cash, not the stored opening figure.
   const forecast = useMemo(() => {
     if (!profile) return null;
-    const currentCash = calculateCurrentCash(profile?.paymentAccounts || []);
+    const derivedAccounts = withDerivedBalances(profile?.paymentAccounts || [], transactions);
+    const currentCash = calculateCurrentCash(derivedAccounts);
     return generateForecast(
       currentCash,
-      profile?.paymentAccounts || [],
+      derivedAccounts,
       profile?.incomeSources || [],
       transactions,
       profile?.settings?.safetyThreshold || 500,
@@ -282,7 +284,7 @@ export default function HistoryPage() {
 
   if (!isAuthenticated) return null;
 
-  const currentCash = calculateCurrentCash(profile?.paymentAccounts || []);
+  const currentCash = calculateCurrentCash(withDerivedBalances(profile?.paymentAccounts || [], transactions));
   const monthlyIncome = profile?.incomeSources?.reduce((sum, inc) => {
     const monthly = inc.frequency === 'yearly' ? inc.amount / 12 :
       inc.frequency === 'biweekly' ? inc.amount * 26 / 12 :

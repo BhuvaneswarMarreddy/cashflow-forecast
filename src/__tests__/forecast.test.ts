@@ -3,7 +3,7 @@
  * Tests the core cash flow forecast calculations
  */
 
-import { generateForecast, simulateSpending } from '@/lib/forecast';
+import { generateForecast, simulateSpending, deriveAccountBalance, withDerivedBalances } from '@/lib/forecast';
 import { PaymentAccount, IncomeSource, Transaction } from '@/types';
 
 describe('Forecast Engine', () => {
@@ -93,6 +93,59 @@ describe('Forecast Engine', () => {
         date: future(),
       };
       expect(run([untyped]).endingBalance).toBe(run([]).endingBalance - 500);
+    });
+  });
+
+  describe('deriveAccountBalance', () => {
+    const past = () => {
+      const d = new Date();
+      d.setDate(d.getDate() - 5);
+      return d.toISOString();
+    };
+    const acct = (id: string, type: PaymentAccount['type']): PaymentAccount => ({
+      id, name: id, type, provider: 'chase', balance: 0, color: '#000', isActive: true,
+    });
+    const row = (over: Partial<Transaction>): Transaction => ({
+      id: Math.random().toString(), title: '', amount: 0, type: 'expense',
+      category: 'other', paymentMethod: 'chase', date: past(), ...over,
+    });
+
+    test('bank: +4000 income and -1000 transfer-out => 3000', () => {
+      const chase = acct('chase-checking', 'bank_account');
+      const txns = [
+        row({ accountId: chase.id, type: 'income', amount: 4000, title: 'Payroll' }),
+        row({ accountId: chase.id, type: 'transfer', transferDirection: 'out', amount: 1000, title: 'Transfer to BofA' }),
+      ];
+      expect(deriveAccountBalance(chase, txns)).toBe(3000);
+    });
+
+    test('bank: +1000 transfer-in and -950 transfer-out => 50', () => {
+      const bofa = acct('bofa-checking', 'bank_account');
+      const txns = [
+        row({ accountId: bofa.id, type: 'transfer', transferDirection: 'in', amount: 1000, title: 'Transfer from Chase' }),
+        row({ accountId: bofa.id, type: 'transfer', transferDirection: 'out', amount: 950, title: 'Transfer to Amazon Card' }),
+      ];
+      expect(deriveAccountBalance(bofa, txns)).toBe(50);
+    });
+
+    test('credit card: 950 purchase and 950 transfer-in payment => debt 0', () => {
+      const card = acct('amazon-card', 'credit_card');
+      const txns = [
+        row({ accountId: card.id, type: 'expense', amount: 950, title: 'Amazon order' }),
+        row({ accountId: card.id, type: 'transfer', transferDirection: 'in', amount: 950, title: 'Transfer from BofA' }),
+      ];
+      expect(deriveAccountBalance(card, txns)).toBe(0);
+    });
+
+    test('a card with derived debt and a due date does NOT synthesize a payment', () => {
+      // Regression: once balances are derived, a card with debt would otherwise fire a
+      // synthetic full-balance bill on top of the recorded transfer that pays it —
+      // double-counting. Card payments must come from recorded transactions only.
+      const card = { ...acct('card', 'credit_card'), dueDate: 15 };
+      const txns = [row({ accountId: card.id, type: 'expense', amount: 950, title: 'Purchase' })];
+      const accounts = withDerivedBalances([card], txns); // card now derives 950 debt
+      const f = generateForecast(1000, accounts, [], txns, 500, 90);
+      expect(f.events.some(e => e.type === 'bill' || e.type === 'credit_card_payment')).toBe(false);
     });
   });
 

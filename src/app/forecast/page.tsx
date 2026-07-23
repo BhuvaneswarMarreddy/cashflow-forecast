@@ -16,7 +16,7 @@ import BudgetStatusPanel from '@/components/BudgetStatusPanel';
 import UpcomingBillsPanel from '@/components/UpcomingBillsPanel';
 import SavingsGoalsPanel from '@/components/SavingsGoalsPanel';
 import PlannedPaymentsPanel from '@/components/PlannedPaymentsPanel';
-import { generateForecast, calculateCurrentCash, generateAccountForecast, getAllAccountForecasts } from '@/lib/forecast';
+import { generateForecast, calculateCurrentCash, generateAccountForecast, getAllAccountForecasts, withDerivedBalances } from '@/lib/forecast';
 import * as firestoreService from '@/lib/firestore';
 import { format } from 'date-fns';
 import { TrendingUp, AlertTriangle, ArrowRight, Shield, CreditCard, ChevronDown, Wallet, Landmark, Building } from 'lucide-react';
@@ -110,17 +110,24 @@ export default function ForecastPage() {
     );
   }, [profile?.paymentAccounts]);
 
+  // Balances derived from linked transactions, so forecasts start from the real
+  // current balance rather than the stored opening figure.
+  const derivedAccounts = useMemo(
+    () => withDerivedBalances(profile?.paymentAccounts || [], transactions),
+    [profile?.paymentAccounts, transactions]
+  );
+
   // Generate all account forecasts
   const accountForecasts = useMemo(() => {
     if (!profile?.paymentAccounts) return [];
     return getAllAccountForecasts(
-      profile.paymentAccounts,
+      derivedAccounts,
       profile.incomeSources || [],
       transactions,
       profile.settings?.safetyThreshold || 500,
       forecastDays
     );
-  }, [profile, transactions, forecastDays]);
+  }, [profile, derivedAccounts, transactions, forecastDays]);
 
   // Get selected account forecast or combined
   const selectedAccountForecast = useMemo(() => {
@@ -132,18 +139,18 @@ export default function ForecastPage() {
   const combinedForecast = useMemo(() => {
     if (!profile) return null;
     
-    const currentCash = calculateCurrentCash(profile.paymentAccounts || []);
+    const currentCash = calculateCurrentCash(derivedAccounts);
     const threshold = profile.settings?.safetyThreshold || 500;
-    
+
     return generateForecast(
       currentCash,
-      profile.paymentAccounts || [],
+      derivedAccounts,
       profile.incomeSources || [],
       transactions,
       threshold,
       forecastDays
     );
-  }, [profile, transactions, forecastDays]);
+  }, [profile, derivedAccounts, transactions, forecastDays]);
 
   // Use selected forecast or combined
   const forecast = selectedAccountForecast?.forecast || combinedForecast;
@@ -161,7 +168,7 @@ export default function ForecastPage() {
 
   if (!isAuthenticated || !forecast) return null;
 
-  const currentCash = calculateCurrentCash(profile?.paymentAccounts || []);
+  const currentCash = calculateCurrentCash(derivedAccounts);
   const hasSetup = (profile?.paymentAccounts?.length || 0) > 0 || (profile?.incomeSources?.length || 0) > 0;
   
   // Calculate monthly expenses for emergency fund calculation
@@ -401,9 +408,9 @@ export default function ForecastPage() {
           <div className="lg:col-span-2 space-y-6">
             <ForecastChart forecast={forecast} />
             <ForecastTimeline forecast={forecast} />
-            <AIInsightsPanel 
+            <AIInsightsPanel
               transactions={transactions}
-              accounts={profile?.paymentAccounts || []}
+              accounts={derivedAccounts}
               incomeSources={profile?.incomeSources || []}
               currentCash={currentCash}
               safetyThreshold={profile?.settings?.safetyThreshold || 500}
@@ -426,7 +433,7 @@ export default function ForecastPage() {
             
             {/* Upcoming Bills */}
             <UpcomingBillsPanel
-              accounts={profile?.paymentAccounts || []}
+              accounts={derivedAccounts}
               transactions={transactions}
               preferences={profile?.settings?.notificationPreferences}
               compact={true}
@@ -435,7 +442,7 @@ export default function ForecastPage() {
             {/* Savings Goals */}
             <SavingsGoalsPanel
               goals={savingsGoals}
-              accounts={profile?.paymentAccounts || []}
+              accounts={derivedAccounts}
               forecast={forecast}
               safetyThreshold={profile?.settings?.safetyThreshold || 500}
               onAddGoal={handleAddGoal}

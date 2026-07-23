@@ -6,6 +6,8 @@ import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useUserProfile } from '@/context/UserProfileContext';
+import { useTransactions } from '@/context/TransactionContext';
+import { withDerivedBalances } from '@/lib/forecast';
 import {
   LayoutDashboard,
   Calendar,
@@ -25,6 +27,7 @@ import {
 export default function Navbar() {
   const { user, logout } = useAuth();
   const { profile } = useUserProfile();
+  const { transactions } = useTransactions();
   const pathname = usePathname();
   const router = useRouter();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -47,13 +50,15 @@ export default function Navbar() {
     router.push('/login');
   };
 
-  // Calculate total balance across all accounts
-  const totalBalance = profile?.paymentAccounts?.reduce((sum, acc) => {
-    if (acc.type === 'credit_card') {
-      return sum - acc.balance; // Credit card balance is what you owe
+  // Calculate total balance across all accounts, from balances derived off linked
+  // transactions (opening balance + past effects) rather than the stored opening figure.
+  const totalBalance = withDerivedBalances(profile?.paymentAccounts || [], transactions).reduce((sum, acc) => {
+    // Cards AND loans are debt (balance = what you owe), so they subtract from net worth.
+    if (acc.type === 'credit_card' || acc.type === 'personal_loan') {
+      return sum - acc.balance;
     }
     return sum + acc.balance;
-  }, 0) || 0;
+  }, 0);
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 bg-[var(--background)]/80 backdrop-blur-xl border-b border-[var(--border-color)]">

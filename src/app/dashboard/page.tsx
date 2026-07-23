@@ -47,7 +47,7 @@ import {
   Legend,
 } from 'recharts';
 import { format, parseISO, isAfter, startOfDay, addDays, isWithinInterval, startOfMonth, endOfMonth } from 'date-fns';
-import { generateForecast, calculateCurrentCash } from '@/lib/forecast';
+import { generateForecast, calculateCurrentCash, withDerivedBalances } from '@/lib/forecast';
 
 export default function DashboardPage() {
   const { isAuthenticated, isLoading: authLoading, user } = useAuth();
@@ -115,26 +115,30 @@ export default function DashboardPage() {
   const categoryTotals = getTotalByCategory();
   const monthlyTotals = getMonthlyTotals();
 
+  // Balances are derived from linked transactions (opening balance + past effects),
+  // so every card/total/forecast below reflects reality, not the stored opening figure.
+  const derivedAccounts = withDerivedBalances(profile?.paymentAccounts || [], transactions);
+
   // Calculate account summaries
-  const totalBankBalance = profile?.paymentAccounts
-    ?.filter((a) => a.type === 'bank_account' || a.type === 'debit_card' || a.type === 'cash')
-    .reduce((sum, a) => sum + a.balance, 0) || 0;
+  const totalBankBalance = derivedAccounts
+    .filter((a) => a.type === 'bank_account' || a.type === 'debit_card' || a.type === 'cash')
+    .reduce((sum, a) => sum + a.balance, 0);
 
-  const totalCreditUsed = profile?.paymentAccounts
-    ?.filter((a) => a.type === 'credit_card')
-    .reduce((sum, a) => sum + a.balance, 0) || 0;
+  const totalCreditUsed = derivedAccounts
+    .filter((a) => a.type === 'credit_card')
+    .reduce((sum, a) => sum + a.balance, 0);
 
-  const totalCreditLimit = profile?.paymentAccounts
-    ?.filter((a) => a.type === 'credit_card')
-    .reduce((sum, a) => sum + (a.creditLimit || 0), 0) || 0;
+  const totalCreditLimit = derivedAccounts
+    .filter((a) => a.type === 'credit_card')
+    .reduce((sum, a) => sum + (a.creditLimit || 0), 0);
 
-  const totalLoanBalance = profile?.paymentAccounts
-    ?.filter((a) => a.type === 'personal_loan')
-    .reduce((sum, a) => sum + a.balance, 0) || 0;
+  const totalLoanBalance = derivedAccounts
+    .filter((a) => a.type === 'personal_loan')
+    .reduce((sum, a) => sum + a.balance, 0);
 
-  const totalMonthlyLoanPayments = profile?.paymentAccounts
-    ?.filter((a) => a.type === 'personal_loan')
-    .reduce((sum, a) => sum + (a.monthlyPayment || 0), 0) || 0;
+  const totalMonthlyLoanPayments = derivedAccounts
+    .filter((a) => a.type === 'personal_loan')
+    .reduce((sum, a) => sum + (a.monthlyPayment || 0), 0);
 
   const monthlyIncome = profile?.incomeSources?.reduce((sum, inc) => {
     const monthly = inc.frequency === 'yearly' ? inc.amount / 12 :
@@ -151,8 +155,8 @@ export default function DashboardPage() {
 
   // Generate forecast for quick summary
   const forecast = profile ? generateForecast(
-    calculateCurrentCash(profile?.paymentAccounts || []),
-    profile?.paymentAccounts || [],
+    calculateCurrentCash(derivedAccounts),
+    derivedAccounts,
     profile?.incomeSources || [],
     transactions,
     profile?.settings?.safetyThreshold || 500,
@@ -162,12 +166,12 @@ export default function DashboardPage() {
   // Get upcoming bill due dates
   const getUpcomingBills = () => {
     if (!profile?.paymentAccounts) return [];
-    
+
     const currentDay = new Date().getDate();
     const currentMonth = new Date().getMonth();
     const currentYear = new Date().getFullYear();
-    
-    return profile.paymentAccounts
+
+    return derivedAccounts
       .filter((a) => a.type === 'credit_card' && a.dueDate && a.balance > 0)
       .map((account) => {
         let dueDate = new Date(currentYear, currentMonth, account.dueDate!);
@@ -378,7 +382,7 @@ export default function DashboardPage() {
               </button>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {profile.paymentAccounts.slice(0, 4).map((account) => (
+              {derivedAccounts.slice(0, 4).map((account) => (
                 <div
                   key={account.id}
                   className="p-4 rounded-xl bg-[var(--background-secondary)] border border-[var(--border-color)] border-l-4 hover:border-[var(--border-glow)] transition-all cursor-pointer"

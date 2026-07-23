@@ -11,6 +11,7 @@ import BudgetSettingsPanel from '@/components/BudgetSettingsPanel';
 import BudgetStatusPanel from '@/components/BudgetStatusPanel';
 import DebtPlannerPanel from '@/components/DebtPlannerPanel';
 import { PAYMENT_METHODS, ACCOUNT_TYPES, PaymentAccount, IncomeSource, AccountType, PaymentMethod, CategoryBudget } from '@/types';
+import { deriveAccountBalance, withDerivedBalances } from '@/lib/forecast';
 import {
   TrendingUp,
   CreditCard,
@@ -270,17 +271,22 @@ export default function AccountsPage() {
     return profile?.incomeSources?.find(i => i.id === deleteConfirmId);
   };
 
-  const totalCreditLimit = profile?.paymentAccounts
-    ?.filter((a) => a.type === 'credit_card')
-    .reduce((sum, a) => sum + (a.creditLimit || 0), 0) || 0;
+  // Balances derived from linked transactions for every DISPLAY below. The edit form
+  // still reads/writes account.balance as the OPENING balance (openEditAccount uses the
+  // original account, not a derived copy), so the write path is unchanged.
+  const derivedAccounts = withDerivedBalances(profile?.paymentAccounts || [], transactions);
 
-  const totalCreditUsed = profile?.paymentAccounts
-    ?.filter((a) => a.type === 'credit_card')
-    .reduce((sum, a) => sum + a.balance, 0) || 0;
+  const totalCreditLimit = derivedAccounts
+    .filter((a) => a.type === 'credit_card')
+    .reduce((sum, a) => sum + (a.creditLimit || 0), 0);
 
-  const totalBankBalance = profile?.paymentAccounts
-    ?.filter((a) => a.type === 'bank_account' || a.type === 'debit_card')
-    .reduce((sum, a) => sum + a.balance, 0) || 0;
+  const totalCreditUsed = derivedAccounts
+    .filter((a) => a.type === 'credit_card')
+    .reduce((sum, a) => sum + a.balance, 0);
+
+  const totalBankBalance = derivedAccounts
+    .filter((a) => a.type === 'bank_account' || a.type === 'debit_card')
+    .reduce((sum, a) => sum + a.balance, 0);
 
   const monthlyIncome = profile?.incomeSources?.reduce((sum, inc) => {
     const monthly = inc.frequency === 'yearly' ? inc.amount / 12 :
@@ -445,7 +451,7 @@ export default function AccountsPage() {
                       <div className="flex items-center gap-4">
                         <div className="text-right">
                           <p className={`text-lg font-semibold ${account.type === 'credit_card' ? 'text-[var(--accent-danger)]' : 'text-[var(--accent-success)]'}`}>
-                            {account.type === 'credit_card' ? '-' : ''}${account.balance.toLocaleString()}
+                            {account.type === 'credit_card' ? '-' : ''}${deriveAccountBalance(account, transactions).toLocaleString()}
                           </p>
                           {account.creditLimit && (
                             <p className="text-xs text-[var(--foreground-muted)]">
@@ -500,7 +506,7 @@ export default function AccountsPage() {
 
               {profile?.paymentAccounts && profile.paymentAccounts.length > 0 ? (
                 <div className="space-y-4">
-                  {profile.paymentAccounts.map((account) => (
+                  {derivedAccounts.map((account) => (
                     <AccountTransactions
                       key={account.id}
                       account={account}
@@ -726,7 +732,7 @@ export default function AccountsPage() {
               </div>
 
               <DebtPlannerPanel
-                accounts={profile?.paymentAccounts || []}
+                accounts={derivedAccounts}
                 currentCash={totalBankBalance}
               />
             </div>
