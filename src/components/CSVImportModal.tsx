@@ -1,12 +1,46 @@
 'use client';
 
 import React, { useState, useRef, useMemo } from 'react';
-import { X, Upload, FileText, AlertCircle, CheckCircle, Download, HelpCircle, CreditCard, Link2 } from 'lucide-react';
+import { X, Upload, FileText, AlertCircle, CheckCircle, Download, HelpCircle, CreditCard, Building2, Link2, Plus } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { format as formatDate } from 'date-fns';
 import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
-import { TransactionType, TransferDirection, ExpenseCategory, PaymentMethod, EXPENSE_CATEGORIES, PaymentAccount } from '@/types';
+import { TransactionType, TransferDirection, ExpenseCategory, PaymentMethod, AccountType, EXPENSE_CATEGORIES, PaymentAccount, getMerchantColor } from '@/types';
+
+// Sentinel account-map value meaning "create a new account for this CSV label".
+const CREATE_ACCOUNT = '__create__';
+
+/**
+ * Builds a PaymentAccount from a CSV "Account" label like
+ * "Customized Cash Rewards Visa Signature (...3572)". Type matters most: a bank
+ * account is cash and a card is debt, and the forecast and the "a card payment is
+ * not income" rule both hinge on it. Balance is 0 — the CSV has no balance column,
+ * so the user sets it once to unlock forecasts.
+ */
+export function inferAccountFromCsv(csvName: string): Omit<PaymentAccount, 'id'> {
+  const lower = csvName.toLowerCase();
+  const lastFourDigits = csvName.match(/(\d{4})\D*$/)?.[1];
+  const name = csvName.replace(/\s*\(\.*\d{4}\)\s*$/, '').trim() || csvName;
+  const type = inferAccountType(csvName);
+  const provider: PaymentMethod =
+    /visa/.test(lower) ? 'visa' :
+    /master/.test(lower) ? 'mastercard' :
+    /amex|american express|blue cash/.test(lower) ? 'amex' :
+    /discover/.test(lower) ? 'discover' :
+    /apple/.test(lower) ? 'apple' :
+    /chase/.test(lower) ? 'chase' :
+    type === 'credit_card' ? 'other' : 'bank-transfer';
+  return { name, type, provider, balance: 0, lastFourDigits, color: getMerchantColor(csvName), isActive: true };
+}
+
+export function inferAccountType(csvName: string): AccountType {
+  const lower = csvName.toLowerCase();
+  // Bank wins first: "Customized Cash Rewards Visa" must not beat "...Checking".
+  if (/checking|savings|banking|debit/.test(lower)) return 'bank_account';
+  if (/card|visa|mastercard|amex|american express|discover|credit|rewards|preferred|signature|blue cash/.test(lower)) return 'credit_card';
+  return 'bank_account';
+}
 
 interface CSVImportModalProps {
   isOpen: boolean;
@@ -112,7 +146,7 @@ const SUPPORTED_FORMATS = [
 
 export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps) {
   const { addBulkTransactions, transactions } = useTransactions();
-  const { profile } = useUserProfile();
+  const { profile, addPaymentAccounts } = useUserProfile();
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [file, setFile] = useState<File | null>(null);
@@ -123,8 +157,11 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
   const [showHelp, setShowHelp] = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   const [detectedAccountName, setDetectedAccountName] = useState<string>('');
-  // Maps each distinct CSV "Account" string to one of the user's accounts.
+  // Maps each distinct CSV "Account" string to an existing account id, the CREATE_ACCOUNT
+  // sentinel (auto-create one), or '' (import unlinked).
   const [accountMap, setAccountMap] = useState<Record<string, string>>({});
+  // Per-label type for accounts about to be created; seeded by inference, user-overridable.
+  const [createTypes, setCreateTypes] = useState<Record<string, AccountType>>({});
   const [skippedCount, setSkippedCount] = useState(0);
   const [importedCount, setImportedCount] = useState(0);
   const [savedToCloud, setSavedToCloud] = useState(true);
@@ -541,15 +578,19 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
 
       const labels = [...new Set(parsed.map(t => t.csvAccount).filter(Boolean))];
       const seeded: Record<string, string> = {};
+      const types: Record<string, AccountType> = {};
       for (const name of labels) {
         // The filename only stands in when the file describes ONE account. In a
         // multi-account Monarch export it would silently attribute an unrecognised
-        // label (say "Vanguard Brokerage") to whatever the filename hinted at, and
-        // the unmapped-rows warning would stay hidden because it looks mapped.
+        // label (say "Vanguard Brokerage") to whatever the filename hinted at.
         const match = matchAccountByName(name) || (labels.length === 1 ? fromFilename : null);
-        if (match) seeded[name] = match.id;
+        // Default to auto-creating the account rather than importing it unlinked —
+        // "just give the CSV" is the whole point.
+        seeded[name] = match ? match.id : CREATE_ACCOUNT;
+        types[name] = inferAccountType(name);
       }
       setAccountMap(seeded);
+      setCreateTypes(types);
 
       if (fromFilename) {
         setDetectedAccountName(fromFilename.name);
@@ -580,11 +621,29 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
     setError(null);
 
     try {
+      // 1. Auto-create the accounts the user left on "create". One batch call so all
+      //    survive (a per-account loop over addPaymentAccount would lose all but one).
+      const toCreate = csvAccounts.filter(n => accountMap[n] === CREATE_ACCOUNT);
+      const created: Record<string, PaymentAccount> = {};
+      if (toCreate.length > 0) {
+        const specs = toCreate.map(n => {
+          const spec = inferAccountFromCsv(n);
+          return { ...spec, type: createTypes[n] ?? spec.type };
+        });
+        const ids = await addPaymentAccounts(specs);
+        toCreate.forEach((n, i) => { created[n] = { ...specs[i], id: ids[i] }; });
+      }
+
+      // Resolve a CSV label to its account: freshly created, existing, or none.
+      const resolve = (csvName: string): PaymentAccount | undefined => {
+        if (created[csvName]) return created[csvName];
+        const id = csvName ? accountMap[csvName] : selectedAccountId;
+        if (!id || id === CREATE_ACCOUNT) return undefined;
+        return profile?.paymentAccounts?.find(a => a.id === id);
+      };
+
       const transactionsToAdd = fresh.map(t => {
-        // Per-row account: a Monarch export contains every account in one file, so a
-        // single global selection would mis-attribute all but one of them.
-        const accountId = t.csvAccount ? accountMap[t.csvAccount] : selectedAccountId;
-        const linkedAccount = profile?.paymentAccounts?.find(a => a.id === accountId);
+        const account = resolve(t.csvAccount);
         return {
           id: t.id,
           title: t.title,
@@ -593,13 +652,13 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
           transferDirection: t.transferDirection,
           category: t.category,
           sourceCategory: t.sourceCategory,
-          paymentMethod: linkedAccount?.provider || t.paymentMethod,
+          paymentMethod: account?.provider || t.paymentMethod,
           date: t.date,
           // Undefined rather than '' / false: the write merges, so only fields the CSV
           // genuinely carries should overwrite what is already stored.
           description: t.description || undefined,
           merchant: t.merchant,
-          accountId: accountId || undefined,
+          accountId: account?.id,
         };
       });
 
@@ -778,19 +837,14 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
               )}
             </div>
 
-            {/* Account Linking — one picker per account found in the file. A Monarch
-                export lists every account in a single CSV, so a single global choice
-                would attribute all of them to one card. */}
-            {profile?.paymentAccounts && profile.paymentAccounts.length > 0 && (
+            {/* Account Linking — one picker per account found in the file. Each label
+                defaults to "Create" so importing a file also creates its account
+                (typed from the name); the user can relink or unlink any of them. */}
+            {(csvAccounts.length > 0 || (profile?.paymentAccounts?.length ?? 0) > 0) && (
               <div className="p-4 rounded-lg bg-[var(--background-tertiary)] border border-[var(--border-color)] space-y-4">
                 <div className="flex items-center gap-2">
                   <Link2 className="w-4 h-4 text-[var(--accent-primary)]" />
-                  <span className="font-medium text-[var(--foreground)]">Link to Account</span>
-                  {(detectedAccountName || (csvAccounts.length > 0 && csvAccounts.every(n => accountMap[n]))) && (
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-500">
-                      Auto-detected
-                    </span>
-                  )}
+                  <span className="font-medium text-[var(--foreground)]">Accounts</span>
                 </div>
 
                 {(csvAccounts.length > 0 ? csvAccounts : ['']).map((csvName) => {
@@ -799,6 +853,9 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
                     csvName
                       ? setAccountMap((m) => ({ ...m, [csvName]: id }))
                       : setSelectedAccountId(id);
+                  const isCreating = csvName !== '' && current === CREATE_ACCOUNT;
+                  const preview = csvName ? inferAccountFromCsv(csvName) : null;
+                  const createType = createTypes[csvName] ?? preview?.type ?? 'bank_account';
                   return (
                     <div key={csvName || '__single__'}>
                       <p className="text-sm text-[var(--foreground-secondary)] mb-2">
@@ -810,24 +867,25 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
                         </span>
                       </p>
                       <div className="flex flex-wrap gap-2">
-                        <button
-                          onClick={() => choose('')}
-                          className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                            !current
-                              ? 'bg-[var(--accent-primary)] text-white'
-                              : 'bg-[var(--background-secondary)] text-[var(--foreground-secondary)] border border-[var(--border-color)]'
-                          }`}
-                        >
-                          No Link
-                        </button>
-                        {profile.paymentAccounts.map((account) => (
+                        {csvName !== '' && (
+                          <button
+                            onClick={() => choose(CREATE_ACCOUNT)}
+                            className={`px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-1.5 ${
+                              isCreating
+                                ? 'bg-[var(--accent-primary)] text-white'
+                                : 'bg-[var(--background-secondary)] text-[var(--foreground-secondary)] border border-[var(--border-color)]'
+                            }`}
+                          >
+                            <Plus className="w-4 h-4" />
+                            Create{preview?.lastFourDigits ? ` ••${preview.lastFourDigits}` : ''}
+                          </button>
+                        )}
+                        {(profile?.paymentAccounts ?? []).map((account) => (
                           <button
                             key={account.id}
                             onClick={() => choose(account.id)}
                             className={`px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
-                              current === account.id
-                                ? 'text-white'
-                                : 'text-[var(--foreground-secondary)] border'
+                              current === account.id ? 'text-white' : 'text-[var(--foreground-secondary)] border'
                             }`}
                             style={{
                               backgroundColor: current === account.id ? account.color : 'var(--background-secondary)',
@@ -839,18 +897,52 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
                             {account.lastFourDigits && <span className="opacity-70">••{account.lastFourDigits}</span>}
                           </button>
                         ))}
+                        <button
+                          onClick={() => choose('')}
+                          className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                            current === ''
+                              ? 'bg-[var(--accent-primary)] text-white'
+                              : 'bg-[var(--background-secondary)] text-[var(--foreground-secondary)] border border-[var(--border-color)]'
+                          }`}
+                        >
+                          No Link
+                        </button>
                       </div>
+
+                      {/* Type toggle for the account being created — the one thing the
+                          CSV can't tell us for sure, and the one that decides whether a
+                          payment counts as debt-reduction or income. */}
+                      {isCreating && (
+                        <div className="flex items-center gap-2 mt-2">
+                          <span className="text-xs text-[var(--foreground-muted)]">Create as</span>
+                          {([['bank_account', 'Bank', Building2], ['credit_card', 'Credit card', CreditCard]] as const).map(
+                            ([t, label, Icon]) => (
+                              <button
+                                key={t}
+                                onClick={() => setCreateTypes((m) => ({ ...m, [csvName]: t }))}
+                                className={`px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${
+                                  createType === t
+                                    ? 'bg-[var(--accent-primary)] text-white'
+                                    : 'bg-[var(--background-secondary)] text-[var(--foreground-secondary)] border border-[var(--border-color)]'
+                                }`}
+                              >
+                                <Icon className="w-3.5 h-3.5" />
+                                {label}
+                              </button>
+                            )
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
 
-                {/* An unlinked card export is the dangerous case: without a linked
-                    account nothing can tell a card payment from real income. */}
-                {csvAccounts.some(n => !accountMap[n]) && (
+                {/* No-Link is the risky choice: without an account, a card payment can't
+                    be told apart from real income. */}
+                {csvAccounts.some(n => accountMap[n] === '') && (
                   <p className="text-xs text-amber-500">
-                    {parsedData.filter(t => t.csvAccount && !accountMap[t.csvAccount]).length} transactions
-                    have no linked account. They will import unlinked, and any card payments
-                    among them cannot be recognised as transfers.
+                    {parsedData.filter(t => t.csvAccount && accountMap[t.csvAccount] === '').length} transactions
+                    are set to No Link and will import unlinked; card payments among them can't be recognised.
                   </p>
                 )}
               </div>

@@ -297,7 +297,7 @@ describe('CSV Import', () => {
 // ---------------------------------------------------------------------------
 // These run against the REAL exported functions, not a copy of them.
 // ---------------------------------------------------------------------------
-import { importKey, parseAmount, isTransferCategory, isOutflow } from '@/components/CSVImportModal';
+import { importKey, parseAmount, isTransferCategory, isOutflow, inferAccountFromCsv, inferAccountType } from '@/components/CSVImportModal';
 
 describe('Amount parsing (trust boundary)', () => {
   test('accepts plain and currency-formatted values', () => {
@@ -386,5 +386,48 @@ describe('Card issuer sign conventions', () => {
     expect(isOutflow('monarch', -58.12)).toBe(true);
     expect(isOutflow('monarch', 6049.55)).toBe(false);
     expect(isOutflow('generic', -20)).toBe(true);
+  });
+});
+
+describe('Account inference from CSV label (auto-create)', () => {
+  // The real 8 accounts from the user's Monarch export. Getting bank-vs-credit right
+  // is what makes "a card payment reduces debt, not income" hold.
+  test('classifies the real accounts correctly', () => {
+    const banks = [
+      'Adv SafeBalance Banking (...2126)',
+      'Advantage Savings (...2139)',
+      'CHASE SAVINGS (...2591)',
+      'TOTAL CHECKING (...7535)',
+    ];
+    const cards = [
+      'Customized Cash Rewards Visa Signature (...3572)',
+      'Blue Cash Preferred® (...1001)',
+      'Apple Card',
+      'Amazon Store Card (...3282)',
+    ];
+    banks.forEach(n => expect(inferAccountType(n)).toBe('bank_account'));
+    cards.forEach(n => expect(inferAccountType(n)).toBe('credit_card'));
+  });
+
+  test('extracts last-4, strips it from the name, defaults balance to 0', () => {
+    const a = inferAccountFromCsv('Customized Cash Rewards Visa Signature (...3572)');
+    expect(a.lastFourDigits).toBe('3572');
+    expect(a.name).toBe('Customized Cash Rewards Visa Signature');
+    expect(a.type).toBe('credit_card');
+    expect(a.provider).toBe('visa');
+    expect(a.balance).toBe(0);
+  });
+
+  test('an account with no digits (Apple Card) has no last-4 and keeps its name', () => {
+    const a = inferAccountFromCsv('Apple Card');
+    expect(a.lastFourDigits).toBeUndefined();
+    expect(a.name).toBe('Apple Card');
+    expect(a.provider).toBe('apple');
+  });
+
+  test('Blue Cash Preferred is an Amex credit card', () => {
+    const a = inferAccountFromCsv('Blue Cash Preferred® (...1001)');
+    expect(a.type).toBe('credit_card');
+    expect(a.provider).toBe('amex');
   });
 });

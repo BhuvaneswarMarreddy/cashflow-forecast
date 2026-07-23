@@ -12,6 +12,10 @@ interface UserProfileContextType {
   error: string | null;
   updateProfile: (updates: Partial<UserProfile>) => Promise<void>;
   addPaymentAccount: (account: Omit<PaymentAccount, 'id'>) => Promise<void>;
+  // Create several accounts in one state update and return their ids in order. Used by
+  // CSV import to auto-create the accounts a file references; a per-account loop over
+  // addPaymentAccount would read a stale `profile` each iteration and lose all but one.
+  addPaymentAccounts: (accounts: Omit<PaymentAccount, 'id'>[]) => Promise<string[]>;
   updatePaymentAccount: (id: string, updates: Partial<PaymentAccount>) => Promise<void>;
   deletePaymentAccount: (id: string) => Promise<void>;
   addIncomeSource: (income: Omit<IncomeSource, 'id'>) => Promise<void>;
@@ -257,6 +261,30 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const addPaymentAccounts = async (accounts: Omit<PaymentAccount, 'id'>[]): Promise<string[]> => {
+    if (!profile || !user?.id || accounts.length === 0) return [];
+
+    const created: PaymentAccount[] = [];
+    for (const account of accounts) {
+      let id = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      try {
+        id = await firestoreService.addAccount(user.id, account);
+      } catch (err) {
+        console.error('Failed to sync imported account to Firestore:', err);
+      }
+      created.push({ ...account, id });
+    }
+
+    // One state update with every new account appended — reads `profile` once.
+    const updatedProfile = {
+      ...profile,
+      paymentAccounts: [...profile.paymentAccounts, ...created],
+    };
+    setProfile(updatedProfile);
+    saveLocalProfile(user.id, updatedProfile);
+    return created.map(a => a.id);
+  };
+
   // Update payment account
   const updatePaymentAccount = async (id: string, updates: Partial<PaymentAccount>) => {
     if (!profile || !user?.id) return;
@@ -398,6 +426,7 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
         error,
         updateProfile,
         addPaymentAccount,
+        addPaymentAccounts,
         updatePaymentAccount,
         deletePaymentAccount,
         addIncomeSource,
