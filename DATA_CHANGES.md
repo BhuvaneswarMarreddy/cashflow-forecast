@@ -53,3 +53,11 @@ Every direct DB change, so nothing is a mystery later. All writes go via Firesto
   but balances are user-entered so nothing displayed changes.
 - **Reminder:** the browser keeps a Firestore offline cache — after any server-side change,
   clear site data (DevTools → Application → Clear site data) or use Incognito to see it.
+
+## 2026-07-23 — Mercedes-Benz closed auto loan
+- Car sold to Carvana ~6 months in (paid ~$5k to close, went underwater). Created
+  **Mercedes-Benz Auto Loan (closed · sold to Carvana)** (`personal_loan`, $0, visible).
+- Linked its 6 rows (2 on Amex, 4 on Chase checking) → the loan account as payments.
+  Total paid in the data: $5,357.39 ($2,000 down + $9.79 fee + 4 × $836.90). No
+  disbursement (auto loan financed the car directly), and Feb/Mar payments are missing
+  from the export.
