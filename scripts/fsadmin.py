@@ -35,7 +35,16 @@ def api(method, url, body=None):
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method, headers={
         "Authorization": f"Bearer {token()}", "Content-Type": "application/json"})
-    return json.load(urllib.request.urlopen(req, timeout=60))
+    return json.load(urllib.request.urlopen(req, timeout=120))
+
+
+def commit(writes):
+    # Batch delete/update via :commit. The doc name goes in the BODY, not the URL, so
+    # ids containing %2F / %7C (encodeURIComponent of '/' and '|' in the source) are not
+    # re-decoded into path separators — which silently made URL-path DELETE/PATCH no-op.
+    # Also faster: up to 500 writes per call.
+    for i in range(0, len(writes), 450):
+        api("POST", BASE + ":commit", {"writes": writes[i:i + 450]})
 
 
 def to_py(v):
@@ -137,15 +146,16 @@ def cmd_reclassify(args):
     if not args.apply:
         print("\nDRY RUN — re-run with --apply to write (a backup is taken first).")
         return
-    # backup then patch
+    # backup then patch via :commit (name in body — see commit() for the id-encoding bug)
     os.makedirs("scripts/backups", exist_ok=True)
     bpath = f"scripts/backups/{uid}_reclassify_{args.stamp}.json"
     json.dump(hits, open(bpath, "w"), indent=2)
-    mask = "&".join(f"updateMask.fieldPaths={k}" for k in updates)
-    for d in hits:
-        name = d["name"]
-        body = {"fields": {k: from_py(v) for k, v in updates.items()}}
-        api("PATCH", f"https://firestore.googleapis.com/v1/{name}?{mask}", body)
+    fields_body = {k: from_py(v) for k, v in updates.items()}
+    commit([
+        {"update": {"name": d["name"], "fields": fields_body},
+         "updateMask": {"fieldPaths": list(updates.keys())}}
+        for d in hits
+    ])
     print(f"applied to {len(hits)} docs. backup: {bpath}")
 
 
@@ -164,9 +174,7 @@ def cmd_purge(args):
     os.makedirs("scripts/backups", exist_ok=True)
     bpath = f"scripts/backups/{uid}_purge_{args.stamp}.json"
     json.dump(docs, open(bpath, "w"), indent=2)
-    for s, ds in docs.items():
-        for d in ds:
-            api("DELETE", f"https://firestore.googleapis.com/v1/{d['name']}")
+    commit([{"delete": d["name"]} for ds in docs.values() for d in ds])
     print(f"deleted {total} docs across {DATA_SUBS}. backup: {bpath}")
 
 
