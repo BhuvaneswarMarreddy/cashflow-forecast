@@ -122,12 +122,15 @@ force + independent adversarial recheck):
 
 | Merchant | Cadence | Median | Occurrences | Last seen | Active |
 |---|---|---|---|---|---|
-| UPSTART | monthly | $900.00 | 21 | 2026-01-23 | no |
+| UPSTART | monthly | $900.00 | 20¹ | 2026-01-23 | no |
 | MERCEDES-BENZ | monthly | $836.90 | 5 | 2026-04-28 | no |
 | VERIZON | monthly | $499.94 | 19 | 2026-07-10 | yes |
 | COMCAST | monthly | $55.28 | 26 | 2026-07-14 | yes |
 | OPENAI | monthly | $20.00 | 12 | 2026-07-14 | yes |
 | ADOBE | monthly | ~$7.34 | 15 | 2026-07-09 | yes |
+
+¹ Occurrences count unique charge DAYS (rule 1): Upstart made 21 payments but two of
+them ($3,200 + $500) landed on 2025-12-01, so 20 days.
 
 QUIKTRIP and FEDERAL WITHHOLDING must NOT appear (rules 2 and 3). Known borderline
 exclusions (correct to exclude): CURSOR (amount varies), USHEALTH GROUP / INTEREST
@@ -165,7 +168,9 @@ per-period by sent+received volume, everyone else folds into "Others (people)".
 
 Name handling rules (all discovered in the real data): extract the payee from
 `description` (Original Statement) for the patterns `Zelle payment to/from NAME Conf#…`,
-`Zelle payment to NAME JPM…`, and BofA's `Zelle Transfer Conf# X; NAME`; canonicalize
+`Zelle payment to NAME JPM…`, `Zelle payment from NAME BACxxxxx…` (Chase glues a BAC
+confirmation token after the name — 13 self rows worth $23,300 hide in this shape), and
+BofA's `Zelle Transfer Conf# X; NAME`; canonicalize
 3+-word names to FIRST + LAST ("Venu Gopal Guntupalli" = "Venu Guntupalli"); strip memo
 suffixes (`for "RENT"` etc.). Self = name contains BHUVANESWAR or MARREDDY, or is
 literally "Me" (Chase writes "Zelle payment to Me" for own-account moves). Rows whose
