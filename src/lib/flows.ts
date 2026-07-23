@@ -116,7 +116,20 @@ export function buildFlowGraph(
   }
 
   // --- transfers: pair, gross matrix, hub-or-direct nets ---
-  const { pairs, unmatchedOut, unmatchedIn } = matchTransfers(rows, accounts);
+  // A leg naming an external person (Zelle/Remitly) is by definition NOT an internal
+  // move — keep it away from the pairer, which otherwise false-pairs it with any
+  // unrelated same-amount leg inside the 4-day window (cost the audit exactly $2,000).
+  const externalPersonLeg = (t: Transaction) => {
+    const p = personFrom(t.description ?? t.title);
+    return p !== null && !isSelfPerson(p);
+  };
+  const { pairs, unmatchedOut, unmatchedIn } = matchTransfers(
+    rows.filter((t) => !(classifyTransaction(t, accounts) === 'transfer' && externalPersonLeg(t))),
+    accounts
+  );
+  const personTransferLegs = rows.filter(
+    (t) => classifyTransaction(t, accounts) === 'transfer' && externalPersonLeg(t)
+  );
   const gross = new Map<string, { moves: number; cents: number }>();
   const strayLegs: Transaction[] = [];
   for (const p of pairs) {
@@ -199,9 +212,11 @@ export function buildFlowGraph(
       add(catCents, displayCategory(t), an, cents);
     }
   }
-  // stray pair legs (dangling accountId) rejoin the unmatched pools by direction
-  const strayOut = strayLegs.filter((t) => (t.transferDirection ?? (isPositive(t, accounts) ? 'in' : 'out')) === 'out');
-  const strayIn = strayLegs.filter((t) => !strayOut.includes(t));
+  // stray pair legs (dangling accountId) and the person legs excluded from pairing
+  // rejoin the unmatched pools by direction
+  const looseLegs = [...strayLegs, ...personTransferLegs];
+  const strayOut = looseLegs.filter((t) => (t.transferDirection ?? (isPositive(t, accounts) ? 'in' : 'out')) === 'out');
+  const strayIn = looseLegs.filter((t) => !strayOut.includes(t));
   for (const t of [...unmatchedOut, ...strayOut]) {
     const cents = toCents(t.amount);
     const an = accNodeOf(t, 'out');
@@ -372,19 +387,29 @@ export function projectNetWorth(
   const window = new Set([-6, -5, -4, -3, -2, -1].map(monthKey));
 
   let net = 0;
-  const { unmatchedOut, unmatchedIn } = matchTransfers(transactions, accounts);
   const personLeg = (t: Transaction) => {
     const p = personFrom(t.description ?? t.title);
     return p !== null && !isSelfPerson(p);
   };
+  // person legs never enter the pairer (same false-pair guard as buildFlowGraph)
+  const isPersonTransfer = (t: Transaction) =>
+    classifyTransaction(t, accounts) === 'transfer' && personLeg(t);
+  const { unmatchedOut, unmatchedIn } = matchTransfers(
+    transactions.filter((t) => !isPersonTransfer(t)), accounts
+  );
+  const personLegs = transactions.filter(isPersonTransfer);
   for (const t of transactions) {
     if (!window.has(day(t.date).slice(0, 7))) continue;
     const cls = classifyTransaction(t, accounts);
     if (cls === 'income') net += toCents(t.amount);
     else if (cls === 'expense') net -= toCents(t.amount);
   }
-  for (const t of unmatchedOut) if (window.has(day(t.date).slice(0, 7)) && personLeg(t)) net -= toCents(t.amount);
-  for (const t of unmatchedIn) if (window.has(day(t.date).slice(0, 7)) && personLeg(t)) net += toCents(t.amount);
+  const outLegs = [...unmatchedOut.filter(personLeg),
+    ...personLegs.filter((t) => (t.transferDirection ?? (isPositive(t, accounts) ? 'in' : 'out')) === 'out')];
+  const inLegs = [...unmatchedIn.filter(personLeg),
+    ...personLegs.filter((t) => (t.transferDirection ?? (isPositive(t, accounts) ? 'in' : 'out')) === 'in')];
+  for (const t of outLegs) if (window.has(day(t.date).slice(0, 7))) net -= toCents(t.amount);
+  for (const t of inLegs) if (window.has(day(t.date).slice(0, 7))) net += toCents(t.amount);
 
   const monthlyRateCents = Math.round(net / 6);
   const startCents = accounts.reduce((s, a) => s + signedRealNowCents(a), 0);
