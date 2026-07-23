@@ -22,6 +22,7 @@ import {
   LineChart,
   History,
   BarChart3,
+  GitBranch,
 } from 'lucide-react';
 
 export default function Navbar() {
@@ -39,6 +40,7 @@ export default function Navbar() {
   const navItems = [
     { href: '/forecast', label: 'Forecast', icon: LineChart },
     { href: '/cashflow', label: 'Cashflow', icon: BarChart3 },
+    { href: '/flow', label: 'Flow', icon: GitBranch },
     { href: '/dashboard', label: 'Overview', icon: LayoutDashboard },
     { href: '/history', label: 'History', icon: History },
     { href: '/accounts', label: 'Accounts', icon: CreditCard },

@@ -102,6 +102,27 @@ maybe('audit replay over the real CSVs', () => {
     }
   });
 
+  it('is a DAG — d3-sankey rejects cycles at render time', () => {
+    const indeg = new Map<string, number>();
+    const out = new Map<string, string[]>();
+    for (const n of g.nodes) { indeg.set(n.id, 0); out.set(n.id, []); }
+    for (const l of g.links) {
+      indeg.set(l.target, (indeg.get(l.target) ?? 0) + 1);
+      out.get(l.source)!.push(l.target);
+    }
+    const queue = g.nodes.filter((n) => indeg.get(n.id) === 0).map((n) => n.id);
+    let seen = 0;
+    while (queue.length) {
+      const id = queue.shift()!;
+      seen += 1;
+      for (const t of out.get(id) ?? []) {
+        indeg.set(t, indeg.get(t)! - 1);
+        if (indeg.get(t) === 0) queue.push(t);
+      }
+    }
+    expect(seen).toBe(g.nodes.length); // anything left has a cycle
+  });
+
   it('finds the audited people totals (±$1)', () => {
     const linkSum = (id: string, side: 'source' | 'target') =>
       g.links.filter((l) => l[side] === id).reduce((s, l) => s + l.cents, 0);
