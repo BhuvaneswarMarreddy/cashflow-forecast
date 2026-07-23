@@ -225,6 +225,19 @@ export default function HistoryPage() {
     return { income, expenses, net: income - expenses };
   }, [filteredTransactions, profile?.paymentAccounts]);
 
+  // Loan summary — only when History is filtered to a single loan account. Shows what
+  // you took (money in) vs what you paid (money out) and the cost above principal.
+  const loanSummary = useMemo(() => {
+    const acct = profile?.paymentAccounts?.find(a => a.id === accountFilter);
+    if (!acct || acct.type !== 'personal_loan') return null;
+    let borrowed = 0, paid = 0;
+    filteredTransactions.forEach(t => {
+      const inbound = isPositive(t, profile?.paymentAccounts);
+      if (inbound) borrowed += t.amount; else paid += t.amount;
+    });
+    return { name: acct.name, borrowed, paid, interest: Math.max(0, paid - borrowed), balance: acct.balance };
+  }, [accountFilter, filteredTransactions, profile?.paymentAccounts]);
+
   // Calculate monthly averages for runway
   const monthlyStats = useMemo(() => {
     const pastTxns = transactions.filter(t => parseISO(t.date) < new Date());
@@ -531,6 +544,36 @@ export default function HistoryPage() {
                 </span>
               </div>
             </div>
+
+            {/* Loan summary — shows when filtered to a loan account */}
+            {loanSummary && (
+              <div className="mb-6 p-5 rounded-xl bg-[var(--background-secondary)] border border-[var(--border-color)]">
+                <div className="flex items-center gap-2 mb-4">
+                  <DollarSign className="w-5 h-5 text-[var(--accent-primary)]" />
+                  <h3 className="font-semibold text-[var(--foreground)]">{loanSummary.name} — summary</h3>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  <div>
+                    <p className="text-xs text-[var(--foreground-muted)]">Borrowed</p>
+                    <p className="text-lg font-bold text-[var(--foreground)]">${loanSummary.borrowed.toLocaleString('en-US',{maximumFractionDigits:2})}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-[var(--foreground-muted)]">Paid back</p>
+                    <p className="text-lg font-bold text-[var(--foreground)]">${loanSummary.paid.toLocaleString('en-US',{maximumFractionDigits:2})}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-[var(--foreground-muted)]">Interest / cost</p>
+                    <p className="text-lg font-bold text-amber-500">${loanSummary.interest.toLocaleString('en-US',{maximumFractionDigits:2})}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-[var(--foreground-muted)]">Balance owed</p>
+                    <p className={`text-lg font-bold ${loanSummary.balance > 0 ? 'text-[var(--accent-danger)]' : 'text-emerald-500'}`}>
+                      {loanSummary.balance > 0 ? `$${loanSummary.balance.toLocaleString()}` : 'Paid off'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Transactions List */}
             {filteredTransactions.length === 0 ? (
