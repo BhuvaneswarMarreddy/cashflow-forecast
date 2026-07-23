@@ -417,3 +417,28 @@ describe('Transaction Classification', () => {
   });
 });
 
+
+describe('Real statement shapes on a credit card (phantom-income fix)', () => {
+  const accts: PaymentAccount[] = [
+    { id: 'card-1', name: 'Visa', type: 'credit_card', provider: 'visa', balance: 0, color: '#000', isActive: true },
+    { id: 'bank-1', name: 'Checking', type: 'bank_account', provider: 'chase', balance: 0, color: '#000', isActive: true },
+  ];
+  const cardTxn = (title: string): Transaction => ({
+    id: 't', title, amount: 500, type: 'income', category: 'other',
+    paymentMethod: 'bank-transfer', accountId: 'card-1', date: '2026-06-01',
+  });
+
+  test.each(['CHASE CREDIT CRD EPAY', 'AMZ_STORECRD_PMT DES:ID', 'ONLINE PYMT THANK YOU'])(
+    '"%s" on a card is a transfer, not income', (title) => {
+      expect(classifyTransaction(cardTxn(title), accts)).toBe('transfer');
+    });
+
+  test('a refund on a card STAYS income (it cancels an expense)', () => {
+    expect(classifyTransaction(cardTxn('CREDIT VOUCHER TARGET RETURN'), accts)).toBe('income');
+  });
+
+  test('payroll on a BANK account is untouched by the wider regex', () => {
+    const t: Transaction = { ...cardTxn('Payroll Deposit'), accountId: 'bank-1' };
+    expect(classifyTransaction(t, accts)).toBe('income');
+  });
+});

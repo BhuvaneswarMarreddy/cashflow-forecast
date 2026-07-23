@@ -12,12 +12,14 @@ type Classifiable = Pick<Transaction, 'type' | 'title'> &
   Partial<Pick<Transaction, 'accountId' | 'transferDirection'>>;
 
 const TRANSFER = /transfer from|transfer to|online transfer/;
-const CARD_PAYMENT = /payment|autopay|auto pay/;
+// pymt/epay cover real statement shapes ("CHASE CREDIT CRD EPAY", "AMZ_STORECRD_PMT"):
+// bank exports rarely spell out "payment", and each missed form read as fake income.
+const CARD_PAYMENT = /payment|autopay|auto pay|pymt|pmt|epay/;
 const INCOME = /deposit|direct dep|payroll|salary/;
 
 // Deliberately wider than CARD_PAYMENT: a statement credit should render as a
 // positive on a card, but it is not itself a transfer between accounts.
-const SIGN_PAYMENT = /payment|autopay|auto pay|statement credit/;
+const SIGN_PAYMENT = /payment|autopay|auto pay|pymt|pmt|epay|statement credit/;
 const TRANSFER_IN = /transfer from/; // subsumes "online transfer from"
 const TRANSFER_OUT = /transfer to/; // subsumes "online transfer to"
 const DEPOSIT = /deposit|direct dep/;

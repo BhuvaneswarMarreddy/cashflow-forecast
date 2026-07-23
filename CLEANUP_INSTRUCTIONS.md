@@ -27,7 +27,18 @@ Fields on a transaction: `type` (income|expense|transfer), `transferDirection` (
 
 Status legend: ✅ confirmed & applied · 📝 draft (needs the owner's OK / real data to pin the exact strings)
 
-### R1 — Credit-card payments miscategorised as income → transfer  📝
+### R1 — Credit-card payments miscategorised as income → transfer  ✅ APPLIED 2026-07-23
+Applied to existing data (31 rows flipped; refunds kept). Rule, re-run after every import:
+income-typed rows ON a credit-card account whose title/merchant/sourceCategory matches
+`payment|pymt|pmt|epay|autopay|thank you|ach|bill pay` → `type=transfer, transferDirection=in`.
+Rows matching `refund|return|reversal|voucher|cashback|reward|redemption|adjustment|rebate` stay income.
+Ambiguous tail → ONE gpt-4o-mini batch call (see scripts note below), with the guard: a
+merchant-named credit under $200 is a refund regardless of the AI verdict.
+Runner: the fix_cards.py pattern (fetch → bucket → AI tail → backup → :commit).
+Code side: classify.ts CARD_PAYMENT widened with `pymt|pmt|epay` so payment-titled rows
+auto-classify even before cleanup.
+
+### R1-old (draft, superseded)  📝
 Monarch's own "Credit Card Payment" rows already import as transfers. This rule catches
 the ones that landed in **Other Income** instead.
 > match: `sourceCategory == "Other Income"` AND `title contains` one of {payment, autopay, epay, card pmt}
