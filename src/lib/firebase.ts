@@ -35,37 +35,33 @@ import {
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
-  apiKey: "AIzaSyCLg0p0sCc7PoDVAW4n_4UbqMVIdz-ocFY",
-  authDomain: "cashflow-forecast-prod.firebaseapp.com",
-  projectId: "cashflow-forecast-prod",
-  storageBucket: "cashflow-forecast-prod.firebasestorage.app",
-  messagingSenderId: "782242267594",
-  appId: "1:782242267594:web:84bcfe35b2297205018f33",
-  measurementId: "G-51LMB3SQ6M"
+  apiKey: "AIzaSyAUv5SbN1OF4ugO1mICBtEzBzPRlb4F00k",
+  authDomain: "marreddy-cashflow.firebaseapp.com",
+  projectId: "marreddy-cashflow",
+  storageBucket: "marreddy-cashflow.firebasestorage.app",
+  messagingSenderId: "958007946272",
+  appId: "1:958007946272:web:69ad68f15965e63af3e045"
 };
 
 // Initialize Firebase (prevent re-initialization in development)
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 const auth = getAuth(app);
 
-// Database name - using named database "cashflow-forecast"
-const DATABASE_NAME = 'cashflow-forecast';
-
-// Initialize Firestore with offline persistence
-// Connecting to named database "cashflow-forecast"
+// Initialize Firestore with offline persistence on the (default) database — the same
+// database firestore.rules is deployed to, so rules and reads/writes stay in sync.
 let db: ReturnType<typeof initializeFirestore>;
 try {
   db = initializeFirestore(app, {
     localCache: persistentLocalCache({
       tabManager: persistentMultipleTabManager()
     })
-  }, DATABASE_NAME);
-  console.log('✅ [Firebase] Connected to Firestore database:', DATABASE_NAME);
+  });
+  console.log('✅ [Firebase] Connected to Firestore (default database)');
 } catch (error) {
   // Firestore might already be initialized
   const { getFirestore } = require("firebase/firestore");
-  db = getFirestore(app, DATABASE_NAME);
-  console.log('✅ [Firebase] Using existing Firestore connection:', DATABASE_NAME);
+  db = getFirestore(app);
+  console.log('✅ [Firebase] Using existing Firestore connection');
 }
 
 // Google Auth Provider
