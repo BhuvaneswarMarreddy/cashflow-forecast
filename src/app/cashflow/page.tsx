@@ -9,6 +9,7 @@ import Navbar from '@/components/Navbar';
 import { classifyTransaction, isPositive, isReward } from '@/lib/classify';
 import { matchTransfers } from '@/lib/transfers';
 import { displayCategory } from '@/types';
+import { CAT_COLORS } from '@/lib/palette';
 import { format, parseISO, subMonths, startOfMonth } from 'date-fns';
 import { TrendingUp, ArrowDownRight, ArrowUpRight, Wallet } from 'lucide-react';
 import {
@@ -16,7 +17,6 @@ import {
 } from 'recharts';
 
 // Validated categorical palette (CVD-safe in light mode with the direct labels present).
-const CAT_COLORS = ['#7c3aed', '#06b6d4', '#f59e0b', '#ec4899', '#8b5cf6', '#14b8a6', '#f97316', '#6366f1'];
 const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
 
 type Range = '12m' | 'ytd' | 'all';
