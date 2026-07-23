@@ -69,3 +69,9 @@ Every direct DB change, so nothing is a mystery later. All writes go via Firesto
 - ⚠️ Amount + date are placeholders from "close to $5,000" — update when the owner gives
   the exact figures. Mercedes total then reads: 4×$836.90 + $2,000 down + $9.79 fee +
   $5,000 payoff ≈ $10,357 sunk into the car.
+
+## 2026-07-23 — Backfilled recipient text (description)
+- Added `description` = Original Statement to all 2,913 transactions (matched by imp_ id;
+  preserves loan accounts, balances, Carvana). Lets History show/search the real payee
+  (e.g. "Zelle payment to SRIDEVI GOGINENI") and lets the cashflow dashboard tell a
+  self-transfer ("to Bhuvaneswar / to me") from money actually sent to a person.
