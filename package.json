@@ -9,7 +9,8 @@
     "lint": "eslint",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "deploy": "sh scripts/predeploy.sh && firebase deploy --only hosting"
   },
   "dependencies": {
     "date-fns": "^4.1.0",

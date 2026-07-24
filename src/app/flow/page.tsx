@@ -200,10 +200,14 @@ export default function FlowPage() {
     return { neighborsOf, outAdj, inAdj, kindLabels };
   }, [graph]);
 
+  // A pin from another period may not exist in this graph — treat it as no pin
+  // (derived, not cleared via effect, so there is no extra render).
+  const effectivePin = pinLabel && graph.nodes.some((n) => n.label === pinLabel) ? pinLabel : null;
+
   // Pinned node -> follow the money end-to-end: everything reachable downstream
   // (where it went) and upstream (where it came from).
   const reach = useMemo(() => {
-    if (!pinLabel) return null;
+    if (!effectivePin) return null;
     const bfs = (start: string, adj: Map<string, Set<string>>) => {
       const seen = new Set<string>();
       const q = [start];
@@ -213,17 +217,12 @@ export default function FlowPage() {
       }
       return seen;
     };
-    return { down: bfs(pinLabel, outAdj), up: bfs(pinLabel, inAdj) };
-  }, [pinLabel, outAdj, inAdj]);
-
-  // If the period changes and the pinned node no longer exists, unpin.
-  useEffect(() => {
-    if (pinLabel && !graph.nodes.some((n) => n.label === pinLabel)) setPinLabel(null);
-  }, [graph, pinLabel]);
+    return { down: bfs(effectivePin, outAdj), up: bfs(effectivePin, inAdj) };
+  }, [effectivePin, outAdj, inAdj]);
 
   const isNodeBright = useCallback((label: string, kind: FlowColorKey) => {
     if (hoverLabel) return label === hoverLabel || (neighborsOf.get(hoverLabel)?.has(label) ?? false);
-    if (pinLabel && reach) return label === pinLabel || reach.down.has(label) || reach.up.has(label);
+    if (effectivePin && reach) return label === effectivePin || reach.down.has(label) || reach.up.has(label);
     if (focusKind) {
       if (kind === focusKind) return true;
       const focused = kindLabels.get(focusKind);
@@ -232,23 +231,23 @@ export default function FlowPage() {
       return false;
     }
     return true;
-  }, [hoverLabel, pinLabel, reach, focusKind, neighborsOf, kindLabels]);
+  }, [hoverLabel, effectivePin, reach, focusKind, neighborsOf, kindLabels]);
 
   const isLinkBright = useCallback((s?: NodePayload, t?: NodePayload) => {
     const sl = s?.label ?? '', tl = t?.label ?? '';
     if (hoverLabel) return sl === hoverLabel || tl === hoverLabel;
-    if (pinLabel && reach) {
+    if (effectivePin && reach) {
       // strictly on-path edges: downstream of the pin, or upstream into it —
       // never a shortcut between two reached nodes that bypasses the pin
-      const downEdge = (sl === pinLabel || reach.down.has(sl)) && reach.down.has(tl);
-      const upEdge = (tl === pinLabel || reach.up.has(tl)) && reach.up.has(sl);
+      const downEdge = (sl === effectivePin || reach.down.has(sl)) && reach.down.has(tl);
+      const upEdge = (tl === effectivePin || reach.up.has(tl)) && reach.up.has(sl);
       return downEdge || upEdge;
     }
     if (focusKind) return s?.kind === focusKind || t?.kind === focusKind;
     return true;
-  }, [hoverLabel, pinLabel, reach, focusKind]);
+  }, [hoverLabel, effectivePin, reach, focusKind]);
 
-  const anyFocus = hoverLabel !== null || pinLabel !== null || focusKind !== null;
+  const anyFocus = hoverLabel !== null || effectivePin !== null || focusKind !== null;
 
   // Colored block + always-visible label; hover traces, click pins.
   const renderNode = useCallback((props: { x: number; y: number; width: number; height: number; payload: NodePayload }) => {
@@ -304,8 +303,6 @@ export default function FlowPage() {
   const activeRecurringCents = recurring.filter((r) => r.active).reduce((s, r) => s + r.monthlyCents, 0);
   const gapTotal = graph.reconciliation.reduce((s, r) => s + r.gapCents, 0);
   const last = projection.points[projection.points.length - 1];
-
-  if (authLoading || !isAuthenticated) return null;
 
   const rangeButtons = (
     <div className="flex items-center gap-2 flex-wrap">
@@ -413,13 +410,13 @@ export default function FlowPage() {
           {c.label}
         </button>
       ))}
-      {pinLabel && (
+      {effectivePin && (
         <button
           onClick={() => setPinLabel(null)}
           className="px-2.5 py-1 rounded-full text-xs bg-[var(--background-tertiary)] text-[var(--foreground)]"
           title="Click to clear"
         >
-          📌 {pinLabel} ✕
+          📌 {effectivePin} ✕
         </button>
       )}
     </div>
@@ -482,6 +479,10 @@ export default function FlowPage() {
       </ResponsiveContainer>
     );
   };
+
+  // AFTER all hooks — an early return above any hook crashes React with
+  // "rendered more hooks than during the previous render" (shipped once; never again).
+  if (authLoading || !isAuthenticated) return null;
 
   return (
     <div className="min-h-screen relative">
