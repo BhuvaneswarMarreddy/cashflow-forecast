@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   ResponsiveContainer, Sankey, Tooltip, LineChart, Line, XAxis, YAxis, CartesianGrid,
+  Treemap, BarChart, Bar, Cell,
 } from 'recharts';
 import { Maximize2, Minimize2 } from 'lucide-react';
 import Navbar from '@/components/Navbar';
@@ -55,6 +56,30 @@ function periodFor(range: Range, todayISO: string, month: string): { start?: str
 }
 
 type NodePayload = { label?: string; kind?: FlowColorKey; value?: number };
+type ChartKind = 'sankey' | 'treemap' | 'waterfall';
+const CHART_KINDS: Array<{ key: ChartKind; label: string }> = [
+  { key: 'sankey', label: 'Flow' },
+  { key: 'treemap', label: 'Where it went' },
+  { key: 'waterfall', label: 'Step by step' },
+];
+
+function TreemapCell(props: { x?: number; y?: number; width?: number; height?: number; name?: string; value?: number; fill?: string }) {
+  const { x = 0, y = 0, width = 0, height = 0, name, value, fill } = props;
+  if (width < 4 || height < 4) return <g />;
+  return (
+    <g>
+      <rect x={x} y={y} width={width} height={height} fill={fill ?? '#64748b'} rx={3} opacity={0.85} stroke="rgba(0,0,0,0.25)" />
+      {width > 82 && height > 30 && (
+        <text x={x + 7} y={y + 18} style={{ fontSize: 11, fontWeight: 600 }} fill="#fff">{name}</text>
+      )}
+      {width > 82 && height > 48 && value !== undefined && (
+        <text x={x + 7} y={y + 34} style={{ fontSize: 11 }} fill="rgba(255,255,255,0.85)">
+          {money(Math.round(value * 100))}
+        </text>
+      )}
+    </g>
+  );
+}
 
 function SankeyTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload?: Record<string, unknown> }> }) {
   if (!active || !payload?.length) return null;
@@ -88,6 +113,7 @@ export default function FlowPage() {
   const router = useRouter();
   const [range, setRange] = useState<Range>('all');
   const [month, setMonth] = useState<string>(() => shiftMonth(new Date().toISOString().slice(0, 7), -1));
+  const [chart, setChart] = useState<ChartKind>('sankey');
   const [maximized, setMaximized] = useState(false);
   const [hoverLabel, setHoverLabel] = useState<string | null>(null);
   const [pinLabel, setPinLabel] = useState<string | null>(null);
@@ -320,15 +346,59 @@ export default function FlowPage() {
 
   // Plain-language headline for the selected period — computed from the same
   // links the chart draws, so the story and the diagram can never disagree.
+  // A refund is NOT income: it nets against spending (owner's accounting rule).
   const story = (() => {
     const sum = (pred: (l: { source: string; target: string; cents: number }) => boolean) =>
       graph.links.filter(pred).reduce((s, l) => s + l.cents, 0);
+    const refunds = sum((l) => l.source === 'refunds');
     const moneyIn = sum((l) =>
-      l.source.startsWith('inc:') || l.source === 'refunds' || l.source === 'rewards' || l.source.startsWith('person-in:'));
-    const spending = sum((l) => l.target.startsWith('cat:'));
+      l.source.startsWith('inc:') || l.source === 'rewards' || l.source.startsWith('person-in:'));
+    const spending = sum((l) => l.target.startsWith('cat:')) - refunds;
     const toPeople = sum((l) => l.target.startsWith('person-out:'));
-    return { moneyIn, spending, toPeople };
+    return { moneyIn, spending, toPeople, refunds };
   })();
+
+  // Sink buckets (nodes money ends at) — feed the treemap and the waterfall.
+  const sinkRows = useMemo(() => {
+    const hasOut = new Set(graph.links.map((l) => l.source));
+    const meta = new Map(graph.nodes.map((n) => [n.id, n]));
+    const by = new Map<string, { cents: number; kind: FlowColorKey }>();
+    for (const l of graph.links) {
+      if (hasOut.has(l.target)) continue; // not a terminal node
+      const n = meta.get(l.target)!;
+      const e = by.get(n.label) ?? { cents: 0, kind: n.kind };
+      e.cents += l.cents;
+      by.set(n.label, e);
+    }
+    return [...by.entries()].map(([label, e]) => ({ label, ...e })).sort((a, b) => b.cents - a.cents);
+  }, [graph]);
+
+  const totalSourcesCents = useMemo(() => {
+    const hasIn = new Set(graph.links.map((l) => l.target));
+    return graph.links.filter((l) => !hasIn.has(l.source)).reduce((s, l) => s + l.cents, 0);
+  }, [graph]);
+
+  const treemapData = useMemo(() => {
+    const top = sinkRows.slice(0, 14);
+    const rest = sinkRows.slice(14).reduce((s, r) => s + r.cents, 0);
+    const rows = [...top, ...(rest > 0 ? [{ label: 'Everything else', cents: rest, kind: 'stub' as FlowColorKey }] : [])];
+    return rows.map((r) => ({ name: r.label, size: r.cents / 100, fill: FLOW_COLORS[r.kind] }));
+  }, [sinkRows]);
+
+  // Waterfall: money available minus each destination — lands on exactly $0,
+  // which IS the "no dollar missed" proof (conservation is unit-tested).
+  const waterfall = useMemo(() => {
+    const top = sinkRows.slice(0, 9);
+    const rest = sinkRows.slice(9).reduce((s, r) => s + r.cents, 0);
+    const buckets = [...top, ...(rest > 0 ? [{ label: 'Everything else', cents: rest, kind: 'stub' as FlowColorKey }] : [])];
+    const rows = [{ name: 'Money available', base: 0, value: totalSourcesCents / 100, fill: FLOW_COLORS.source }];
+    let run = totalSourcesCents;
+    for (const b of buckets) {
+      run -= b.cents;
+      rows.push({ name: b.label, base: run / 100, value: b.cents / 100, fill: FLOW_COLORS[b.kind] });
+    }
+    return rows;
+  }, [sinkRows, totalSourcesCents]);
 
   const kindChips = (
     <div className="flex gap-1 flex-wrap items-center">
@@ -355,20 +425,63 @@ export default function FlowPage() {
     </div>
   );
 
-  const sankeyChart = (heightPx: number | '100%') => (
-    <ResponsiveContainer width="100%" height={heightPx}>
-      <Sankey
-        data={sankeyData}
-        node={renderNode}
-        link={renderLink}
-        nodePadding={18}
-        nodeWidth={12}
-        margin={{ top: 16, right: 230, bottom: 16, left: 16 }}
-      >
-        <Tooltip content={<SankeyTooltip />} />
-      </Sankey>
-    </ResponsiveContainer>
+  const chartToggle = (
+    <div className="flex gap-1 rounded-lg bg-[var(--background-tertiary)] p-1">
+      {CHART_KINDS.map((c) => (
+        <button
+          key={c.key}
+          onClick={() => setChart(c.key)}
+          className={`px-3 py-1.5 rounded-md text-sm transition-colors ${chart === c.key
+            ? 'bg-[var(--accent-primary)] text-white'
+            : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'}`}
+        >
+          {c.label}
+        </button>
+      ))}
+    </div>
   );
+
+  const chartView = (heightPx: number | '100%') => {
+    if (chart === 'treemap') {
+      return (
+        <ResponsiveContainer width="100%" height={heightPx}>
+          <Treemap data={treemapData} dataKey="size" nameKey="name" content={<TreemapCell />} isAnimationActive={false}>
+            <Tooltip formatter={(v) => money(Math.round(Number(v) * 100))} />
+          </Treemap>
+        </ResponsiveContainer>
+      );
+    }
+    if (chart === 'waterfall') {
+      return (
+        <ResponsiveContainer width="100%" height={heightPx}>
+          <BarChart data={waterfall} margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
+            <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.15} />
+            <XAxis dataKey="name" interval={0} angle={-28} textAnchor="end" height={95} tick={{ fontSize: 10 }} />
+            <YAxis tickFormatter={(v) => `$${Math.round(Number(v) / 1000)}k`} tick={{ fontSize: 11 }} width={52} />
+            <Tooltip formatter={(v) => money(Math.round(Number(v) * 100))} />
+            <Bar dataKey="base" stackId="w" fill="transparent" isAnimationActive={false} />
+            <Bar dataKey="value" stackId="w" radius={[3, 3, 0, 0]} isAnimationActive={false}>
+              {waterfall.map((r, i) => <Cell key={i} fill={r.fill} />)}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      );
+    }
+    return (
+      <ResponsiveContainer width="100%" height={heightPx}>
+        <Sankey
+          data={sankeyData}
+          node={renderNode}
+          link={renderLink}
+          nodePadding={18}
+          nodeWidth={12}
+          margin={{ top: 16, right: 230, bottom: 16, left: 16 }}
+        >
+          <Tooltip content={<SankeyTooltip />} />
+        </Sankey>
+      </ResponsiveContainer>
+    );
+  };
 
   return (
     <div className="min-h-screen relative">
@@ -388,8 +501,8 @@ export default function FlowPage() {
         {/* The story in plain language — same links as the chart, to the cent */}
         <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           {[
-            { label: 'Money came in', cents: story.moneyIn, sub: 'paychecks, refunds, rewards & money received' },
-            { label: 'Spent on living', cents: story.spending, sub: 'groceries, shopping, bills — every category' },
+            { label: 'Money came in', cents: story.moneyIn, sub: 'paychecks, rewards & money received — refunds not counted as income' },
+            { label: 'Spent on living', cents: story.spending, sub: `all categories, net of ${money(story.refunds)} refunded` },
             { label: 'Sent to people & family', cents: story.toPeople, sub: 'Zelle + Remitly to India' },
             { label: gapTotal > 0 ? '⚠ Not yet in the data' : 'Data complete', cents: gapTotal, sub: gapTotal > 0 ? 'export gaps — shown in the chart, being re-exported' : 'every dollar accounted for' },
           ].map((t) => (
@@ -410,7 +523,10 @@ export default function FlowPage() {
         ) : (
           <section className="rounded-xl border border-[var(--border-color)] bg-[var(--background-secondary)] p-4 relative">
             <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
-              {kindChips}
+              <div className="flex items-center gap-2 flex-wrap">
+                {chartToggle}
+                {chart === 'sankey' && kindChips}
+              </div>
               <button
                 onClick={() => setMaximized(true)}
                 className="p-2 rounded-lg text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)]"
@@ -421,11 +537,12 @@ export default function FlowPage() {
               </button>
             </div>
             <div className="overflow-x-auto">
-              <div style={{ minWidth: 900 }}>{sankeyChart(560)}</div>
+              <div style={{ minWidth: chart === 'sankey' ? 900 : 0 }}>{chartView(560)}</div>
             </div>
             <p className="text-xs text-[var(--foreground-muted)] mt-2">
-              Click an income source (left side) to follow that money to the end · hover for a quick peek ·
-              chips filter by kind · Esc clears
+              {chart === 'sankey' && 'Click an income source (left side) to follow that money to the end · hover for a quick peek · chips filter by kind · Esc clears'}
+              {chart === 'treemap' && 'Box size = dollars. Where every dollar ended up in this period — including what stayed in your accounts.'}
+              {chart === 'waterfall' && 'Start with all money available, subtract each destination — it lands on exactly $0 because every dollar is accounted for.'}
             </p>
           </section>
         )}
@@ -447,9 +564,9 @@ export default function FlowPage() {
                 </button>
               </div>
             </div>
-            <div className="mb-2">{kindChips}</div>
+            <div className="mb-2 flex items-center gap-2 flex-wrap">{chartToggle}{chart === 'sankey' && kindChips}</div>
             <div className="flex-1 min-h-0 overflow-auto rounded-xl border border-[var(--border-color)] bg-[var(--background-secondary)] p-2">
-              <div style={{ minWidth: 900 }} className="h-full">{sankeyChart('100%')}</div>
+              <div style={{ minWidth: chart === 'sankey' ? 900 : 0 }} className="h-full">{chartView('100%')}</div>
             </div>
           </div>
         )}
