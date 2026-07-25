@@ -201,7 +201,7 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
     setProfile(updatedProfile);
     saveLocalProfile(user.id, updatedProfile);
 
-    if (isFirestoreOnline) {
+    {
       try {
         // Flatten settings for Firestore update
         const firestoreSettings: Record<string, any> = {
@@ -229,8 +229,10 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
         }
         
         await firestoreService.updateUserSettings(user.id, firestoreSettings);
+        setIsFirestoreOnline(true);
       } catch (err) {
         console.error('Failed to sync profile update:', err);
+        setIsFirestoreOnline(false);
       }
     }
   };
@@ -314,11 +316,18 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
     setProfile(updatedProfile);
     saveLocalProfile(user.id, updatedProfile);
 
-    if (isFirestoreOnline && !id.startsWith('local_')) {
+    // Always attempt the server write for a real account id. Gating this on a cached
+    // `isFirestoreOnline` flag silently dropped balance edits: the value updated the
+    // screen and localStorage but never reached Firestore, so a reload (which reads
+    // balances from the server) showed 0 again. The try/catch already handles a true
+    // offline; on success we know we're online.
+    if (!id.startsWith('local_')) {
       try {
         await firestoreService.updateAccount(user.id, id, updates as any);
+        setIsFirestoreOnline(true);
       } catch (err) {
         console.error('Failed to sync account update:', err);
+        setIsFirestoreOnline(false);
       }
     }
   };
@@ -332,11 +341,15 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
     setProfile(updatedProfile);
     saveLocalProfile(user.id, updatedProfile);
 
-    if (isFirestoreOnline && !id.startsWith('local_')) {
+    // Always attempt the delete (see updatePaymentAccount) — gating on a cached
+    // online flag left deleted accounts to reappear on the next reload.
+    if (!id.startsWith('local_')) {
       try {
         await firestoreService.deleteAccount(user.id, id);
+        setIsFirestoreOnline(true);
       } catch (err) {
         console.error('Failed to sync account deletion:', err);
+        setIsFirestoreOnline(false);
       }
     }
   };
