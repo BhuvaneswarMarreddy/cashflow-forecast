@@ -6,12 +6,99 @@
 
 CashFlow Forecast is a forward-looking personal finance application designed specifically for **young adults (20-29 years old)** who want to take control of their finances, build financial resilience, and prepare for economic uncertainties like the potential 2026 recession.
 
-**🌐 Live Application:** https://cashflow-forecast-prod.web.app
+**🌐 Live Application:** https://marreddy-cashflow.web.app
+
+---
+
+## 🔀 End-to-End: How a Dollar Flows Through the App
+
+This is the newest and most important subsystem — the **Flow page** (`/flow`) and the
+money-tracing pipeline behind it. It answers: *where did every dollar since 2024 come
+from, how did it move between my accounts, where did it leave, and does it all add up to
+what I hold today?*
+
+### The pipeline, stage by stage
+
+```
+Monarch CSVs ──▶ import & de-dupe ──▶ classify ──▶ pair transfers ──▶ reconcile ──▶ visualize
+ (per account)    CSVImportModal      classify.ts    transfers.ts     flows.ts      /flow page
+```
+
+1. **Import (`src/components/CSVImportModal.tsx`).** Native Monarch CSV parsing via
+   `xlsx` (handles quoted commas, embedded newlines, `®`, the `…,Tags,Owner` header).
+   Each row gets a **deterministic id** (`imp_` + date|signedAmount|last4|statement|
+   occurrence) so re-importing the cumulative export **overwrites instead of
+   duplicating** — you can re-upload every month safely. Accounts are auto-created from
+   the `Account` column.
+
+2. **Classify (`src/lib/classify.ts`).** One shared classifier assigns every row a
+   `type: 'income' | 'expense' | 'transfer'`. A Monarch `Transfer` / `Credit Card
+   Payment`, or a payment-shaped inflow landing on a card, becomes a **transfer** (never
+   counted as income or spending). `isPositive` decides the sign for the account the row
+   sits on; `isReward` surfaces card rewards.
+
+3. **Pair transfers (`src/lib/transfers.ts`).** `matchTransfers` matches the two legs of
+   every internal move (opposite amount, ≤ 4 days, different accounts). Matched pairs are
+   money moving **between your own accounts** (net zero); unmatched legs are the signal
+   that the other side is external (a person, a servicer) — surfaced, never hidden. This
+   is the feature Monarch itself lacks.
+
+4. **Reconcile + build the graph (`src/lib/flows.ts`, integer cents throughout).**
+   `buildFlowGraph` turns transactions + accounts into the Sankey nodes/links **and** a
+   per-account reconciliation: `opening = today's real balance − net of this period`. A
+   bank can't have a negative opening, so an impossible one means the **export is missing
+   rows** — shown as a red ⚠ node with the exact gap, never absorbed. Bank↔bank moves
+   route through one "⇄ between accounts" hub node because the real data contains a bank
+   cycle that a Sankey (a DAG) can't draw. A unit-tested conservation identity guarantees
+   every node's inflow equals its outflow — the graph never leaks a cent, and the
+   reconciliation total ties to net worth exactly.
+
+5. **Visualize (`src/app/flow/page.tsx`).** Three views of the same links, toggleable:
+   - **Flow** — the Sankey. Click an income source to trace it end-to-end (downstream +
+     upstream, strict on-path highlighting); hover for a one-hop peek; kind chips
+     (Banks / Cards / People / Spending…); maximize; a monthly ◀ ▶ stepper.
+   - **Where it went** — a treemap sized by dollars, the view non-technical viewers read
+     instantly.
+   - **Step by step** — a waterfall that subtracts each destination and lands on exactly
+     **$0**, the on-screen proof that every dollar is accounted for.
+   Plus a recurring-payment detector, a 12-month net-worth projection, a gross
+   between-accounts matrix, and plain-language headline tiles (refunds count as reduced
+   spending, never income).
+
+### Trust the balance, not the flow
+
+Because the CSV export drops rows, the **user-entered account balances are the source of
+truth** (they match Monarch to the cent); the CSVs are authoritative for *flows* only.
+"Actually kept" is a *flow* (a change over time), not a *balance* — the money you have is
+your **net worth**, shown on the reconciliation table.
+
+### Verification (the "run it in loops" guarantee)
+
+- `scripts/verify_flow_groundtruth.py` re-derives every audited number straight from the
+  raw CSVs and exits non-zero on any drift (per-account totals, top counterparties,
+  self-transfers, recurring anchors).
+- `src/__tests__/flows.integration.test.ts` **replays all 9 real CSVs through the engine
+  on every `npm test`**, asserting the reconciliation to the cent, global conservation,
+  DAG-ness, people totals, and recurring detection against frozen ground truth.
+
+### Ship safety
+
+Deploys go through `npm run deploy`, which gates on **tsc + the full jest suite +
+a React-hooks crash-rule scan** before `firebase deploy` — added after a conditional-hook
+bug once shipped a white screen. Admin data ops (backup / purge / reclassify) live in
+`scripts/fsadmin.py` and always back up before a destructive step.
+
+### Brand
+
+Identity is **"Ink & Gold"**: a gold-coin mark (`src/components/LogoMark.tsx`, animated
+gleam) on graphite surfaces, gold as the accent. Theme tokens live in
+`src/app/globals.css`; the CVD-validated chart palette in `src/lib/palette.ts`.
 
 ---
 
 ## 📋 Table of Contents
 
+0. [End-to-End: How a Dollar Flows Through the App](#-end-to-end-how-a-dollar-flows-through-the-app) ⭐
 1. [Purpose & Philosophy](#-purpose--philosophy)
 2. [Who This Is For](#-who-this-is-for)
 3. [Key Features Overview](#-key-features-overview)
