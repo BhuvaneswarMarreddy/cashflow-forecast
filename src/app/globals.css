@@ -3,20 +3,20 @@
 
 :root {
   /* Dark theme - Midnight Aurora */
-  --background: #0d1117;
-  --background-secondary: #161b22;
-  --background-tertiary: #21262d;
-  --foreground: #f0f6fc;
-  --foreground-secondary: #8b949e;
-  --foreground-muted: #484f58;
+  --background: #14161a;
+  --background-secondary: #1c1f24;
+  --background-tertiary: #24282e;
+  --foreground: #f2f0ea;
+  --foreground-secondary: #9a9c98;
+  --foreground-muted: #5c5f5a;
   
   /* Accent colors - Deep Blue Theme */
-  --accent-primary: #1e40af;      /* Deep blue-800 */
-  --accent-secondary: #3b82f6;   /* Medium blue-500 */
-  --accent-tertiary: #60a5fa;    /* Light blue-400 */
-  --accent-success: #10b981;     /* Keep green for positive */
-  --accent-danger: #ef4444;      /* Keep red for negative */
-  --accent-warning: #f59e0b;     /* Keep amber for warnings */
+  --accent-primary: #c9a24e;      /* Gold — filled CTAs use dark text */
+  --accent-secondary: #b08d3f;   /* Deep gold */
+  --accent-tertiary: #d9bd77;    /* Pale gold */
+  --accent-success: #34d399;     /* Green for money in */
+  --accent-danger: #f87171;      /* Red for money out */
+  --accent-warning: #fbbf24;     /* Amber for warnings */
   
   /* Payment method colors */
   --amex-blue: #006fcf;
@@ -27,18 +27,18 @@
   --mastercard-red: #eb001b;
   
   /* Gradients - Deep Blue Theme */
-  --gradient-aurora: linear-gradient(135deg, #1e40af 0%, #3b82f6 50%, #60a5fa 100%);
+  --gradient-aurora: linear-gradient(135deg, #b08d3f 0%, #c9a24e 100%);
   --gradient-sunset: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
-  --gradient-ocean: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
-  --gradient-purple: linear-gradient(135deg, #1e40af 0%, #2563eb 100%);
+  --gradient-ocean: linear-gradient(135deg, #8a6d2e 0%, #c9a24e 100%);
+  --gradient-purple: linear-gradient(135deg, #3d4653 0%, #b08d3f 100%);
   
   /* Shadows - Blue glow */
-  --shadow-glow: 0 0 40px rgba(30, 64, 175, 0.3);
+  --shadow-glow: 0 0 40px rgba(201, 162, 78, 0.28);
   --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.4);
   
   /* Border */
-  --border-color: #30363d;
-  --border-glow: rgba(30, 64, 175, 0.5);
+  --border-color: #2b2f35;
+  --border-glow: rgba(201, 162, 78, 0.5);
 }
 
 @theme inline {
@@ -69,9 +69,9 @@ body {
   position: fixed;
   inset: 0;
   background-image: 
-    radial-gradient(circle at 20% 80%, rgba(30, 64, 175, 0.12) 0%, transparent 50%),
-    radial-gradient(circle at 80% 20%, rgba(59, 130, 246, 0.12) 0%, transparent 50%),
-    radial-gradient(circle at 40% 40%, rgba(96, 165, 250, 0.08) 0%, transparent 40%);
+    radial-gradient(circle at 20% 80%, rgba(201, 162, 78, 0.12) 0%, transparent 50%),
+    radial-gradient(circle at 80% 20%, rgba(176, 141, 63, 0.12) 0%, transparent 50%),
+    radial-gradient(circle at 40% 40%, rgba(217, 189, 119, 0.08) 0%, transparent 40%);
   pointer-events: none;
   z-index: 0;
 }
@@ -108,7 +108,7 @@ body {
 .input-field:focus {
   outline: none;
   border-color: var(--accent-primary);
-  box-shadow: 0 0 0 3px rgba(30, 64, 175, 0.2);
+  box-shadow: 0 0 0 3px rgba(201, 162, 78, 0.2);
 }
 
 .input-field::placeholder {
@@ -169,7 +169,7 @@ input[type="number"].input-field::-webkit-inner-spin-button {
   border: none;
   border-radius: 12px;
   padding: 14px 28px;
-  color: white;
+  color: #16181c;
   font-weight: 600;
   font-size: 1rem;
   cursor: pointer;
@@ -179,7 +179,7 @@ input[type="number"].input-field::-webkit-inner-spin-button {
 
 .btn-primary:hover {
   transform: translateY(-2px);
-  box-shadow: 0 8px 30px rgba(30, 64, 175, 0.4);
+  box-shadow: 0 8px 30px rgba(201, 162, 78, 0.4);
 }
 
 .btn-secondary {
@@ -197,7 +197,7 @@ input[type="number"].input-field::-webkit-inner-spin-button {
 
 .btn-secondary:hover {
   border-color: var(--accent-primary);
-  background: rgba(30, 64, 175, 0.1);
+  background: rgba(201, 162, 78, 0.1);
 }
 
 .btn-gradient {
@@ -284,10 +284,10 @@ input[type="number"].input-field::-webkit-inner-spin-button {
 
 @keyframes pulse-glow {
   0%, 100% {
-    box-shadow: 0 0 20px rgba(30, 64, 175, 0.3);
+    box-shadow: 0 0 20px rgba(201, 162, 78, 0.3);
   }
   50% {
-    box-shadow: 0 0 40px rgba(30, 64, 175, 0.5);
+    box-shadow: 0 0 40px rgba(201, 162, 78, 0.5);
   }
 }
 
@@ -337,7 +337,7 @@ input[type="number"].input-field::-webkit-inner-spin-button {
 
 .calendar-day:hover {
   border-color: var(--accent-primary);
-  background: rgba(30, 64, 175, 0.1);
+  background: rgba(201, 162, 78, 0.1);
 }
 
 .calendar-day.today {
@@ -410,7 +410,7 @@ input[type="number"].input-field::-webkit-inner-spin-button {
 .select-field:focus {
   outline: none;
   border-color: var(--accent-primary);
-  box-shadow: 0 0 0 3px rgba(30, 64, 175, 0.2);
+  box-shadow: 0 0 0 3px rgba(201, 162, 78, 0.2);
 }
 
 /* Select option styling */
@@ -432,7 +432,7 @@ input[type="password"] {
 
 /* Dropdown styles for better contrast - Deep Blue Theme */
 select option {
-  background-color: #21262d;
+  background-color: #24282e;
   color: #f0f6fc;
   padding: 10px;
 }
@@ -440,24 +440,24 @@ select option {
 select option:hover,
 select option:focus,
 select option:checked {
-  background-color: #1e40af;
+  background-color: #b08d3f;
   color: white;
 }
 
 /* Custom dropdown styling */
 .dropdown-blue {
-  background: rgba(30, 64, 175, 0.1);
-  border: 1px solid rgba(59, 130, 246, 0.3);
+  background: rgba(201, 162, 78, 0.1);
+  border: 1px solid rgba(176, 141, 63, 0.3);
   color: #f0f6fc;
 }
 
 .dropdown-blue:focus {
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+  border-color: #c9a24e;
+  box-shadow: 0 0 0 3px rgba(176, 141, 63, 0.2);
 }
 
 .dropdown-blue option {
-  background-color: #161b22;
+  background-color: #1c1f24;
   color: #f0f6fc;
 }
 
@@ -721,7 +721,7 @@ select option:checked {
 
 .fab:hover {
   transform: scale(1.1);
-  box-shadow: 0 6px 30px rgba(30, 64, 175, 0.6);
+  box-shadow: 0 6px 30px rgba(201, 162, 78, 0.6);
 }
 
 /* Safe area insets for notched phones */

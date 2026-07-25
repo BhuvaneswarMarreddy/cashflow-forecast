@@ -336,7 +336,7 @@ export default function HistoryPage() {
                 onClick={() => setViewMode('history')}
                 className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
                   viewMode === 'history'
-                    ? 'bg-[var(--accent-primary)] text-white'
+                    ? 'bg-[var(--accent-primary)] text-[#16181c]'
                     : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'
                 }`}
               >
@@ -347,7 +347,7 @@ export default function HistoryPage() {
                 onClick={() => setViewMode('runway')}
                 className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
                   viewMode === 'runway'
-                    ? 'bg-[var(--accent-primary)] text-white'
+                    ? 'bg-[var(--accent-primary)] text-[#16181c]'
                     : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'
                 }`}
               >
@@ -458,7 +458,7 @@ export default function HistoryPage() {
                     onClick={() => setTypeFilter('all')}
                     className={`px-2.5 py-1 rounded text-xs font-medium transition-all ${
                       typeFilter === 'all'
-                        ? 'bg-[var(--accent-primary)] text-white'
+                        ? 'bg-[var(--accent-primary)] text-[#16181c]'
                         : 'text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]'
                     }`}
                   >
@@ -492,7 +492,7 @@ export default function HistoryPage() {
                     onClick={() => setGroupBy('month')}
                     className={`px-2.5 py-1 rounded text-xs font-medium transition-all ${
                       groupBy === 'month'
-                        ? 'bg-[var(--accent-primary)] text-white'
+                        ? 'bg-[var(--accent-primary)] text-[#16181c]'
                         : 'text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]'
                     }`}
                   >
@@ -502,7 +502,7 @@ export default function HistoryPage() {
                     onClick={() => setGroupBy('year')}
                     className={`px-2.5 py-1 rounded text-xs font-medium transition-all ${
                       groupBy === 'year'
-                        ? 'bg-[var(--accent-primary)] text-white'
+                        ? 'bg-[var(--accent-primary)] text-[#16181c]'
                         : 'text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]'
                     }`}
                   >
@@ -512,7 +512,7 @@ export default function HistoryPage() {
                     onClick={() => setGroupBy('category')}
                     className={`px-2.5 py-1 rounded text-xs font-medium transition-all ${
                       groupBy === 'category'
-                        ? 'bg-[var(--accent-primary)] text-white'
+                        ? 'bg-[var(--accent-primary)] text-[#16181c]'
                         : 'text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]'
                     }`}
                   >

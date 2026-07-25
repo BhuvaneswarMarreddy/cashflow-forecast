@@ -2,8 +2,8 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
+import LogoMark from '@/components/LogoMark';
 import { useAuth } from '@/context/AuthContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import { useTransactions } from '@/context/TransactionContext';
@@ -70,18 +70,10 @@ export default function Navbar() {
           {/* Logo */}
           <Link href="/dashboard" className="flex items-center gap-3 group">
             <div className="w-9 h-9 rounded-xl flex items-center justify-center group-hover:scale-105 transition-transform relative overflow-hidden">
-              <Image
-                src="/logos/logo-icon-v2.png"
-                alt="CashFlow Forecast"
-                width={36}
-                height={36}
-                className="object-contain"
-                priority
-                unoptimized
-              />
+              <LogoMark size={36} />
             </div>
             <div className="hidden sm:block">
-              <span className="text-lg font-bold text-[var(--foreground)]">CashFlow</span>
+              <span className="text-lg font-bold text-[var(--foreground)]">Cash<span style={{ color: '#b08d3f' }}>Flow</span></span>
               {profile?.monthlyBudget ? (
                 <p className="text-xs text-[var(--foreground-muted)]">
                   Budget: ${profile.monthlyBudget.toLocaleString()}/mo
@@ -100,7 +92,7 @@ export default function Navbar() {
                   href={item.href}
                   className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all ${
                     isActive(item.href)
-                      ? 'bg-[var(--accent-primary)] text-white'
+                      ? 'bg-[var(--accent-primary)] text-[#16181c]'
                       : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)]'
                   }`}
                 >
@@ -129,7 +121,7 @@ export default function Navbar() {
                 onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
                 className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--background-tertiary)] transition-colors"
               >
-                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] flex items-center justify-center text-white font-medium text-sm">
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] flex items-center justify-center text-[#16181c] font-semibold text-sm">
                   {user?.name?.charAt(0).toUpperCase()}
                 </div>
                 <div className="text-left hidden lg:block">
@@ -214,7 +206,7 @@ export default function Navbar() {
                   onClick={() => setIsMobileMenuOpen(false)}
                   className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
                     isActive(item.href)
-                      ? 'bg-[var(--accent-primary)] text-white'
+                      ? 'bg-[var(--accent-primary)] text-[#16181c]'
                       : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)]'
                   }`}
                 >

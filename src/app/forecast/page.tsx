@@ -199,7 +199,7 @@ export default function ForecastPage() {
                 onClick={() => setForecastDays(period.days)}
                 className={`px-4 py-2.5 text-sm font-semibold rounded-md transition-all ${
                   forecastDays === period.days
-                    ? 'bg-[var(--accent-primary)] text-white shadow-sm'
+                    ? 'bg-[var(--accent-primary)] text-[#16181c] shadow-sm'
                     : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)]'
                 }`}
               >
@@ -224,7 +224,7 @@ export default function ForecastPage() {
                   onClick={() => setSelectedAccountId('all')}
                   className={`px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
                     selectedAccountId === 'all'
-                      ? 'bg-[var(--accent-primary)] text-white'
+                      ? 'bg-[var(--accent-primary)] text-[#16181c]'
                       : 'bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:bg-[var(--background-primary)] border border-[var(--border-color)]'
                   }`}
                 >
@@ -243,7 +243,7 @@ export default function ForecastPage() {
                       onClick={() => setSelectedAccountId(account.id)}
                       className={`px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
                         selectedAccountId === account.id
-                          ? 'bg-[var(--accent-primary)] text-white'
+                          ? 'bg-[var(--accent-primary)] text-[#16181c]'
                           : 'bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:bg-[var(--background-primary)] border border-[var(--border-color)]'
                       }`}
                       style={{

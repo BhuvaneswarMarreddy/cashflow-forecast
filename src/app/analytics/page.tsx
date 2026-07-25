@@ -392,7 +392,7 @@ export default function AnalyticsPage() {
                 onClick={() => setViewMode('weekly')}
                 className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
                   viewMode === 'weekly'
-                    ? 'bg-[var(--accent-primary)] text-white'
+                    ? 'bg-[var(--accent-primary)] text-[#16181c]'
                     : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'
                 }`}
               >
@@ -402,7 +402,7 @@ export default function AnalyticsPage() {
                 onClick={() => setViewMode('monthly')}
                 className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
                   viewMode === 'monthly'
-                    ? 'bg-[var(--accent-primary)] text-white'
+                    ? 'bg-[var(--accent-primary)] text-[#16181c]'
                     : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'
                 }`}
               >
@@ -539,7 +539,7 @@ export default function AnalyticsPage() {
                     onClick={() => setChartType(type)}
                     className={`px-3 py-1 rounded text-xs font-medium transition-all ${
                       chartType === type
-                        ? 'bg-[var(--accent-primary)] text-white'
+                        ? 'bg-[var(--accent-primary)] text-[#16181c]'
                         : 'text-[var(--foreground-secondary)]'
                     }`}
                   >

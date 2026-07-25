@@ -91,7 +91,7 @@ export default function ForecastChart({ forecast }: ForecastChartProps) {
         </div>
         <div className="flex flex-wrap items-center gap-3 text-sm bg-[var(--background-tertiary)] px-4 py-2.5 rounded-lg border border-[var(--border-color)]">
           <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-[#3b82f6] shadow-sm" />
+            <div className="w-3 h-3 rounded-full bg-[#c9a24e] shadow-sm" />
             <span className="text-[var(--foreground)] font-medium">Balance</span>
           </div>
           <div className="w-px h-4 bg-[var(--border-color)]" />
@@ -146,8 +146,8 @@ export default function ForecastChart({ forecast }: ForecastChartProps) {
           <AreaChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
             <defs>
               <linearGradient id="balanceGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4} />
-                <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.05} />
+                <stop offset="5%" stopColor="#c9a24e" stopOpacity={0.4} />
+                <stop offset="95%" stopColor="#c9a24e" stopOpacity={0.05} />
               </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} opacity={0.5} />
@@ -191,7 +191,7 @@ export default function ForecastChart({ forecast }: ForecastChartProps) {
             <Area
               type="monotone"
               dataKey="balance"
-              stroke="#3b82f6"
+              stroke="#c9a24e"
               strokeWidth={3}
               fill="url(#balanceGradient)"
               dot={(props: any) => {

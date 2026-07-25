@@ -121,7 +121,7 @@ export default function BudgetSettingsPanel({
             </div>
             <button
               onClick={applySuggested}
-              className="text-sm px-3 py-1.5 rounded-lg bg-[var(--accent-primary)] text-white hover:opacity-90 transition-opacity"
+              className="text-sm px-3 py-1.5 rounded-lg bg-[var(--accent-primary)] text-[#16181c] hover:opacity-90 transition-opacity"
             >
               Apply Suggestions
             </button>

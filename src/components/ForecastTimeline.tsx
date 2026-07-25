@@ -135,7 +135,7 @@ export default function ForecastTimeline({ forecast }: ForecastTimelineProps) {
             onClick={() => setViewMode('daily')}
             className={`px-3 py-2 rounded-md transition-all flex items-center gap-2 ${
               viewMode === 'daily'
-                ? 'bg-[var(--accent-primary)] text-white shadow-sm'
+                ? 'bg-[var(--accent-primary)] text-[#16181c] shadow-sm'
                 : 'text-[var(--foreground-muted)] hover:text-[var(--foreground)] hover:bg-[var(--background-secondary)]'
             }`}
             title="Daily View"
@@ -147,7 +147,7 @@ export default function ForecastTimeline({ forecast }: ForecastTimelineProps) {
             onClick={() => setViewMode('monthly')}
             className={`px-3 py-2 rounded-md transition-all flex items-center gap-2 ${
               viewMode === 'monthly'
-                ? 'bg-[var(--accent-primary)] text-white shadow-sm'
+                ? 'bg-[var(--accent-primary)] text-[#16181c] shadow-sm'
                 : 'text-[var(--foreground-muted)] hover:text-[var(--foreground)] hover:bg-[var(--background-secondary)]'
             }`}
             title="Monthly View"

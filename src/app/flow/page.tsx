@@ -312,7 +312,7 @@ export default function FlowPage() {
             key={r.key}
             onClick={() => setRange(r.key)}
             className={`px-3 py-1.5 rounded-md text-sm transition-colors ${range === r.key
-              ? 'bg-[var(--accent-primary)] text-white'
+              ? 'bg-[var(--accent-primary)] text-[#16181c]'
               : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'}`}
           >
             {r.label}
@@ -404,7 +404,7 @@ export default function FlowPage() {
           key={c.label}
           onClick={() => { setFocusKind(c.kind); setPinLabel(null); }}
           className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${focusKind === c.kind
-            ? 'bg-[var(--accent-primary)] text-white border-transparent'
+            ? 'bg-[var(--accent-primary)] text-[#16181c] border-transparent'
             : 'border-[var(--border-color)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'}`}
         >
           {c.label}
@@ -429,7 +429,7 @@ export default function FlowPage() {
           key={c.key}
           onClick={() => setChart(c.key)}
           className={`px-3 py-1.5 rounded-md text-sm transition-colors ${chart === c.key
-            ? 'bg-[var(--accent-primary)] text-white'
+            ? 'bg-[var(--accent-primary)] text-[#16181c]'
             : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'}`}
         >
           {c.label}
@@ -700,7 +700,7 @@ export default function FlowPage() {
                 <XAxis dataKey="month" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `$${Math.round(Number(v) / 1000)}k`} width={56} />
                 <Tooltip formatter={(v) => money(Math.round(Number(v) * 100))} />
-                <Line type="monotone" dataKey="value" stroke="#2563eb" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="value" stroke="#b08d3f" strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>

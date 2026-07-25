@@ -395,7 +395,7 @@ export default function AccountsPage() {
                 onClick={() => setActiveTab(tab.key as any)}
                 className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg font-medium transition-all text-sm sm:text-base ${
                   activeTab === tab.key
-                    ? 'bg-[var(--accent-primary)] text-white'
+                    ? 'bg-[var(--accent-primary)] text-[#16181c]'
                     : 'bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'
                 }`}
               >

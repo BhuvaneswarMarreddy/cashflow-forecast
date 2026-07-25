@@ -192,7 +192,7 @@ export default function EmergencyFundPanel({
               onClick={() => setGoalType('months')}
               className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2 ${
                 goalType === 'months'
-                  ? 'bg-[var(--accent-primary)] text-white'
+                  ? 'bg-[var(--accent-primary)] text-[#16181c]'
                   : 'bg-[var(--background-secondary)] text-[var(--foreground-secondary)] border border-[var(--border-color)]'
               }`}
             >
@@ -203,7 +203,7 @@ export default function EmergencyFundPanel({
               onClick={() => setGoalType('amount')}
               className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2 ${
                 goalType === 'amount'
-                  ? 'bg-[var(--accent-primary)] text-white'
+                  ? 'bg-[var(--accent-primary)] text-[#16181c]'
                   : 'bg-[var(--background-secondary)] text-[var(--foreground-secondary)] border border-[var(--border-color)]'
               }`}
             >
@@ -225,7 +225,7 @@ export default function EmergencyFundPanel({
                     onClick={() => setGoalMonths(months)}
                     className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                       goalMonths === months
-                        ? 'bg-[var(--accent-primary)] text-white'
+                        ? 'bg-[var(--accent-primary)] text-[#16181c]'
                         : 'bg-[var(--background-secondary)] text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]'
                     }`}
                   >
@@ -261,7 +261,7 @@ export default function EmergencyFundPanel({
           <button
             onClick={handleSaveSettings}
             disabled={isSaving}
-            className="w-full py-2 rounded-lg bg-[var(--accent-primary)] text-white font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-50"
+            className="w-full py-2 rounded-lg bg-[var(--accent-primary)] text-[#16181c] font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-50"
           >
             {isSaving ? 'Saving...' : 'Save Goal'}
           </button>

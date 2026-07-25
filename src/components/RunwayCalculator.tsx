@@ -405,8 +405,8 @@ export default function RunwayCalculator({
             >
               <defs>
                 <linearGradient id="projectionGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                  <stop offset="5%" stopColor="#c9a24e" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#c9a24e" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
@@ -434,7 +434,7 @@ export default function RunwayCalculator({
               <Area
                 type="monotone"
                 dataKey="balance"
-                stroke="#3b82f6"
+                stroke="#c9a24e"
                 strokeWidth={2}
                 fill="url(#projectionGradient)"
               />
@@ -444,7 +444,7 @@ export default function RunwayCalculator({
 
         <div className="flex items-center gap-4 mt-4 text-sm">
           <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-[#3b82f6]" />
+            <div className="w-3 h-3 rounded-full bg-[#c9a24e]" />
             <span className="text-[var(--foreground-secondary)]">
               {expenseReduction > 0 || additionalIncome > 0 ? 'Scenario Balance' : 'Projected Balance'}
             </span>

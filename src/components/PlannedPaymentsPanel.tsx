@@ -215,7 +215,7 @@ export default function PlannedPaymentsPanel() {
     switch (status) {
       case 'completed': return <CheckCircle className="w-4 h-4 text-green-400" />;
       case 'skipped': return <XCircle className="w-4 h-4 text-gray-400" />;
-      default: return <Clock className="w-4 h-4 text-blue-400" />;
+      default: return <Clock className="w-4 h-4 text-amber-400" />;
     }
   };
 
@@ -223,8 +223,8 @@ export default function PlannedPaymentsPanel() {
     return (
       <div className="glass-card p-6">
         <div className="animate-pulse flex items-center gap-3">
-          <div className="w-6 h-6 bg-blue-500/20 rounded"></div>
-          <div className="h-4 bg-blue-500/20 rounded w-32"></div>
+          <div className="w-6 h-6 bg-amber-500/20 rounded"></div>
+          <div className="h-4 bg-amber-500/20 rounded w-32"></div>
         </div>
       </div>
     );
@@ -235,7 +235,7 @@ export default function PlannedPaymentsPanel() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-amber-600 flex items-center justify-center">
             <Calendar className="w-5 h-5 text-white" />
           </div>
           <div>
@@ -260,7 +260,7 @@ export default function PlannedPaymentsPanel() {
               recurringFrequency: 'monthly',
             });
           }}
-          className="flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium transition-colors"
+          className="flex items-center gap-2 px-3 py-2 bg-amber-600 hover:bg-amber-700 rounded-lg text-sm font-medium transition-colors"
         >
           <Plus className="w-4 h-4" />
           Add
@@ -268,17 +268,17 @@ export default function PlannedPaymentsPanel() {
       </div>
 
       {/* Month Navigator */}
-      <div className="flex items-center justify-between mb-4 p-3 bg-blue-900/10 rounded-lg">
+      <div className="flex items-center justify-between mb-4 p-3 bg-amber-900/10 rounded-lg">
         <button
           onClick={() => setCurrentMonth(addMonths(currentMonth, -1))}
-          className="p-1 hover:bg-blue-500/10 rounded"
+          className="p-1 hover:bg-amber-500/10 rounded"
         >
           <ChevronLeft className="w-5 h-5" />
         </button>
         <span className="font-medium">{format(currentMonth, 'MMMM yyyy')}</span>
         <button
           onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}
-          className="p-1 hover:bg-blue-500/10 rounded"
+          className="p-1 hover:bg-amber-500/10 rounded"
         >
           <ChevronRight className="w-5 h-5" />
         </button>
@@ -286,14 +286,14 @@ export default function PlannedPaymentsPanel() {
 
       {/* Summary */}
       <div className="grid grid-cols-2 gap-3 mb-4">
-        <div className="p-3 bg-blue-900/10 rounded-lg">
+        <div className="p-3 bg-amber-900/10 rounded-lg">
           <p className="text-xs text-white/60 mb-1">Pending</p>
           <p className="text-lg font-semibold text-yellow-400">
             ${totalPlanned.toLocaleString()}
           </p>
           <p className="text-xs text-white/40">{pendingItems.length} items</p>
         </div>
-        <div className="p-3 bg-blue-900/10 rounded-lg">
+        <div className="p-3 bg-amber-900/10 rounded-lg">
           <p className="text-xs text-white/60 mb-1">Completed</p>
           <p className="text-lg font-semibold text-green-400">
             ${totalCompleted.toLocaleString()}
@@ -304,7 +304,7 @@ export default function PlannedPaymentsPanel() {
 
       {/* Add/Edit Form */}
       {showAddForm && (
-        <form onSubmit={handleSubmit} className="mb-4 p-4 bg-blue-900/10 rounded-lg border border-blue-500/20">
+        <form onSubmit={handleSubmit} className="mb-4 p-4 bg-amber-900/10 rounded-lg border border-amber-500/20">
           <h4 className="font-medium mb-3">{editingId ? 'Edit' : 'Add'} Planned Payment</h4>
           
           <div className="grid grid-cols-2 gap-3 mb-3">
@@ -314,7 +314,7 @@ export default function PlannedPaymentsPanel() {
                 type="text"
                 value={formData.title}
                 onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                className="w-full px-3 py-2 bg-blue-900/20 border border-blue-500/30 rounded-lg text-sm"
+                className="w-full px-3 py-2 bg-amber-900/20 border border-amber-500/30 rounded-lg text-sm"
                 placeholder="Rent, Insurance..."
                 required
               />
@@ -325,7 +325,7 @@ export default function PlannedPaymentsPanel() {
                 type="number"
                 value={formData.amount}
                 onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-                className="w-full px-3 py-2 bg-blue-900/20 border border-blue-500/30 rounded-lg text-sm"
+                className="w-full px-3 py-2 bg-amber-900/20 border border-amber-500/30 rounded-lg text-sm"
                 placeholder="0.00"
                 step="0.01"
                 required
@@ -339,7 +339,7 @@ export default function PlannedPaymentsPanel() {
               <select
                 value={formData.type}
                 onChange={(e) => setFormData({ ...formData, type: e.target.value as 'expense' | 'income' })}
-                className="w-full px-3 py-2 bg-blue-900/20 border border-blue-500/30 rounded-lg text-sm"
+                className="w-full px-3 py-2 bg-amber-900/20 border border-amber-500/30 rounded-lg text-sm"
               >
                 <option value="expense">Expense</option>
                 <option value="income">Income</option>
@@ -350,7 +350,7 @@ export default function PlannedPaymentsPanel() {
               <select
                 value={formData.category}
                 onChange={(e) => setFormData({ ...formData, category: e.target.value as ExpenseCategory })}
-                className="w-full px-3 py-2 bg-blue-900/20 border border-blue-500/30 rounded-lg text-sm"
+                className="w-full px-3 py-2 bg-amber-900/20 border border-amber-500/30 rounded-lg text-sm"
               >
                 {EXPENSE_CATEGORIES.map((cat) => (
                   <option key={cat.value} value={cat.value}>
@@ -368,7 +368,7 @@ export default function PlannedPaymentsPanel() {
                 type="date"
                 value={formData.dueDate}
                 onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
-                className="w-full px-3 py-2 bg-blue-900/20 border border-blue-500/30 rounded-lg text-sm"
+                className="w-full px-3 py-2 bg-amber-900/20 border border-amber-500/30 rounded-lg text-sm"
                 required
               />
             </div>
@@ -377,7 +377,7 @@ export default function PlannedPaymentsPanel() {
               <select
                 value={formData.priority}
                 onChange={(e) => setFormData({ ...formData, priority: e.target.value as 'high' | 'medium' | 'low' })}
-                className="w-full px-3 py-2 bg-blue-900/20 border border-blue-500/30 rounded-lg text-sm"
+                className="w-full px-3 py-2 bg-amber-900/20 border border-amber-500/30 rounded-lg text-sm"
               >
                 <option value="high">🔴 High</option>
                 <option value="medium">🟡 Medium</option>
@@ -392,7 +392,7 @@ export default function PlannedPaymentsPanel() {
               <select
                 value={formData.accountId}
                 onChange={(e) => setFormData({ ...formData, accountId: e.target.value })}
-                className="w-full px-3 py-2 bg-blue-900/20 border border-blue-500/30 rounded-lg text-sm"
+                className="w-full px-3 py-2 bg-amber-900/20 border border-amber-500/30 rounded-lg text-sm"
               >
                 <option value="">Select account...</option>
                 {profile.paymentAccounts.map((acc) => (
@@ -410,7 +410,7 @@ export default function PlannedPaymentsPanel() {
               type="text"
               value={formData.notes}
               onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-              className="w-full px-3 py-2 bg-blue-900/20 border border-blue-500/30 rounded-lg text-sm"
+              className="w-full px-3 py-2 bg-amber-900/20 border border-amber-500/30 rounded-lg text-sm"
               placeholder="Additional notes..."
             />
           </div>
@@ -429,7 +429,7 @@ export default function PlannedPaymentsPanel() {
               <select
                 value={formData.recurringFrequency}
                 onChange={(e) => setFormData({ ...formData, recurringFrequency: e.target.value as 'weekly' | 'monthly' | 'yearly' })}
-                className="px-2 py-1 bg-blue-900/20 border border-blue-500/30 rounded text-sm"
+                className="px-2 py-1 bg-amber-900/20 border border-amber-500/30 rounded text-sm"
               >
                 <option value="weekly">Weekly</option>
                 <option value="monthly">Monthly</option>
@@ -441,7 +441,7 @@ export default function PlannedPaymentsPanel() {
           <div className="flex gap-2">
             <button
               type="submit"
-              className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium transition-colors"
+              className="flex-1 py-2 bg-amber-600 hover:bg-amber-700 rounded-lg text-sm font-medium transition-colors"
             >
               {editingId ? 'Update' : 'Add'} Payment
             </button>
@@ -451,7 +451,7 @@ export default function PlannedPaymentsPanel() {
                 setShowAddForm(false);
                 setEditingId(null);
               }}
-              className="px-4 py-2 bg-blue-900/20 hover:bg-blue-500/20 rounded-lg text-sm transition-colors"
+              className="px-4 py-2 bg-amber-900/20 hover:bg-amber-500/20 rounded-lg text-sm transition-colors"
             >
               Cancel
             </button>
@@ -470,7 +470,7 @@ export default function PlannedPaymentsPanel() {
             {pendingItems.map((item) => (
               <div
                 key={item.id}
-                className="p-3 bg-blue-900/10 rounded-lg border border-blue-500/20 hover:border-blue-500/40 transition-colors"
+                className="p-3 bg-amber-900/10 rounded-lg border border-amber-500/20 hover:border-amber-500/40 transition-colors"
               >
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
@@ -479,7 +479,7 @@ export default function PlannedPaymentsPanel() {
                         {item.priority}
                       </span>
                       {item.isRecurring && (
-                        <RefreshCw className="w-3 h-3 text-blue-400" />
+                        <RefreshCw className="w-3 h-3 text-amber-400" />
                       )}
                     </div>
                     <h5 className="font-medium">{item.title}</h5>
@@ -513,7 +513,7 @@ export default function PlannedPaymentsPanel() {
                     </button>
                     <button
                       onClick={() => handleEdit(item)}
-                      className="p-1.5 bg-blue-500/20 hover:bg-blue-500/30 rounded text-blue-400"
+                      className="p-1.5 bg-amber-500/20 hover:bg-amber-500/30 rounded text-amber-400"
                       title="Edit"
                     >
                       <Edit2 className="w-4 h-4" />
@@ -544,7 +544,7 @@ export default function PlannedPaymentsPanel() {
             {completedItems.map((item) => (
               <div
                 key={item.id}
-                className="p-3 bg-blue-900/10 rounded-lg border border-green-500/20 opacity-70"
+                className="p-3 bg-amber-900/10 rounded-lg border border-green-500/20 opacity-70"
               >
                 <div className="flex items-center justify-between">
                   <div>
@@ -573,7 +573,7 @@ export default function PlannedPaymentsPanel() {
             {skippedItems.map((item) => (
               <div
                 key={item.id}
-                className="p-3 bg-blue-900/10 rounded-lg border border-blue-500/10 opacity-50"
+                className="p-3 bg-amber-900/10 rounded-lg border border-amber-500/10 opacity-50"
               >
                 <div className="flex items-center justify-between">
                   <div>
@@ -585,7 +585,7 @@ export default function PlannedPaymentsPanel() {
                   </div>
                   <button
                     onClick={() => updatePlannedTransaction(user!.id, item.id, { status: 'pending' }).then(fetchPlanned)}
-                    className="text-xs text-blue-400 hover:underline"
+                    className="text-xs text-amber-400 hover:underline"
                   >
                     Restore
                   </button>
@@ -603,7 +603,7 @@ export default function PlannedPaymentsPanel() {
           <p>No planned payments for {format(currentMonth, 'MMMM yyyy')}</p>
           <button
             onClick={() => setShowAddForm(true)}
-            className="mt-3 text-blue-400 hover:underline text-sm"
+            className="mt-3 text-amber-400 hover:underline text-sm"
           >
             Add your first planned payment
           </button>

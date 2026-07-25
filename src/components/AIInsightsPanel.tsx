@@ -254,7 +254,7 @@ export default function AIInsightsPanel({
           <button
             onClick={generateAIInsight}
             disabled={isLoading}
-            className="text-xs px-3 py-1.5 rounded-lg bg-[var(--accent-primary)] text-white hover:opacity-90 disabled:opacity-50 flex items-center gap-1"
+            className="text-xs px-3 py-1.5 rounded-lg bg-[var(--accent-primary)] text-[#16181c] hover:opacity-90 disabled:opacity-50 flex items-center gap-1"
           >
             {isLoading ? (
               <span className="animate-pulse">Analyzing...</span>

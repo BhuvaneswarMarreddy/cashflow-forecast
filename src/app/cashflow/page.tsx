@@ -151,7 +151,7 @@ export default function CashflowPage() {
           <div className="flex gap-1 p-1 bg-[var(--background)] rounded-lg border border-[var(--border-color)]">
             {([['12m', 'Last 12 mo'], ['ytd', 'This year'], ['all', 'All time']] as [Range, string][]).map(([k, label]) => (
               <button key={k} onClick={() => setRange(k)}
-                className={`px-3 py-1.5 rounded text-sm font-medium transition-all ${range === k ? 'bg-[var(--accent-primary)] text-white' : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'}`}>
+                className={`px-3 py-1.5 rounded text-sm font-medium transition-all ${range === k ? 'bg-[var(--accent-primary)] text-[#16181c]' : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'}`}>
                 {label}
               </button>
             ))}

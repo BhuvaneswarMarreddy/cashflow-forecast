@@ -110,7 +110,7 @@ export default function DebtPlannerPanel({
           >
             <div className="flex items-center gap-3 mb-2">
               <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                selectedStrategy === 'snowball' ? 'bg-[var(--accent-primary)] text-white' : 'bg-[var(--background-secondary)]'
+                selectedStrategy === 'snowball' ? 'bg-[var(--accent-primary)] text-[#16181c]' : 'bg-[var(--background-secondary)]'
               }`}>
                 <Zap className="w-5 h-5" />
               </div>
@@ -148,7 +148,7 @@ export default function DebtPlannerPanel({
           >
             <div className="flex items-center gap-3 mb-2">
               <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                selectedStrategy === 'avalanche' ? 'bg-[var(--accent-primary)] text-white' : 'bg-[var(--background-secondary)]'
+                selectedStrategy === 'avalanche' ? 'bg-[var(--accent-primary)] text-[#16181c]' : 'bg-[var(--background-secondary)]'
               }`}>
                 <TrendingDown className="w-5 h-5" />
               </div>
@@ -226,7 +226,7 @@ export default function DebtPlannerPanel({
                 onClick={() => setExtraPayment(amount.toString())}
                 className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                   parseFloat(extraPayment) === amount
-                    ? 'bg-[var(--accent-primary)] text-white'
+                    ? 'bg-[var(--accent-primary)] text-[#16181c]'
                     : 'bg-[var(--background-tertiary)] text-[var(--foreground)] hover:bg-[var(--background-primary)]'
                 }`}
               >
@@ -260,7 +260,7 @@ export default function DebtPlannerPanel({
             >
               <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
                 index === 0 
-                  ? 'bg-[var(--accent-primary)] text-white' 
+                  ? 'bg-[var(--accent-primary)] text-[#16181c]' 
                   : 'bg-[var(--background-secondary)] text-[var(--foreground-muted)]'
               }`}>
                 {index + 1}

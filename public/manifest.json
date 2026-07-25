@@ -4,8 +4,8 @@
   "description": "Personal finance management - Track expenses, forecast cash flow, manage budgets, and plan for financial goals. Supports US and Indian currencies.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0d1117",
-  "theme_color": "#1e40af",
+  "background_color": "#14161a",
+  "theme_color": "#b08d3f",
   "orientation": "portrait-primary",
   "icons": [
     {

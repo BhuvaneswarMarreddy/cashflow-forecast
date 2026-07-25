@@ -872,7 +872,7 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
                             onClick={() => choose(CREATE_ACCOUNT)}
                             className={`px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-1.5 ${
                               isCreating
-                                ? 'bg-[var(--accent-primary)] text-white'
+                                ? 'bg-[var(--accent-primary)] text-[#16181c]'
                                 : 'bg-[var(--background-secondary)] text-[var(--foreground-secondary)] border border-[var(--border-color)]'
                             }`}
                           >
@@ -901,7 +901,7 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
                           onClick={() => choose('')}
                           className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${
                             current === ''
-                              ? 'bg-[var(--accent-primary)] text-white'
+                              ? 'bg-[var(--accent-primary)] text-[#16181c]'
                               : 'bg-[var(--background-secondary)] text-[var(--foreground-secondary)] border border-[var(--border-color)]'
                           }`}
                         >
@@ -922,7 +922,7 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
                                 onClick={() => setCreateTypes((m) => ({ ...m, [csvName]: t }))}
                                 className={`px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${
                                   createType === t
-                                    ? 'bg-[var(--accent-primary)] text-white'
+                                    ? 'bg-[var(--accent-primary)] text-[#16181c]'
                                     : 'bg-[var(--background-secondary)] text-[var(--foreground-secondary)] border border-[var(--border-color)]'
                                 }`}
                               >
@@ -979,7 +979,7 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
                         {t.type === 'income' || t.transferDirection === 'in' ? '+' : '-'}${t.amount.toFixed(2)}
                       </td>
                       <td className="p-3">
-                        <span className={`text-xs px-2 py-1 rounded-full ${t.type === 'income' ? 'bg-emerald-500/20 text-emerald-500' : t.type === 'transfer' ? 'bg-blue-500/20 text-blue-400' : 'bg-[var(--background-tertiary)] text-[var(--foreground-secondary)]'}`}>
+                        <span className={`text-xs px-2 py-1 rounded-full ${t.type === 'income' ? 'bg-emerald-500/20 text-emerald-500' : t.type === 'transfer' ? 'bg-amber-500/20 text-amber-400' : 'bg-[var(--background-tertiary)] text-[var(--foreground-secondary)]'}`}>
                           {t.type}
                         </span>
                       </td>

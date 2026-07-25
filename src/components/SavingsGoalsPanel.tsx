@@ -29,12 +29,12 @@ interface SavingsGoalsPanelProps {
 }
 
 const GOAL_COLORS = [
+  '#c9a24e', // gold (brand)
   '#10b981', // emerald
-  '#3b82f6', // blue
-  '#1e40af', // deep blue
-  '#60a5fa', // light blue
-  '#2563eb', // blue-600
-  '#1e3a8a', // blue-900
+  '#0d9488', // teal
+  '#7c3aed', // violet
+  '#e11d48', // rose
+  '#f59e0b', // amber
   '#06b6d4', // cyan
   '#84cc16', // lime
 ];
@@ -517,7 +517,7 @@ function GoalModal({
                   onClick={() => setFormData(prev => ({ ...prev, priority: p as any }))}
                   className={`flex-1 py-2 rounded-lg font-medium transition-colors ${
                     formData.priority === p
-                      ? 'bg-[var(--accent-primary)] text-white'
+                      ? 'bg-[var(--accent-primary)] text-[#16181c]'
                       : 'bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:bg-[var(--background-secondary)]'
                   }`}
                 >

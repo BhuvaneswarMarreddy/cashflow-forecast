@@ -338,7 +338,7 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
               onClick={() => setFormData({ ...formData, type: 'transfer' })}
               className={`flex-1 py-3 rounded-xl font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
                 formData.type === 'transfer'
-                  ? 'bg-[var(--accent-primary)] text-white'
+                  ? 'bg-[var(--accent-primary)] text-[#16181c]'
                   : 'bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'
               }`}
             >
