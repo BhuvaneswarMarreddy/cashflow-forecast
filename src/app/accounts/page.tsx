@@ -13,7 +13,7 @@ import BudgetSettingsPanel from '@/components/BudgetSettingsPanel';
 import BudgetStatusPanel from '@/components/BudgetStatusPanel';
 import DebtPlannerPanel from '@/components/DebtPlannerPanel';
 import { PAYMENT_METHODS, ACCOUNT_TYPES, PaymentAccount, IncomeSource, AccountType, PaymentMethod, CategoryBudget } from '@/types';
-import { deriveAccountBalance, withDerivedBalances } from '@/lib/forecast';
+import { deriveAccountBalance, withDerivedBalances, monthlyAverages } from '@/lib/forecast';
 import { matchTransfers } from '@/lib/transfers';
 import { currentOf } from '@/lib/accounts';
 import {
@@ -332,15 +332,29 @@ export default function AccountsPage() {
     .reduce((sum, a) => sum + currentOf(a), 0);
 
   const totalBankBalance = derivedAccounts
-    .filter((a) => a.type === 'bank_account' || a.type === 'debit_card')
+    .filter((a) => a.type === 'bank_account' || a.type === 'debit_card' || a.type === 'cash')
     .reduce((sum, a) => sum + currentOf(a), 0);
 
-  const monthlyIncome = profile?.incomeSources?.reduce((sum, inc) => {
+  // All debt (cards + loans) and net worth — the headline number this page was missing.
+  const totalDebt = derivedAccounts
+    .filter((a) => a.type === 'credit_card' || a.type === 'personal_loan')
+    .reduce((sum, a) => sum + currentOf(a), 0);
+  const netWorth = totalBankBalance - totalDebt;
+  const creditUtilization = totalCreditLimit > 0 ? Math.round((totalCreditUsed / totalCreditLimit) * 100) : 0;
+
+  // Income & budget: use hand-entered income sources / budget when present, else DERIVE
+  // from the last 6 months of transactions (so these never read a bare $0).
+  const incomeFromSources = profile?.incomeSources?.reduce((sum, inc) => {
     const monthly = inc.frequency === 'yearly' ? inc.amount / 12 :
-      inc.frequency === 'biweekly' ? inc.amount * 2 :
-      inc.frequency === 'weekly' ? inc.amount * 4 : inc.amount;
+      inc.frequency === 'biweekly' ? inc.amount * 26 / 12 :
+      inc.frequency === 'weekly' ? inc.amount * 52 / 12 : inc.amount;
     return sum + monthly;
   }, 0) || 0;
+  const derivedMonthly = monthlyAverages(transactions, derivedAccounts);
+  const monthlyIncome = incomeFromSources > 0 ? incomeFromSources : derivedMonthly.income;
+  const incomeIsDerived = incomeFromSources === 0 && derivedMonthly.income > 0;
+  const effectiveBudget = (profile?.monthlyBudget || 0) > 0 ? profile!.monthlyBudget! : derivedMonthly.spending;
+  const budgetIsDerived = !((profile?.monthlyBudget || 0) > 0) && effectiveBudget > 0;
 
   return (
     <div className="min-h-screen relative">
@@ -357,7 +371,17 @@ export default function AccountsPage() {
         </div>
 
         {/* Summary Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+          <div className="stat-card">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[var(--foreground-secondary)] text-sm">Net Worth</span>
+              <Wallet className="w-5 h-5 text-[var(--accent-primary)]" />
+            </div>
+            <p className={`text-2xl font-bold ${netWorth >= 0 ? 'text-[var(--accent-success)]' : 'text-[var(--accent-danger)]'}`}>
+              {netWorth < 0 ? '-' : ''}${Math.abs(netWorth).toLocaleString()}
+            </p>
+            <p className="text-xs text-[var(--foreground-muted)]">cash − all debt</p>
+          </div>
           <div className="stat-card">
             <div className="flex items-center justify-between mb-2">
               <span className="text-[var(--foreground-secondary)] text-sm">Bank Balance</span>
@@ -366,6 +390,7 @@ export default function AccountsPage() {
             <p className="text-2xl font-bold text-[var(--accent-success)]">
               ${totalBankBalance.toLocaleString()}
             </p>
+            <p className="text-xs text-[var(--foreground-muted)]">across all cash accounts</p>
           </div>
           <div className="stat-card">
             <div className="flex items-center justify-between mb-2">
@@ -376,7 +401,7 @@ export default function AccountsPage() {
               ${totalCreditUsed.toLocaleString()}
             </p>
             <p className="text-xs text-[var(--foreground-muted)]">
-              of ${totalCreditLimit.toLocaleString()} limit
+              {creditUtilization}% of ${totalCreditLimit.toLocaleString()} limit
             </p>
           </div>
           <div className="stat-card">
@@ -387,6 +412,7 @@ export default function AccountsPage() {
             <p className="text-2xl font-bold text-[var(--accent-success)]">
               ${monthlyIncome.toLocaleString()}
             </p>
+            <p className="text-xs text-[var(--foreground-muted)]">{incomeIsDerived ? 'avg (from transactions)' : 'from income sources'}</p>
           </div>
           <div className="stat-card">
             <div className="flex items-center justify-between mb-2">
@@ -394,8 +420,9 @@ export default function AccountsPage() {
               <DollarSign className="w-5 h-5 text-[var(--accent-warning)]" />
             </div>
             <p className="text-2xl font-bold text-[var(--foreground)]">
-              ${(profile?.monthlyBudget || 0).toLocaleString()}
+              ${effectiveBudget.toLocaleString()}
             </p>
+            <p className="text-xs text-[var(--foreground-muted)]">{budgetIsDerived ? 'typical monthly spend' : 'your set budget'}</p>
           </div>
         </div>
 
