@@ -153,6 +153,8 @@ export default function DashboardPage() {
   const monthlyIncome = incomeFromSources > 0 ? incomeFromSources : derivedMonthly.income;
   const effectiveBudget = (profile?.monthlyBudget || 0) > 0 ? profile!.monthlyBudget! : derivedMonthly.spending;
   const budgetIsDerived = !((profile?.monthlyBudget || 0) > 0) && effectiveBudget > 0;
+  const netWorth = totalBankBalance - totalCreditUsed - totalLoanBalance;
+  const creditUtilization = totalCreditLimit > 0 ? Math.round((totalCreditUsed / totalCreditLimit) * 100) : 0;
 
   // Check if setup is incomplete
   const hasAccounts = (profile?.paymentAccounts?.length || 0) > 0;
@@ -436,7 +438,22 @@ export default function DashboardPage() {
         )}
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+          <div className="stat-card">
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-[var(--foreground-secondary)] text-sm font-medium">Net Worth</span>
+              <div className="w-10 h-10 rounded-xl bg-[var(--accent-primary)]/20 flex items-center justify-center">
+                <Wallet className="w-5 h-5 text-[var(--accent-primary)]" />
+              </div>
+            </div>
+            <p className={`text-3xl font-bold ${netWorth >= 0 ? 'text-[var(--accent-success)]' : 'text-[var(--accent-danger)]'}`}>
+              {netWorth < 0 ? '-' : ''}${Math.abs(netWorth).toLocaleString()}
+            </p>
+            <p className="text-[var(--foreground-muted)] text-sm mt-1">
+              Cash − all debt
+            </p>
+          </div>
+
           <div className="stat-card">
             <div className="flex items-center justify-between mb-4">
               <span className="text-[var(--foreground-secondary)] text-sm font-medium">Cash Available</span>
@@ -463,7 +480,7 @@ export default function DashboardPage() {
               ${totalCreditUsed.toLocaleString()}
             </p>
             <p className="text-[var(--foreground-muted)] text-sm mt-1">
-              of ${totalCreditLimit.toLocaleString()} limit
+              {creditUtilization}% of ${totalCreditLimit.toLocaleString()} limit
             </p>
           </div>
 
