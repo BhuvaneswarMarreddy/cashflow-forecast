@@ -54,15 +54,14 @@ export default function HistoryPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [dateFilter, setDateFilter] = useState<DateFilter>('all');
   const [typeFilter, setTypeFilter] = useState<'all' | TransactionType>('all');
-  const [accountFilter, setAccountFilter] = useState<string>('all');
-
   // Deep-link from the Accounts page: /history?account=<id> pre-selects that account
-  // (drills straight into one account's transactions + summary, grouped month/year/all).
-  // Read from window (client-only) to avoid the useSearchParams static-prerender bailout.
-  useEffect(() => {
-    const a = new URLSearchParams(window.location.search).get('account');
-    if (a) setAccountFilter(a);
-  }, []);
+  // (drills into one account's transactions + summary, grouped month/year/all-time).
+  // Read in the initializer (not an effect) so there's no set-state-in-effect and no
+  // useSearchParams prerender bailout; the page SSRs a spinner during auth load, so the
+  // client-only initial value can't cause a hydration mismatch.
+  const [accountFilter, setAccountFilter] = useState<string>(
+    () => (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('account') || 'all' : 'all')
+  );
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest' | 'highest' | 'lowest'>('newest');
   const [groupBy, setGroupBy] = useState<GroupBy>('month');
