@@ -79,7 +79,7 @@ describe('person extraction', () => {
   });
 });
 
-import { buildFlowGraph } from '@/lib/flows';
+import { buildFlowGraph, FlowGraph } from '@/lib/flows';
 
 describe('buildFlowGraph', () => {
   // Distilled real-world scenario covering every stub branch.
@@ -185,6 +185,64 @@ describe('buildFlowGraph', () => {
   });
 });
 
+describe('refunds are not income (owner rule)', () => {
+  const find = (g: FlowGraph, s: string, t: string) =>
+    g.links.find((l) => l.source === s && l.target === t)?.cents;
+
+  it('routes a bank-account refund to the Refunds node, never an income source', () => {
+    const bank = acct({ id: 'A', balance: 100 });
+    const txns = [
+      tx({ id: 'buy', amount: 80, type: 'expense', accountId: 'A', sourceCategory: 'Shopping', merchant: 'Amazon', date: '2026-03-01' }),
+      tx({ id: 'ref', amount: 45.99, type: 'income', accountId: 'A', sourceCategory: 'Shopping', merchant: 'Amazon', title: 'Amazon refund', date: '2026-03-10' }),
+    ];
+    const g = buildFlowGraph(txns, [bank]);
+    expect(find(g, 'refunds', 'acct:A')).toBe(4599);
+    expect(g.links.some((l) => l.source.startsWith('inc:') && l.target === 'acct:A')).toBe(false);
+  });
+
+  it('leaves a genuine bank deposit as income', () => {
+    const bank = acct({ id: 'A', balance: 100 });
+    const txns = [tx({ id: 'pay', amount: 500, type: 'income', accountId: 'A', sourceCategory: 'Paychecks', title: 'Payroll Deposit', date: '2026-03-05' })];
+    const g = buildFlowGraph(txns, [bank]);
+    expect(find(g, 'inc:Paychecks', 'acct:A')).toBe(50000);
+    expect(g.links.some((l) => l.source === 'refunds')).toBe(false);
+  });
+});
+
+describe('conservation holds at balance sign edges', () => {
+  const assertConserved = (g: FlowGraph) => {
+    const inBy = new Map<string, number>(), outBy = new Map<string, number>();
+    for (const l of g.links) {
+      inBy.set(l.target, (inBy.get(l.target) ?? 0) + l.cents);
+      outBy.set(l.source, (outBy.get(l.source) ?? 0) + l.cents);
+    }
+    for (const n of g.nodes) {
+      const i = inBy.get(n.id) ?? 0, o = outBy.get(n.id) ?? 0;
+      if (i > 0 && o > 0) expect(i).toBe(o);
+    }
+    const sources = g.nodes.filter((n) => !inBy.has(n.id)).reduce((s, n) => s + (outBy.get(n.id) ?? 0), 0);
+    const sinks = g.nodes.filter((n) => !outBy.has(n.id)).reduce((s, n) => s + (inBy.get(n.id) ?? 0), 0);
+    expect(sources).toBe(sinks);
+  };
+
+  it('balances an overdrawn bank that is also missing rows', () => {
+    // negative balance now → overdrawn; the lone income makes the implied opening impossible
+    const bank = acct({ id: 'od', balance: -20 });
+    const txns = [tx({ id: 'in', amount: 100, type: 'income', accountId: 'od', sourceCategory: 'Paychecks', title: 'Payroll Deposit', date: '2026-02-01' })];
+    const g = buildFlowGraph(txns, [bank]);
+    expect(g.reconciliation[0].verdict).toBe('missing-rows');
+    assertConserved(g); // fails under the old clamp-to-zero held
+  });
+
+  it('balances an overpaid card (credit balance) that is also missing rows', () => {
+    const card = acct({ id: 'oc', balance: -15, type: 'credit_card', provider: 'amex' });
+    const txns = [tx({ id: 'sp', amount: 100, type: 'expense', accountId: 'oc', sourceCategory: 'Shopping', date: '2026-02-01' })];
+    const g = buildFlowGraph(txns, [card]);
+    expect(g.reconciliation[0].verdict).toBe('missing-rows');
+    assertConserved(g);
+  });
+});
+
 import { detectRecurring, projectNetWorth } from '@/lib/flows';
 
 describe('detectRecurring', () => {
@@ -229,6 +287,15 @@ describe('detectRecurring', () => {
     expect(cents).toHaveLength(0);
     const lapsed = detectRecurring(monthly('g', 'GYM', 26.92, [1, 2, 3]), accounts, '2026-07-23');
     expect(lapsed[0].active).toBe(false); // last seen 03-14, today 07-23
+  });
+
+  it('keeps a quarterly subscription active past the old flat 45-day window', () => {
+    // ~90-day cadence; last seen 62 days before "today" — lapsed under a flat 45d, active now
+    const txns = ['2025-11-20', '2026-02-18', '2026-05-19'].map((d, i) =>
+      tx({ id: `q${i}`, amount: 60, merchant: 'QUARTERLY CO', date: d, accountId: 'A' }));
+    const [item] = detectRecurring(txns, accounts, '2026-07-20');
+    expect(item.cadence).toBe('quarterly');
+    expect(item.active).toBe(true);
   });
 });
 

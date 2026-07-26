@@ -73,6 +73,19 @@ export function isReward(
   return REWARD.test(`${t.title} ${t.merchant || ''} ${t.sourceCategory || ''}`);
 }
 
+// A refund / reimbursement / reversal — money coming back for something already paid.
+// Owner's rule: a refund is NOT income; it nets against spending. Distinct from isReward
+// (card earnings). Text-detected because the source data gives refunds no distinct type.
+// ponytail: catches only rows whose text says so; a refund Monarch files under the
+// original spend category with no "refund" word still reads as income — upgrade needs a
+// same-merchant-prior-expense match if that proves common.
+const REFUND = /refund|reimburse|reversal/i;
+export function isRefund(
+  t: Pick<Transaction, 'title'> & Partial<Pick<Transaction, 'merchant' | 'sourceCategory'>>
+): boolean {
+  return REFUND.test(`${t.title} ${t.merchant || ''} ${t.sourceCategory || ''}`);
+}
+
 export function isPositive(t: Classifiable & { amount?: number }, accounts?: PaymentAccount[]): boolean {
   // The source told us which leg this is. Authoritative — titles like
   // "USAA FUNDS TRANSFER DB"/"...CR" carry no direction word at all.

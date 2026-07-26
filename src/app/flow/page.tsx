@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   ResponsiveContainer, Sankey, Tooltip, LineChart, Line, XAxis, YAxis, CartesianGrid,
@@ -70,10 +70,10 @@ function TreemapCell(props: { x?: number; y?: number; width?: number; height?: n
     <g>
       <rect x={x} y={y} width={width} height={height} fill={fill ?? '#64748b'} rx={3} opacity={0.85} stroke="rgba(0,0,0,0.25)" />
       {width > 82 && height > 30 && (
-        <text x={x + 7} y={y + 18} style={{ fontSize: 11, fontWeight: 600 }} fill="#fff">{name}</text>
+        <text x={x + 7} y={y + 18} style={{ fontSize: 11, fontWeight: 600, paintOrder: 'stroke' }} stroke="rgba(0,0,0,0.55)" strokeWidth={3} fill="#fff">{name}</text>
       )}
       {width > 82 && height > 48 && value !== undefined && (
-        <text x={x + 7} y={y + 34} style={{ fontSize: 11 }} fill="rgba(255,255,255,0.85)">
+        <text x={x + 7} y={y + 34} style={{ fontSize: 11, paintOrder: 'stroke' }} stroke="rgba(0,0,0,0.55)" strokeWidth={3} fill="#fff">
           {money(Math.round(value * 100))}
         </text>
       )}
@@ -145,6 +145,30 @@ export default function FlowPage() {
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
   }, []);
+
+  // Maximized overlay is a modal dialog: move focus in on open, keep Tab inside it, and
+  // restore focus to the trigger on close (WCAG 2.4.3 focus order, 2.1.2 no keyboard trap).
+  const overlayRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!maximized) return;
+    const el = overlayRef.current;
+    if (!el) return;
+    const prev = document.activeElement as HTMLElement | null;
+    const focusables = () => [...el.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input, [tabindex]:not([tabindex="-1"])'
+    )];
+    (focusables()[0] ?? el).focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return;
+      const f = focusables();
+      if (!f.length) { e.preventDefault(); return; }
+      const first = f[0], lastEl = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); lastEl.focus(); }
+      else if (!e.shiftKey && document.activeElement === lastEl) { e.preventDefault(); first.focus(); }
+    };
+    el.addEventListener('keydown', onKey);
+    return () => { el.removeEventListener('keydown', onKey); prev?.focus?.(); };
+  }, [maximized]);
 
   const accounts = useMemo(() => profile?.paymentAccounts ?? [], [profile]);
   const todayISO = day(new Date().toISOString());
@@ -266,11 +290,24 @@ export default function FlowPage() {
     const labelLeft = x > 560;
     return (
       <g
+        className="flow-node"
+        tabIndex={0}
+        role="button"
+        aria-label={`${payload.label ?? 'node'}${payload.value ? `, ${money(Math.round(payload.value * 100))}` : ''}. Press Enter to trace this money through the flow.`}
+        aria-pressed={effectivePin === payload.label}
         opacity={bright ? 1 : 0.22}
         style={{ cursor: 'pointer', transition: 'opacity 150ms' }}
         onMouseEnter={() => setHoverLabel(payload.label ?? null)}
         onMouseLeave={() => setHoverLabel(null)}
+        onFocus={() => setHoverLabel(payload.label ?? null)}
+        onBlur={() => setHoverLabel(null)}
         onClick={() => setPinLabel((p) => (p === payload.label ? null : payload.label ?? null))}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setPinLabel((p) => (p === payload.label ? null : payload.label ?? null));
+          }
+        }}
       >
         <rect x={x} y={y} width={width} height={height} fill={FLOW_COLORS[kind]} rx={2} />
         <text
@@ -285,7 +322,7 @@ export default function FlowPage() {
         </text>
       </g>
     );
-  }, [isNodeBright]);
+  }, [isNodeBright, effectivePin]);
 
   // Ribbons colored by their source node; connected ones glow, the rest recede.
   const renderLink = useCallback((props: {
@@ -313,13 +350,20 @@ export default function FlowPage() {
   const gapTotal = graph.reconciliation.reduce((s, r) => s + r.gapCents, 0);
   const last = projection.points[projection.points.length - 1];
 
+  // The reconciliation "Now" column actually shows the balance at the END of the selected
+  // period. That equals today only when the period runs to (or past) today — for a bounded
+  // PAST period it is a historical balance, so label it honestly.
+  const periodEnd = periodFor(range, todayISO, month).end;
+  const balanceColLabel = !periodEnd || periodEnd >= todayISO ? 'Now' : 'Period end';
+
   const rangeButtons = (
     <div className="flex items-center gap-2 flex-wrap">
-      <div className="flex gap-1 rounded-lg bg-[var(--background-tertiary)] p-1 flex-wrap">
+      <div role="group" aria-label="Time range" className="flex gap-1 rounded-lg bg-[var(--background-tertiary)] p-1 flex-wrap">
         {RANGES.map((r) => (
           <button
             key={r.key}
             onClick={() => setRange(r.key)}
+            aria-pressed={range === r.key}
             className={`px-3 py-1.5 rounded-md text-sm transition-colors ${range === r.key
               ? 'bg-[var(--accent-primary)] text-[#16181c]'
               : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'}`}
@@ -384,6 +428,16 @@ export default function FlowPage() {
     return graph.links.filter((l) => !hasIn.has(l.source)).reduce((s, l) => s + l.cents, 0);
   }, [graph]);
 
+  // Text alternative for the SVG chart: every ribbon as a From → To → amount row. The
+  // diagram is unreadable to a screen reader; this table carries the same data (dataviz
+  // requires a table view of every chart), and sighted users get an exact lookup too.
+  const linkRows = useMemo(() => {
+    const labelOf = new Map(graph.nodes.map((n) => [n.id, n.label]));
+    return graph.links
+      .map((l) => ({ from: labelOf.get(l.source) ?? l.source, to: labelOf.get(l.target) ?? l.target, cents: l.cents }))
+      .sort((a, b) => b.cents - a.cents);
+  }, [graph]);
+
   const treemapData = useMemo(() => {
     const top = sinkRows.slice(0, 14);
     const rest = sinkRows.slice(14).reduce((s, r) => s + r.cents, 0);
@@ -407,11 +461,12 @@ export default function FlowPage() {
   }, [sinkRows, totalSourcesCents]);
 
   const kindChips = (
-    <div className="flex gap-1 flex-wrap items-center">
+    <div role="group" aria-label="Filter flow by kind" className="flex gap-1 flex-wrap items-center">
       {KIND_CHIPS.map((c) => (
         <button
           key={c.label}
           onClick={() => { setFocusKind(c.kind); setPinLabel(null); }}
+          aria-pressed={focusKind === c.kind}
           className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${focusKind === c.kind
             ? 'bg-[var(--accent-primary)] text-[#16181c] border-transparent'
             : 'border-[var(--border-color)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'}`}
@@ -432,11 +487,12 @@ export default function FlowPage() {
   );
 
   const chartToggle = (
-    <div className="flex gap-1 rounded-lg bg-[var(--background-tertiary)] p-1">
+    <div role="group" aria-label="Chart type" className="flex gap-1 rounded-lg bg-[var(--background-tertiary)] p-1">
       {CHART_KINDS.map((c) => (
         <button
           key={c.key}
           onClick={() => setChart(c.key)}
+          aria-pressed={chart === c.key}
           className={`px-3 py-1.5 rounded-md text-sm transition-colors ${chart === c.key
             ? 'bg-[var(--accent-primary)] text-[#16181c]'
             : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'}`}
@@ -546,20 +602,58 @@ export default function FlowPage() {
                 <Maximize2 className="w-4 h-4" />
               </button>
             </div>
-            <div className="overflow-x-auto">
+            <div
+              className="overflow-x-auto"
+              role="img"
+              aria-label={`${CHART_KINDS.find((c) => c.key === chart)?.label ?? 'Flow'} chart tracing ${money(totalSourcesCents)} across ${graph.nodes.length} sources, accounts and destinations. The full breakdown is in the "View the flow as a table" section below.`}
+            >
               <div style={{ minWidth: chart === 'sankey' ? 900 : 0 }}>{chartView(560)}</div>
             </div>
             <p className="text-xs text-[var(--foreground-muted)] mt-2">
-              {chart === 'sankey' && 'Click an income source (left side) to follow that money to the end · hover for a quick peek · chips filter by kind · Esc clears'}
+              {chart === 'sankey' && 'Click or focus an income source (left side) and press Enter to follow that money to the end · hover for a quick peek · chips filter by kind · Esc clears'}
               {chart === 'treemap' && 'Box size = dollars. Where every dollar ended up in this period — including what stayed in your accounts.'}
               {chart === 'waterfall' && 'Start with all money available, subtract each destination — it lands on exactly $0 because every dollar is accounted for.'}
             </p>
+
+            {/* Text alternative — the same ribbons as a real table (keyboard + screen-reader path) */}
+            <details className="mt-3">
+              <summary className="cursor-pointer text-sm text-[var(--foreground-secondary)] hover:text-[var(--foreground)] select-none">
+                View the flow as a table ({linkRows.length} flows)
+              </summary>
+              <div className="overflow-x-auto rounded-xl border border-[var(--border-color)] mt-2">
+                <table className="w-full text-sm">
+                  <caption className="sr-only">Every money flow for this period, from source to destination, in dollars.</caption>
+                  <thead className="bg-[var(--background-tertiary)] text-left">
+                    <tr>
+                      <th scope="col" className="px-3 py-2">From</th>
+                      <th scope="col" className="px-3 py-2">To</th>
+                      <th scope="col" className="px-3 py-2 text-right">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {linkRows.map((l, i) => (
+                      <tr key={i} className="border-t border-[var(--border-color)]">
+                        <td className="px-3 py-2">{l.from}</td>
+                        <td className="px-3 py-2">{l.to}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{money(l.cents)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
           </section>
         )}
 
         {/* Maximized overlay */}
         {maximized && (
-          <div className="fixed inset-0 z-[70] bg-[var(--background)] p-3 sm:p-4 flex flex-col">
+          <div
+            ref={overlayRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Money flow, expanded view"
+            tabIndex={-1}
+            className="fixed inset-0 z-[70] bg-[var(--background)] p-3 sm:p-4 flex flex-col">
             <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
               <h2 className="text-lg font-semibold text-[var(--foreground)]">Money flow</h2>
               <div className="flex items-center gap-2 flex-wrap">
@@ -576,7 +670,9 @@ export default function FlowPage() {
             </div>
             <div className="mb-2 flex items-center gap-2 flex-wrap">{chartToggle}{chart === 'sankey' && kindChips}</div>
             <div className="flex-1 min-h-0 overflow-auto rounded-xl border border-[var(--border-color)] bg-[var(--background-secondary)] p-2">
-              <div style={{ minWidth: chart === 'sankey' ? 900 : 0 }} className="h-full">{chartView('100%')}</div>
+              {/* minHeight keeps the chart usable on short/landscape screens — it scrolls in
+                  the overflow-auto parent instead of being crushed to a few pixels. */}
+              <div style={{ minWidth: chart === 'sankey' ? 900 : 0, minHeight: 420 }} className="h-full">{chartView('100%')}</div>
             </div>
           </div>
         )}
@@ -598,7 +694,7 @@ export default function FlowPage() {
                 <tr>
                   <th className="px-3 py-2">Account</th><th className="px-3 py-2 text-right">Opening</th>
                   <th className="px-3 py-2 text-right">In</th><th className="px-3 py-2 text-right">Out</th>
-                  <th className="px-3 py-2 text-right">Now</th><th className="px-3 py-2">Verdict</th>
+                  <th className="px-3 py-2 text-right">{balanceColLabel}</th><th className="px-3 py-2">Verdict</th>
                 </tr>
               </thead>
               <tbody>

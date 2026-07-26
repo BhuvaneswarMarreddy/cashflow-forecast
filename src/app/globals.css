@@ -8,7 +8,7 @@
   --background-tertiary: #24282e;
   --foreground: #f2f0ea;
   --foreground-secondary: #9a9c98;
-  --foreground-muted: #5c5f5a;
+  --foreground-muted: #8a8d88;   /* WCAG 1.4.3: ~5:1 on the graphite bg (was #5c5f5a = 2.6:1) */
   
   /* Accent colors - Deep Blue Theme */
   --accent-primary: #c9a24e;      /* Gold — filled CTAs use dark text */
@@ -771,4 +771,11 @@ a:focus-visible {
 /* Drag-and-drop: respect reduced motion */
 @media (prefers-reduced-motion: reduce) {
   [data-dnd-draggable] { transition: none !important; }
+}
+
+/* Keyboard focus ring for the SVG flow (Sankey) nodes — browsers give SVG no default */
+.flow-node:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+  border-radius: 2px;
 }

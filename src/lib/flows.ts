@@ -62,7 +62,7 @@ export const displayPerson = (name: string) =>
 // ============================================================
 // buildFlowGraph — the Sankey data + reconciliation
 // ============================================================
-import { classifyTransaction, isReward } from './classify';
+import { classifyTransaction, isReward, isRefund } from './classify';
 import { matchTransfers } from './transfers';
 import { displayCategory } from '@/types';
 import type { FlowColorKey } from './palette';
@@ -202,9 +202,14 @@ export function buildFlowGraph(
       const an = accNodeOf(t, 'in');
       if (person && !isSelfPerson(person)) { add(recv, person, an, cents); continue; }
       const a = t.accountId ? byId.get(t.accountId) : undefined;
+      // A refund is not income (owner rule) — on a bank it must reach the same 'refunds'
+      // node a card refund does, so the story nets it out of spending instead of counting
+      // it as money in.
       const src = isDebtAccount(a)
         ? node(isReward(t) ? 'rewards' : 'refunds', isReward(t) ? 'Rewards' : 'Refunds', 'source')
-        : node(`inc:${t.sourceCategory ?? 'Other income'}`, t.sourceCategory ?? 'Other income', 'source');
+        : isRefund(t)
+          ? node('refunds', 'Refunds', 'source')
+          : node(`inc:${t.sourceCategory ?? 'Other income'}`, t.sourceCategory ?? 'Other income', 'source');
       link(src, an, cents);
     } else {
       const an = accNodeOf(t, 'out');
@@ -285,11 +290,18 @@ export function buildFlowGraph(
       gap = Math.abs(opening);
       verdict = 'missing-rows';
       if (bank) {
-        link(id, node('held', 'Held today', 'stub'), Math.max(closing, 0));
         link(id, node('missing-out', '⚠ Missing from export', 'warning'), gap);
+        // Hold the real closing so the node balances. A positive balance stays in the
+        // account; a rare overdrawn (negative) balance is an inflow — clamping it to zero
+        // (the old bug) left |closing| of outflow with no source and broke conservation.
+        if (closing >= 0) link(id, node('held', 'Held today', 'stub'), closing);
+        else link(node('overdrawn', '⚠ Overdrawn (negative balance)', 'warning'), id, -closing);
       } else {
         link(node('missing-in', '⚠ Missing from export (in)', 'warning'), id, gap);
-        link(node('debt-up', 'Card balance ↑ (new debt)', 'source'), id, Math.max(-closing, 0));
+        // A normal card owes (negative closing → new-debt inflow); an overpaid card holds a
+        // positive balance that must LEAVE the node as held, else sources exceed sinks.
+        if (closing <= 0) link(node('debt-up', 'Card balance ↑ (new debt)', 'source'), id, -closing);
+        else link(id, node('held', 'Held today', 'stub'), closing);
       }
     }
     reconciliation.push({
@@ -366,7 +378,9 @@ export function detectRecurring(
     out.push({
       merchant, cadence, medianCents: med, monthlyCents: Math.round(med * mult),
       occurrences: dates.length, firstSeen: dates[0], lastSeen,
-      active: daysBetween(lastSeen, day(todayISO)) <= 45,
+      // Active = seen within ~1.5 of its own cycle length, not a flat 45 days — else a
+      // healthy quarterly/yearly subscription reads as lapsed and drops off the /mo total.
+      active: daysBetween(lastSeen, day(todayISO)) <= hi * 1.5,
     });
   }
   return out.sort((a, b) => b.monthlyCents - a.monthlyCents);
