@@ -39,14 +39,22 @@ export function monthlyAverages(
   for (let i = 1; i <= months; i++) {
     window.add(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1)).toISOString().slice(0, 7));
   }
-  let inc = 0, sp = 0;
+  // Prefer PAYCHECKS as "income" — summing every income-classified row overcounts salary
+  // with refunds, money received from people, one-off deposits, etc. Fall back to all
+  // income only when the user has no paycheck-tagged rows.
+  let pay = 0, allInc = 0, sp = 0;
   for (const t of transactions) {
     if (!window.has(t.date.split('T')[0].slice(0, 7))) continue;
     const c = classifyTransaction(t, accounts);
-    if (c === 'income') inc += t.amount;
-    else if (c === 'expense') sp += t.amount;
+    if (c === 'income') {
+      allInc += t.amount;
+      if (t.sourceCategory === 'Paychecks' || /payroll|paycheck/i.test(t.description ?? t.title)) pay += t.amount;
+    } else if (c === 'expense') {
+      sp += t.amount;
+    }
   }
-  return { income: Math.round(inc / months), spending: Math.round(sp / months) };
+  const income = pay > 0 ? pay : allInc;
+  return { income: Math.round(income / months), spending: Math.round(sp / months) };
 }
 
 export function calculateCurrentCash(accounts: PaymentAccount[]): number {

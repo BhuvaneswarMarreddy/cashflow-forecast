@@ -24,7 +24,20 @@ describe('monthlyAverages', () => {
       tx({ id: 'now', amount: 9999, type: 'income', accountId: 'b', date: m(0) }), // current month excluded
     ];
     const r = monthlyAverages(txns, A, 3);
-    expect(r.income).toBe(Math.round(6000 / 3));   // 2000
+    expect(r.income).toBe(Math.round(6000 / 3));   // 2000 (no paychecks → all income)
     expect(r.spending).toBe(Math.round(1500 / 3)); // 500
+  });
+
+  it('counts ONLY paychecks as income when the user has paycheck rows', () => {
+    const A = [acct({ id: 'b' })];
+    const now = new Date();
+    const m = (back: number) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - back, 15)).toISOString().slice(0, 10);
+    const txns = [
+      tx({ id: 'p1', amount: 4000, type: 'income', accountId: 'b', date: m(1), sourceCategory: 'Paychecks' }),
+      tx({ id: 'p2', amount: 4000, type: 'income', accountId: 'b', date: m(2), sourceCategory: 'Paychecks' }),
+      tx({ id: 'zelle', amount: 5000, type: 'income', accountId: 'b', date: m(1), sourceCategory: 'Other Income' }), // NOT salary
+      tx({ id: 'refund', amount: 200, type: 'income', accountId: 'b', date: m(2), sourceCategory: 'Shopping' }),     // NOT salary
+    ];
+    expect(monthlyAverages(txns, A, 2).income).toBe(4000); // (4000+4000)/2, ignoring the $5,200 non-salary
   });
 });
