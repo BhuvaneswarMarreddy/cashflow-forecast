@@ -23,3 +23,16 @@ export function reindex(orderedIds: string[], accounts: PaymentAccount[]): Array
   const known = new Set(accounts.map((a) => a.id));
   return orderedIds.filter((id) => known.has(id)).map((id, i) => ({ id, sortIndex: i }));
 }
+
+/**
+ * Reconcile an account against the user's real balance. Anchor-only: any drift
+ * re-anchors (openingBalance = the entered balance, openingDate = today), which
+ * resets net-since-anchor to zero and makes later pre-today imports harmless.
+ */
+export function reconcile(
+  account: PaymentAccount, enteredCurrent: number, derivedCurrent: number, todayISO: string
+): { driftCents: number; reanchor?: { openingBalance: number; openingDate: string } } {
+  const driftCents = Math.round((enteredCurrent - derivedCurrent) * 100);
+  if (driftCents === 0) return { driftCents: 0 };
+  return { driftCents, reanchor: { openingBalance: enteredCurrent, openingDate: todayISO } };
+}

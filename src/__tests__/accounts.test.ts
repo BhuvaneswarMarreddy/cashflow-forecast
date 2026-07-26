@@ -24,3 +24,16 @@ describe('reindex', () => {
     expect(reindex(['c', 'ghost', 'a'], accts).map((x) => x.id)).toEqual(['c', 'a']);
   });
 });
+
+import { reconcile } from '@/lib/accounts';
+describe('reconcile', () => {
+  const bank = a({ id: 'b', type: 'bank_account', openingBalance: 1000, openingDate: '2026-02-01' });
+  it('no drift → no re-anchor', () => {
+    expect(reconcile(bank, 1150, 1150, '2026-03-01')).toEqual({ driftCents: 0 });
+  });
+  it('drift → re-anchor to the entered balance at today', () => {
+    const r = reconcile(bank, 1200, 1150, '2026-03-01');
+    expect(r.driftCents).toBe(5000);
+    expect(r.reanchor).toEqual({ openingBalance: 1200, openingDate: '2026-03-01' });
+  });
+});
