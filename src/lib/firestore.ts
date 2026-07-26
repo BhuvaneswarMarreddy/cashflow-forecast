@@ -139,6 +139,8 @@ export interface FirestoreAccount {
   lastFourDigits?: string;
   color: string;
   isActive: boolean;
+  sortIndex?: number; // user-defined display order
+  openingDate?: string; // ISO yyyy-MM-dd (Phase B)
   paymentFromAccountId?: string; // Which account pays this card/loan
   // Loan specific
   originalAmount?: number;

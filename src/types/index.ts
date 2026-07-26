@@ -179,6 +179,11 @@ export interface PaymentAccount {
   color: string;
   lastFourDigits?: string;
   isActive: boolean;
+  sortIndex?: number; // user-defined display order; undefined sorts to the end
+  // Anchor fields (Phase B makes openingBalance/openingDate required + renames balance):
+  openingBalance?: number; // balance AT openingDate; cash +, debt = amount owed
+  openingDate?: string;    // ISO yyyy-MM-dd; net is summed from here forward
+  currentBalance?: number; // DERIVED in memory by withDerivedBalances; never stored
   // Payment linking - which account pays this card/loan
   paymentFromAccountId?: string; // ID of the account that pays this credit card or loan
   // Loan specific fields
