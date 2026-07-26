@@ -60,9 +60,15 @@ export default function AccountsPage() {
   // Live transfer pairing: match each leg leaving an account to the leg arriving in
   // another, so an internal move reads as ONE net-zero movement. Unpaired legs = the
   // other side is in an account you didn't import (external / a Zelle to a person).
+  // Derived accounts (openingBalance + net → currentBalance). MUST stay above any early
+  // return — a hook after a conditional return is React error #310.
+  const derivedAccounts = useMemo(
+    () => withDerivedBalances(profile?.paymentAccounts || [], transactions),
+    [profile?.paymentAccounts, transactions]
+  );
   const transfers = useMemo(
-    () => matchTransfers(transactions, withDerivedBalances(profile?.paymentAccounts || [], transactions)),
-    [transactions, profile?.paymentAccounts]
+    () => matchTransfers(transactions, derivedAccounts),
+    [transactions, derivedAccounts]
   );
   const acctName = (id?: string) => profile?.paymentAccounts?.find(a => a.id === id)?.name || 'Untracked';
   const transferRoutes = useMemo(() => {
@@ -315,13 +321,6 @@ export default function AccountsPage() {
   };
 
   // Balances derived from linked transactions for every DISPLAY below. The edit form
-  // still reads/writes currentOf(account) as the OPENING balance (openEditAccount uses the
-  // original account, not a derived copy), so the write path is unchanged.
-  const derivedAccounts = useMemo(
-    () => withDerivedBalances(profile?.paymentAccounts || [], transactions),
-    [profile?.paymentAccounts, transactions]
-  );
-
   const totalCreditLimit = derivedAccounts
     .filter((a) => a.type === 'credit_card')
     .reduce((sum, a) => sum + (a.creditLimit || 0), 0);
