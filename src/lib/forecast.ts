@@ -17,6 +17,7 @@ import {
 } from '@/types';
 import { addDays, format, parseISO, startOfDay, isBefore, isAfter, isSameDay } from 'date-fns';
 import { isPositive } from '@/lib/classify';
+import { currentOf } from '@/lib/accounts';
 
 const DEFAULT_SAFETY_THRESHOLD = 500;
 const FORECAST_DAYS = 90;
@@ -27,41 +28,42 @@ const FORECAST_DAYS = 90;
 export function calculateCurrentCash(accounts: PaymentAccount[]): number {
   return accounts
     .filter(a => a.type === 'bank_account' || a.type === 'debit_card' || a.type === 'cash')
-    .reduce((sum, a) => sum + a.balance, 0);
+    .reduce((sum, a) => sum + currentOf(a), 0);
 }
 
 /**
  * Derive an account's CURRENT balance from its own PAST transactions.
- * account.balance is treated as an OPENING balance (0 for auto-created accounts,
+ * currentOf(account) is treated as an OPENING balance (0 for auto-created accounts,
  * which yields pure derivation). Future/projected rows are the forecast, not the
  * balance, so they are excluded here using the same today-boundary the forecast uses.
  */
 export function deriveAccountBalance(account: PaymentAccount, transactions: Transaction[]): number {
   const todayKey = format(new Date(), 'yyyy-MM-dd');
+  const openingKey = account.openingDate || '0000-00-00';
   const isDebt = account.type === 'credit_card' || account.type === 'personal_loan';
   const net = transactions.reduce((sum, t) => {
     if (t.accountId !== account.id) return sum;
-    // Compare calendar days, not instants. A today-dated row is stored at UTC midnight,
-    // so an instant comparison against local start-of-day dropped it for users east of
-    // UTC (e.g. IST) until the next calendar day. yyyy-MM-dd is what the forecast uses too.
-    if (t.date.split('T')[0] > todayKey) return sum; // future = forecast, not current balance
+    // Compare calendar days, not instants (IST timezone; see git history).
+    const day = t.date.split('T')[0];
+    if (day > todayKey) return sum;   // future = forecast, not current balance
+    if (day < openingKey) return sum; // pre-anchor = already inside openingBalance
     return sum + (isPositive(t, [account]) ? t.amount : -t.amount);
   }, 0);
-  const opening = account.balance || 0;
-  // Debt is stored as a positive number: a purchase (signedEffect < 0) raises it,
+  const opening = account.openingBalance || 0;
+  // Debt is stored as a positive amount owed: a purchase (signedEffect < 0) raises it,
   // a payment (signedEffect > 0) lowers it — the opposite sign to a cash account.
   return isDebt ? opening - net : opening + net;
 }
 
 /**
- * Balances are the CURRENT balance the user sets per account — that is the truth.
- * The CSV carries no balance, and summing transactions from $0 over an incomplete
- * history produced a wrong net worth (the reason this used to derive). So this now
- * returns the stored balances unchanged; deriveAccountBalance() is only an ESTIMATE
- * the Accounts page offers as a starting point, never the source of truth.
+ * Attaches a DERIVED currentBalance to each account: openingBalance ± net of the
+ * account's transactions dated on/after openingDate (the dated anchor set by reconcile).
+ * currentBalance is the everyday hero number; openingBalance/openingDate are the stored
+ * anchor. Callers showing "current" read currentBalance; callers showing/editing the
+ * anchor read openingBalance. This is O(accounts × transactions) — CALLERS MUST MEMOIZE.
  */
-export function withDerivedBalances(accounts: PaymentAccount[], _transactions: Transaction[]): PaymentAccount[] {
-  return accounts;
+export function withDerivedBalances(accounts: PaymentAccount[], transactions: Transaction[]): PaymentAccount[] {
+  return accounts.map((a) => ({ ...a, currentBalance: deriveAccountBalance(a, transactions) }));
 }
 
 /**
@@ -795,7 +797,7 @@ export function generateAccountForecast(
     type: 'starting_balance',
     description: `${account.name} Starting Balance`,
     amount: 0,
-    balanceAfter: account.balance,
+    balanceAfter: currentOf(account),
     source: 'manual',
     accountId: account.id,
   });
@@ -939,7 +941,7 @@ export function generateAccountForecast(
             date: format(dueDate, 'yyyy-MM-dd'),
             type: 'income', // Payment reduces credit card balance (like income)
             description: `Payment from ${payingAccount?.name || 'Bank Account'}`,
-            amount: -(account.balance || 0), // Reduces balance
+            amount: -(currentOf(account) || 0), // Reduces balance
             balanceAfter: 0,
             source: 'recurring',
             accountId: account.id,
@@ -982,8 +984,8 @@ export function generateAccountForecast(
   events.sort((a, b) => a.date.localeCompare(b.date));
   
   // Calculate running balance
-  let runningBalance = account.balance;
-  let lowestBalance = account.balance;
+  let runningBalance = currentOf(account);
+  let lowestBalance = currentOf(account);
   let lowestBalanceDate = format(today, 'yyyy-MM-dd');
   let totalIncome = 0;
   let totalExpenses = 0;
@@ -991,7 +993,7 @@ export function generateAccountForecast(
   
   events.forEach((event, index) => {
     if (index === 0) {
-      event.balanceAfter = account.balance;
+      event.balanceAfter = currentOf(account);
       return;
     }
     
@@ -1027,7 +1029,7 @@ export function generateAccountForecast(
         .map(card => ({
           cardId: card.id,
           cardName: card.name,
-          amount: card.balance || 0,
+          amount: currentOf(card) || 0,
           dueDate: (() => {
             const today = new Date();
             const dueDay = card.dueDate!;
@@ -1044,9 +1046,9 @@ export function generateAccountForecast(
     accountId: account.id,
     accountName: account.name,
     accountType: account.type,
-    currentBalance: account.balance,
+    currentBalance: currentOf(account),
     forecast: {
-      startingBalance: account.balance,
+      startingBalance: currentOf(account),
       endingBalance: runningBalance,
       lowestBalance,
       lowestBalanceDate,

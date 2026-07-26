@@ -13,6 +13,7 @@ import {
   DebtAccount 
 } from '@/types';
 import { addMonths, format } from 'date-fns';
+import { currentOf } from '@/lib/accounts';
 
 /**
  * Convert PaymentAccount to DebtAccount (for planning)
@@ -21,16 +22,16 @@ export function accountsToDebts(accounts: PaymentAccount[]): DebtAccount[] {
   return accounts
     .filter(a => 
       (a.type === 'credit_card' || a.type === 'personal_loan') && 
-      a.balance > 0
+      currentOf(a) > 0
     )
     .map(a => ({
       id: a.id,
       name: a.name,
-      balance: a.balance,
+      balance: currentOf(a),
       apr: a.apr || 0,
       minimumPayment: a.type === 'credit_card' 
-        ? Math.max(25, a.balance * 0.02) // 2% or $25 minimum for cards
-        : (a.monthlyPayment || Math.max(50, a.balance * 0.03)), // Loan payment or estimate
+        ? Math.max(25, currentOf(a) * 0.02) // 2% or $25 minimum for cards
+        : (a.monthlyPayment || Math.max(50, currentOf(a) * 0.03)), // Loan payment or estimate
       dueDate: a.dueDate || 1,
     }));
 }

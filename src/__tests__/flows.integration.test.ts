@@ -27,7 +27,7 @@ const ACCOUNTS: Array<[string, PaymentAccount['type'], number]> = [
 
 function load(): { transactions: Transaction[]; accounts: PaymentAccount[] } {
   const accounts: PaymentAccount[] = ACCOUNTS.map(([name, type, balance], i) => ({
-    id: `a${i}`, name, type, balance,
+    id: `a${i}`, name, type, openingBalance: balance, openingDate: '2000-01-01',
     provider: 'other', color: '#000', isActive: true,
   } as PaymentAccount));
   const idByName = new Map(accounts.map((a) => [a.name, a.id]));

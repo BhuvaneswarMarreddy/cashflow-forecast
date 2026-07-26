@@ -14,7 +14,7 @@ describe('Forecast Engine', () => {
       name: 'Chase Checking',
       type: 'bank_account',
       provider: 'chase',
-      balance: 5000,
+      openingBalance: 5000, openingDate: '2000-01-01',
       color: '#1e88e5',
       isActive: true,
     },
@@ -23,7 +23,7 @@ describe('Forecast Engine', () => {
       name: 'AMEX Card',
       type: 'credit_card',
       provider: 'amex',
-      balance: -1500, // Negative = owed
+      openingBalance: -1500, openingDate: '2000-01-01', // Negative = owed
       creditLimit: 10000,
       apr: 24.99,
       dueDate: 15,
@@ -103,7 +103,7 @@ describe('Forecast Engine', () => {
       return d.toISOString();
     };
     const acct = (id: string, type: PaymentAccount['type']): PaymentAccount => ({
-      id, name: id, type, provider: 'chase', balance: 0, color: '#000', isActive: true,
+      id, name: id, type, provider: 'chase', openingBalance: 0, openingDate: '2000-01-01', color: '#000', isActive: true,
     });
     const row = (over: Partial<Transaction>): Transaction => ({
       id: Math.random().toString(), title: '', amount: 0, type: 'expense',

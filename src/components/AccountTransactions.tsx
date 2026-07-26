@@ -19,6 +19,7 @@ import {
 import { Transaction, PaymentAccount, EXPENSE_CATEGORIES, getMerchantColor } from '@/types';
 import { isPositive } from '@/lib/classify';
 import { format, parseISO, startOfMonth, endOfMonth, isWithinInterval } from 'date-fns';
+import { currentOf } from '@/lib/accounts';
 
 interface AccountTransactionsProps {
   account: PaymentAccount;
@@ -142,7 +143,7 @@ export default function AccountTransactions({ account, transactions }: AccountTr
                 : 'text-emerald-500'
             }`}>
               {account.type === 'credit_card' || account.type === 'personal_loan' ? '-' : ''}
-              ${account.balance.toLocaleString()}
+              ${currentOf(account).toLocaleString()}
             </p>
           </div>
           
@@ -183,7 +184,7 @@ export default function AccountTransactions({ account, transactions }: AccountTr
               </p>
               <p className="text-lg font-bold text-[var(--foreground)]">
                 {account.creditLimit 
-                  ? `$${(account.creditLimit - account.balance).toLocaleString()}`
+                  ? `$${(account.creditLimit - currentOf(account)).toLocaleString()}`
                   : `$${Math.round(
                       accountTransactions.reduce((sum, t) => sum + t.amount, 0) / 
                       (accountTransactions.length || 1)

@@ -2,10 +2,10 @@ import { matchTransfers } from '@/lib/transfers';
 import { PaymentAccount, Transaction } from '@/types';
 
 const bank = (id: string): PaymentAccount => ({
-  id, name: id, type: 'bank_account', provider: 'chase', balance: 0, color: '#000', isActive: true,
+  id, name: id, type: 'bank_account', provider: 'chase', openingBalance: 0, openingDate: '2000-01-01', color: '#000', isActive: true,
 });
 const card = (id: string): PaymentAccount => ({
-  id, name: id, type: 'credit_card', provider: 'visa', balance: 0, color: '#000', isActive: true,
+  id, name: id, type: 'credit_card', provider: 'visa', openingBalance: 0, openingDate: '2000-01-01', color: '#000', isActive: true,
 });
 const leg = (o: Partial<Transaction>): Transaction => ({
   id: Math.random().toString(), title: '', amount: 0, type: 'transfer',

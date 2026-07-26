@@ -131,7 +131,7 @@ export interface FirestoreAccount {
   name: string;
   type: 'credit_card' | 'debit_card' | 'bank_account' | 'cash' | 'personal_loan';
   provider: string;
-  balance: number;
+  openingBalance: number;
   creditLimit?: number;
   apr?: number;
   statementDate?: number;

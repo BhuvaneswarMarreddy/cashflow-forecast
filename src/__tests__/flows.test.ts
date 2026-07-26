@@ -10,7 +10,10 @@ export const tx = (o: Partial<Transaction> & { id: string; amount: number }): Tr
 } as Transaction);
 
 export const acct = (o: Partial<PaymentAccount> & { id: string; balance: number }): PaymentAccount => ({
-  name: o.id, type: 'bank_account', provider: 'chase', color: '#000', isActive: true, ...o,
+  name: o.id, type: 'bank_account', provider: 'chase', color: '#000', isActive: true,
+  // Test ergonomics: fixtures pass `balance` = the current/real balance. Anchor it at an
+  // early date so the whole synthetic ledger counts as post-anchor (net from opening).
+  openingBalance: o.balance, openingDate: '2000-01-01', ...o,
 } as PaymentAccount);
 
 describe('cents & balance rollback', () => {

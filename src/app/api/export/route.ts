@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import * as XLSX from 'xlsx';
 import { withDerivedBalances } from '@/lib/forecast';
 import { PaymentAccount, Transaction } from '@/types';
+import { currentOf } from '@/lib/accounts';
 
 interface ExportRequest {
   profile: {
@@ -123,9 +124,9 @@ export async function POST(request: NextRequest) {
       [''],
       ['Account Totals'],
       ['Total Accounts', data.accounts.length],
-      ['Total Bank Balance', accounts.filter(a => a.type === 'bank_account' || a.type === 'debit_card').reduce((sum, a) => sum + a.balance, 0)],
-      ['Total Credit Card Debt', accounts.filter(a => a.type === 'credit_card').reduce((sum, a) => sum + a.balance, 0)],
-      ['Total Loan Balance', accounts.filter(a => a.type === 'personal_loan').reduce((sum, a) => sum + a.balance, 0)],
+      ['Total Bank Balance', accounts.filter(a => a.type === 'bank_account' || a.type === 'debit_card').reduce((sum, a) => sum + currentOf(a), 0)],
+      ['Total Credit Card Debt', accounts.filter(a => a.type === 'credit_card').reduce((sum, a) => sum + currentOf(a), 0)],
+      ['Total Loan Balance', accounts.filter(a => a.type === 'personal_loan').reduce((sum, a) => sum + currentOf(a), 0)],
       [''],
       ['Income Summary'],
       ['Total Income Sources', data.incomeSources.length],
@@ -146,7 +147,7 @@ export async function POST(request: NextRequest) {
         a.name,
         a.type,
         a.provider,
-        a.balance,
+        currentOf(a),
         a.creditLimit || '',
         a.apr || '',
         a.dueDate || '',

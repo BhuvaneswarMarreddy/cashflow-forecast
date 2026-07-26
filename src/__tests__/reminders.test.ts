@@ -22,7 +22,7 @@ const mockCreditCard = (
   name,
   type: 'credit_card',
   provider: 'visa',
-  balance,
+  openingBalance: balance, openingDate: '2000-01-01',
   creditLimit: 5000,
   dueDate,
   color: '#1a1f71',

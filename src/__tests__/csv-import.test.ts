@@ -415,7 +415,7 @@ describe('Account inference from CSV label (auto-create)', () => {
     expect(a.name).toBe('Customized Cash Rewards Visa Signature');
     expect(a.type).toBe('credit_card');
     expect(a.provider).toBe('visa');
-    expect(a.balance).toBe(0);
+    expect(a.openingBalance).toBe(0);
   });
 
   test('an account with no digits (Apple Card) has no last-4 and keeps its name', () => {

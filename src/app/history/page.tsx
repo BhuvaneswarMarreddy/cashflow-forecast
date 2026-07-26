@@ -34,6 +34,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { format, parseISO, startOfMonth, endOfMonth, subMonths, isWithinInterval } from 'date-fns';
+import { currentOf } from '@/lib/accounts';
 
 type ViewMode = 'history' | 'runway';
 type DateFilter = 'all' | 'thisMonth' | 'lastMonth' | 'last3Months' | 'last6Months';
@@ -562,21 +563,21 @@ export default function HistoryPage() {
                   ['Borrowed', money(inbound), 'text-[var(--foreground)]'],
                   ['Paid back', money(outbound), 'text-[var(--foreground)]'],
                   ['Interest / cost', money(Math.max(0, outbound - inbound)), 'text-amber-500'],
-                  ['Balance owed', acct.balance > 0 ? money(acct.balance) : 'Paid off', acct.balance > 0 ? 'text-[var(--accent-danger)]' : 'text-emerald-500'],
+                  ['Balance owed', currentOf(acct) > 0 ? money(currentOf(acct)) : 'Paid off', currentOf(acct) > 0 ? 'text-[var(--accent-danger)]' : 'text-emerald-500'],
                 ];
               } else if (acct.type === 'credit_card') {
                 tiles = [
                   ['Spent (purchases)', money(spent), 'text-[var(--foreground)]'],
                   ['Paid to card', money(inbound), 'text-emerald-500'],
                   ['Rewards earned', money(rewards), 'text-[var(--accent-primary)]'],
-                  ['Balance owed', acct.balance > 0 ? money(acct.balance) : 'Paid off', acct.balance > 0 ? 'text-[var(--accent-danger)]' : 'text-emerald-500'],
+                  ['Balance owed', currentOf(acct) > 0 ? money(currentOf(acct)) : 'Paid off', currentOf(acct) > 0 ? 'text-[var(--accent-danger)]' : 'text-emerald-500'],
                 ];
               } else {
                 tiles = [
                   ['Income in', money(income), 'text-emerald-500'],
                   ['Spent', money(spent), 'text-[var(--accent-danger)]'],
                   ['Transfers in / out', `${money(inbound)} / ${money(outbound)}`, 'text-[var(--foreground-secondary)]'],
-                  ['Balance', money(acct.balance), 'text-[var(--foreground)]'],
+                  ['Balance', money(currentOf(acct)), 'text-[var(--foreground)]'],
                 ];
               }
               return (

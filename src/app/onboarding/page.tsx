@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import { PAYMENT_METHODS, PaymentAccount, IncomeSource, AccountType, PaymentMethod } from '@/types';
+import { currentOf } from '@/lib/accounts';
 import {
   TrendingUp,
   CreditCard,
@@ -235,7 +236,8 @@ function OnboardingContent() {
       name: bankForm.name,
       type: bankForm.type,
       provider: bankForm.provider,
-      balance: parseFloat(bankForm.balance) || 0,
+      openingBalance: parseFloat(bankForm.balance) || 0,
+      openingDate: new Date().toISOString().slice(0, 10),
       lastFourDigits: bankForm.lastFourDigits || undefined,
       color: providerInfo?.color || '#8b949e',
       isActive: true,
@@ -357,7 +359,8 @@ function OnboardingContent() {
       name: cardForm.name,
       type: 'credit_card',
       provider: cardForm.provider,
-      balance: parseFloat(cardForm.balance) || 0,
+      openingBalance: parseFloat(cardForm.balance) || 0,
+      openingDate: new Date().toISOString().slice(0, 10),
       creditLimit: parseFloat(cardForm.creditLimit) || undefined,
       apr: parseFloat(cardForm.apr) || undefined,
       statementDate: cardForm.statementDate ? parseInt(cardForm.statementDate) : undefined,
@@ -412,7 +415,8 @@ function OnboardingContent() {
       name: loanForm.name,
       type: 'personal_loan',
       provider: loanForm.provider,
-      balance: parseFloat(loanForm.balance) || 0,
+      openingBalance: parseFloat(loanForm.balance) || 0,
+      openingDate: new Date().toISOString().slice(0, 10),
       originalAmount: parseFloat(loanForm.originalAmount) || undefined,
       apr: parseFloat(loanForm.apr) || undefined,
       monthlyPayment: parseFloat(loanForm.monthlyPayment) || undefined,
@@ -550,7 +554,7 @@ function OnboardingContent() {
     }, 0);
   };
 
-  const totalDebt = creditCards.reduce((sum, c) => sum + c.balance, 0) + loans.reduce((sum, l) => sum + l.balance, 0);
+  const totalDebt = creditCards.reduce((sum, c) => sum + c.openingBalance, 0) + loans.reduce((sum, l) => sum + l.openingBalance, 0);
   const totalMonthlyPayments = loans.reduce((sum, l) => sum + (l.monthlyPayment || 0), 0);
 
   return (
@@ -728,7 +732,7 @@ function OnboardingContent() {
                       </div>
                       <div className="flex items-center gap-4">
                         <p className="font-semibold text-[var(--accent-success)]">
-                          ${account.balance.toLocaleString()}
+                          ${account.openingBalance.toLocaleString()}
                         </p>
                         <button
                           onClick={() => removeBankAccount(index)}
@@ -941,7 +945,7 @@ function OnboardingContent() {
                       </div>
                       <div className="flex items-center gap-4">
                         <p className="font-semibold text-[var(--accent-danger)]">
-                          -${card.balance.toLocaleString()}
+                          -${card.openingBalance.toLocaleString()}
                         </p>
                         <button
                           onClick={() => removeCreditCard(index)}
@@ -1243,7 +1247,7 @@ function OnboardingContent() {
                       </div>
                       <div className="flex items-center gap-4">
                         <p className="font-semibold text-[var(--accent-danger)]">
-                          -${loan.balance.toLocaleString()}
+                          -${loan.openingBalance.toLocaleString()}
                         </p>
                         <button
                           onClick={() => removeLoan(index)}
