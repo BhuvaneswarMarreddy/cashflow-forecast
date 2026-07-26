@@ -44,6 +44,7 @@ export default function AccountsPage() {
     isLoading: profileLoading, 
     addPaymentAccount, 
     updatePaymentAccount,
+    reconcileAccount,
     reorderPaymentAccounts,
     deletePaymentAccount,
     addIncomeSource,
@@ -145,6 +146,18 @@ export default function AccountsPage() {
       case 'personal_loan':
         return <FileText className="w-5 h-5" />;
     }
+  };
+
+  const handleReconcile = async (account: PaymentAccount) => {
+    const derived = account.currentBalance ?? account.openingBalance;
+    const isDebt = account.type === 'credit_card' || account.type === 'personal_loan';
+    const label = isDebt ? 'amount you currently owe' : 'real balance right now';
+    const input = window.prompt(`${account.name} — enter the ${label}:`, String(derived));
+    if (input === null) return;
+    const entered = parseFloat(input);
+    if (Number.isNaN(entered)) return;
+    const drift = await reconcileAccount(account.id, entered, derived);
+    window.alert(drift === 0 ? 'Reconciled — nothing changed.' : 'Reconciled — balance updated.');
   };
 
   const openEditAccount = (account: PaymentAccount) => {
@@ -435,7 +448,7 @@ export default function AccountsPage() {
 
               {profile?.paymentAccounts && profile.paymentAccounts.length > 0 ? (
                 <AccountsList
-                  accounts={profile.paymentAccounts}
+                  accounts={derivedAccounts}
                   onReorder={reorderPaymentAccounts}
                   renderRow={(account) => (
                     <div
@@ -501,6 +514,13 @@ export default function AccountsPage() {
                           )}
                         </div>
                         <div className="flex gap-1">
+                          <button
+                            onClick={() => handleReconcile(account)}
+                            title="Reconcile — enter your real balance now"
+                            className="p-2 rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors"
+                          >
+                            <Check className="w-4 h-4" />
+                          </button>
                           <button
                             onClick={() => openEditAccount(account)}
                             className="p-2 rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors"

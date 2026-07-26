@@ -4,7 +4,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode, useCa
 import { UserProfile, PaymentAccount, IncomeSource } from '@/types';
 import { useAuth } from './AuthContext';
 import * as firestoreService from '@/lib/firestore';
-import { sortAccounts, reindex } from '@/lib/accounts';
+import { sortAccounts, reindex, reconcile } from '@/lib/accounts';
 
 interface UserProfileContextType {
   profile: UserProfile | null;
@@ -18,6 +18,7 @@ interface UserProfileContextType {
   // addPaymentAccount would read a stale `profile` each iteration and lose all but one.
   addPaymentAccounts: (accounts: Omit<PaymentAccount, 'id'>[]) => Promise<string[]>;
   updatePaymentAccount: (id: string, updates: Partial<PaymentAccount>) => Promise<void>;
+  reconcileAccount: (id: string, enteredCurrent: number, derivedCurrent: number) => Promise<number>;
   reorderPaymentAccounts: (orderedIds: string[]) => Promise<void>;
   deletePaymentAccount: (id: string) => Promise<void>;
   addIncomeSource: (income: Omit<IncomeSource, 'id'>) => Promise<void>;
@@ -334,6 +335,19 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Reconcile an account to the user's real balance. `derivedCurrent` is passed by the
+  // caller (which holds the transaction ledger) so this context stays ledger-free. Any
+  // drift re-anchors (openingBalance = entered, openingDate = today). Returns drift cents.
+  const reconcileAccount = async (id: string, enteredCurrent: number, derivedCurrent: number): Promise<number> => {
+    if (!profile) return 0;
+    const acc = profile.paymentAccounts.find((x) => x.id === id);
+    if (!acc) return 0;
+    const today = new Date().toISOString().slice(0, 10);
+    const { driftCents, reanchor } = reconcile(acc, enteredCurrent, derivedCurrent, today);
+    if (reanchor) await updatePaymentAccount(id, reanchor);
+    return driftCents;
+  };
+
   // Persist a new account order: optimistic reorder + one batched sortIndex write.
   const reorderPaymentAccounts = async (orderedIds: string[]) => {
     if (!profile || !user?.id) return;
@@ -489,6 +503,7 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
         addPaymentAccount,
         addPaymentAccounts,
         updatePaymentAccount,
+        reconcileAccount,
         reorderPaymentAccounts,
         deletePaymentAccount,
         addIncomeSource,
