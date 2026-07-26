@@ -454,7 +454,11 @@ export default function AccountsPage() {
                       className="flex items-center justify-between p-4 rounded-xl bg-[var(--background-tertiary)] border-l-4 hover:bg-[var(--background-secondary)] transition-colors"
                       style={{ borderLeftColor: account.color }}
                     >
-                      <div className="flex items-center gap-4">
+                      <div
+                        className="flex items-center gap-4 flex-1 min-w-0 cursor-pointer"
+                        onClick={() => router.push(`/history?account=${account.id}`)}
+                        title="View this account's transactions"
+                      >
                         <div
                           className="w-12 h-12 rounded-xl flex items-center justify-center"
                           style={{ backgroundColor: `${account.color}20`, color: account.color }}

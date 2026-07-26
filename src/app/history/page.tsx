@@ -55,6 +55,14 @@ export default function HistoryPage() {
   const [dateFilter, setDateFilter] = useState<DateFilter>('all');
   const [typeFilter, setTypeFilter] = useState<'all' | TransactionType>('all');
   const [accountFilter, setAccountFilter] = useState<string>('all');
+
+  // Deep-link from the Accounts page: /history?account=<id> pre-selects that account
+  // (drills straight into one account's transactions + summary, grouped month/year/all).
+  // Read from window (client-only) to avoid the useSearchParams static-prerender bailout.
+  useEffect(() => {
+    const a = new URLSearchParams(window.location.search).get('account');
+    if (a) setAccountFilter(a);
+  }, []);
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest' | 'highest' | 'lowest'>('newest');
   const [groupBy, setGroupBy] = useState<GroupBy>('month');
