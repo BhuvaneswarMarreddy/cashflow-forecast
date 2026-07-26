@@ -16,7 +16,7 @@ import {
   AccountForecast 
 } from '@/types';
 import { addDays, format, parseISO, startOfDay, isBefore, isAfter, isSameDay } from 'date-fns';
-import { isPositive } from '@/lib/classify';
+import { isPositive, classifyTransaction } from '@/lib/classify';
 import { currentOf } from '@/lib/accounts';
 
 const DEFAULT_SAFETY_THRESHOLD = 500;
@@ -25,6 +25,30 @@ const FORECAST_DAYS = 90;
 /**
  * Calculate current available cash from all accounts
  */
+/**
+ * Average monthly income and spending derived from actual transactions over the last
+ * `months` FULL calendar months (the current partial month is excluded). Transfers are
+ * ignored (classifier). Lets the app show a real Monthly Income / suggested Budget
+ * instead of $0 when the user hasn't hand-entered income sources or a budget.
+ */
+export function monthlyAverages(
+  transactions: Transaction[], accounts: PaymentAccount[], months = 6
+): { income: number; spending: number } {
+  const now = new Date();
+  const window = new Set<string>();
+  for (let i = 1; i <= months; i++) {
+    window.add(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1)).toISOString().slice(0, 7));
+  }
+  let inc = 0, sp = 0;
+  for (const t of transactions) {
+    if (!window.has(t.date.split('T')[0].slice(0, 7))) continue;
+    const c = classifyTransaction(t, accounts);
+    if (c === 'income') inc += t.amount;
+    else if (c === 'expense') sp += t.amount;
+  }
+  return { income: Math.round(inc / months), spending: Math.round(sp / months) };
+}
+
 export function calculateCurrentCash(accounts: PaymentAccount[]): number {
   return accounts
     .filter(a => a.type === 'bank_account' || a.type === 'debit_card' || a.type === 'cash')

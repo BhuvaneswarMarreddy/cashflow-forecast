@@ -47,7 +47,7 @@ import {
   Legend,
 } from 'recharts';
 import { format, parseISO, isAfter, startOfDay, addDays, isWithinInterval, startOfMonth, endOfMonth } from 'date-fns';
-import { generateForecast, calculateCurrentCash, withDerivedBalances } from '@/lib/forecast';
+import { generateForecast, calculateCurrentCash, withDerivedBalances, monthlyAverages } from '@/lib/forecast';
 import { currentOf } from '@/lib/accounts';
 
 export default function DashboardPage() {
@@ -141,12 +141,18 @@ export default function DashboardPage() {
     .filter((a) => a.type === 'personal_loan')
     .reduce((sum, a) => sum + (a.monthlyPayment || 0), 0);
 
-  const monthlyIncome = profile?.incomeSources?.reduce((sum, inc) => {
+  const incomeFromSources = profile?.incomeSources?.reduce((sum, inc) => {
     const monthly = inc.frequency === 'yearly' ? inc.amount / 12 :
       inc.frequency === 'biweekly' ? inc.amount * 26 / 12 :
       inc.frequency === 'weekly' ? inc.amount * 52 / 12 : inc.amount;
     return sum + monthly;
   }, 0) || 0;
+  // Fall back to a figure DERIVED from the last 6 months of transactions when the user
+  // hasn't hand-entered income sources / a budget — so these never show a bare $0.
+  const derivedMonthly = monthlyAverages(transactions, derivedAccounts);
+  const monthlyIncome = incomeFromSources > 0 ? incomeFromSources : derivedMonthly.income;
+  const effectiveBudget = (profile?.monthlyBudget || 0) > 0 ? profile!.monthlyBudget! : derivedMonthly.spending;
+  const budgetIsDerived = !((profile?.monthlyBudget || 0) > 0) && effectiveBudget > 0;
 
   // Check if setup is incomplete
   const hasAccounts = (profile?.paymentAccounts?.length || 0) > 0;
@@ -268,10 +274,10 @@ export default function DashboardPage() {
     return null;
   };
 
-  // Calculate budget usage
+  // Calculate budget usage against the effective (set or derived) monthly budget
   const budgetUsed = pastExpenses;
-  const budgetRemaining = (profile?.monthlyBudget || 0) - budgetUsed;
-  const budgetPercentage = profile?.monthlyBudget ? Math.min((budgetUsed / profile.monthlyBudget) * 100, 100) : 0;
+  const budgetRemaining = effectiveBudget - budgetUsed;
+  const budgetPercentage = effectiveBudget ? Math.min((budgetUsed / effectiveBudget) * 100, 100) : 0;
 
   return (
     <div className="min-h-screen relative">
@@ -472,7 +478,7 @@ export default function DashboardPage() {
               ${monthlyIncome.toLocaleString()}
             </p>
             <p className="text-[var(--foreground-muted)] text-sm mt-1">
-              Expected per month
+              {incomeFromSources > 0 ? 'Expected per month' : 'Avg / month (from transactions)'}
             </p>
           </div>
 
@@ -486,7 +492,7 @@ export default function DashboardPage() {
             <p className={`text-3xl font-bold ${budgetRemaining >= 0 ? 'text-[var(--accent-success)]' : 'text-[var(--accent-danger)]'}`}>
               ${Math.abs(budgetRemaining).toLocaleString()}
             </p>
-            {profile?.monthlyBudget && (
+            {effectiveBudget > 0 && (
               <div className="mt-2">
                 <div className="h-1.5 bg-[var(--background-tertiary)] rounded-full overflow-hidden">
                   <div
@@ -498,7 +504,8 @@ export default function DashboardPage() {
                   />
                 </div>
                 <p className="text-xs text-[var(--foreground-muted)] mt-1">
-                  {Math.round(budgetPercentage)}% of ${profile.monthlyBudget.toLocaleString()} used
+                  {Math.round(budgetPercentage)}% of ${effectiveBudget.toLocaleString()} used
+                  {budgetIsDerived && ' (typical spend)'}
                 </p>
               </div>
             )}
