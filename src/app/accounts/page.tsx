@@ -7,6 +7,7 @@ import { useUserProfile } from '@/context/UserProfileContext';
 import { useTransactions } from '@/context/TransactionContext';
 import Navbar from '@/components/Navbar';
 import AccountsList from '@/components/AccountsList';
+import AccountDetailModal from '@/components/AccountDetailModal';
 import AccountTransactions from '@/components/AccountTransactions';
 import BudgetSettingsPanel from '@/components/BudgetSettingsPanel';
 import BudgetStatusPanel from '@/components/BudgetStatusPanel';
@@ -87,6 +88,7 @@ export default function AccountsPage() {
   const [showAccountModal, setShowAccountModal] = useState(false);
   const [showIncomeModal, setShowIncomeModal] = useState(false);
   const [editingAccount, setEditingAccount] = useState<PaymentAccount | null>(null);
+  const [graphAccount, setGraphAccount] = useState<PaymentAccount | null>(null);
   const [editingIncome, setEditingIncome] = useState<IncomeSource | null>(null);
   
   const [accountForm, setAccountForm] = useState({
@@ -456,8 +458,8 @@ export default function AccountsPage() {
                     >
                       <div
                         className="flex items-center gap-4 flex-1 min-w-0 cursor-pointer"
-                        onClick={() => router.push(`/history?account=${account.id}`)}
-                        title="View this account's transactions"
+                        onClick={() => setGraphAccount(account)}
+                        title="View this account's history graph"
                       >
                         <div
                           className="w-12 h-12 rounded-xl flex items-center justify-center"
@@ -903,6 +905,14 @@ export default function AccountsPage() {
           )}
         </div>
       </main>
+
+      {graphAccount && (
+        <AccountDetailModal
+          account={graphAccount}
+          transactions={transactions}
+          onClose={() => setGraphAccount(null)}
+        />
+      )}
 
       {/* Account Modal */}
       {showAccountModal && (
