@@ -38,6 +38,21 @@ function legDirection(t: Transaction, accounts: PaymentAccount[]): 'in' | 'out' 
   return isPositive(t, accounts) ? 'in' : 'out';
 }
 
+/**
+ * If `txId` is one leg of a matched internal transfer, return the other leg's id.
+ * Used to warn on deletion: removing only one leg desyncs the two derived balances.
+ */
+export function pairedLegId(
+  txId: string, transactions: Transaction[], accounts: PaymentAccount[]
+): string | null {
+  const { pairs } = matchTransfers(transactions, accounts);
+  for (const p of pairs) {
+    if (p.out.id === txId) return p.inbound.id;
+    if (p.inbound.id === txId) return p.out.id;
+  }
+  return null;
+}
+
 export function matchTransfers(
   transactions: Transaction[],
   accounts: PaymentAccount[],

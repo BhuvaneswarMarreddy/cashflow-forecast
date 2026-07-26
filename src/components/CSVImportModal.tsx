@@ -31,7 +31,7 @@ export function inferAccountFromCsv(csvName: string): Omit<PaymentAccount, 'id'>
     /apple/.test(lower) ? 'apple' :
     /chase/.test(lower) ? 'chase' :
     type === 'credit_card' ? 'other' : 'bank-transfer';
-  return { name, type, provider, balance: 0, lastFourDigits, color: getMerchantColor(csvName), isActive: true };
+  return { name, type, provider, openingBalance: 0, openingDate: new Date().toISOString().slice(0, 10), lastFourDigits, color: getMerchantColor(csvName), isActive: true };
 }
 
 export function inferAccountType(csvName: string): AccountType {

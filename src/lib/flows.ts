@@ -12,7 +12,7 @@ export const isDebtAccount = (a?: PaymentAccount) =>
   a?.type === 'credit_card' || a?.type === 'personal_loan';
 
 export const signedRealNowCents = (a: PaymentAccount) =>
-  isDebtAccount(a) ? -toCents(a.balance) : toCents(a.balance);
+  isDebtAccount(a) ? -toCents(currentOf(a)) : toCents(currentOf(a));
 
 export const signedCents = (t: Transaction, accounts: PaymentAccount[]) =>
   (isPositive(t, accounts) ? 1 : -1) * toCents(t.amount);
@@ -66,6 +66,7 @@ import { classifyTransaction, isReward } from './classify';
 import { matchTransfers } from './transfers';
 import { displayCategory } from '@/types';
 import type { FlowColorKey } from './palette';
+import { currentOf } from '@/lib/accounts';
 
 export interface FlowNode { id: string; label: string; kind: FlowColorKey }
 export interface FlowLink {

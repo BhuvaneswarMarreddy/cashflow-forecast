@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import LogoMark from '@/components/LogoMark';
@@ -8,6 +8,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import { useTransactions } from '@/context/TransactionContext';
 import { withDerivedBalances } from '@/lib/forecast';
+import { currentOf } from '@/lib/accounts';
 import {
   LayoutDashboard,
   Calendar,
@@ -55,13 +56,15 @@ export default function Navbar() {
 
   // Calculate total balance across all accounts, from balances derived off linked
   // transactions (opening balance + past effects) rather than the stored opening figure.
-  const totalBalance = withDerivedBalances(profile?.paymentAccounts || [], transactions).reduce((sum, acc) => {
-    // Cards AND loans are debt (balance = what you owe), so they subtract from net worth.
-    if (acc.type === 'credit_card' || acc.type === 'personal_loan') {
-      return sum - acc.balance;
-    }
-    return sum + acc.balance;
-  }, 0);
+  const totalBalance = useMemo(() =>
+    withDerivedBalances(profile?.paymentAccounts || [], transactions).reduce((sum, acc) => {
+      // Cards AND loans are debt (balance = what you owe), so they subtract from net worth.
+      if (acc.type === 'credit_card' || acc.type === 'personal_loan') {
+        return sum - currentOf(acc);
+      }
+      return sum + currentOf(acc);
+    }, 0),
+    [profile?.paymentAccounts, transactions]);
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 bg-[var(--background)]/80 backdrop-blur-xl border-b border-[var(--border-color)]">

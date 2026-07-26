@@ -2,10 +2,10 @@ import { matchTransfers } from '@/lib/transfers';
 import { PaymentAccount, Transaction } from '@/types';
 
 const bank = (id: string): PaymentAccount => ({
-  id, name: id, type: 'bank_account', provider: 'chase', balance: 0, color: '#000', isActive: true,
+  id, name: id, type: 'bank_account', provider: 'chase', openingBalance: 0, openingDate: '2000-01-01', color: '#000', isActive: true,
 });
 const card = (id: string): PaymentAccount => ({
-  id, name: id, type: 'credit_card', provider: 'visa', balance: 0, color: '#000', isActive: true,
+  id, name: id, type: 'credit_card', provider: 'visa', openingBalance: 0, openingDate: '2000-01-01', color: '#000', isActive: true,
 });
 const leg = (o: Partial<Transaction>): Transaction => ({
   id: Math.random().toString(), title: '', amount: 0, type: 'transfer',
@@ -69,5 +69,19 @@ describe('matchTransfers', () => {
     expect(m.pairs).toHaveLength(0);
     expect(m.unmatchedOut).toHaveLength(0);
     expect(m.unmatchedIn).toHaveLength(0);
+  });
+});
+
+import { pairedLegId } from '@/lib/transfers';
+describe('pairedLegId', () => {
+  const accounts = [bank('bofa'), card('visa')];
+  test('returns the counterpart leg of a matched transfer, null otherwise', () => {
+    const out = leg({ id: 'out1', accountId: 'bofa', amount: 700, transferDirection: 'out' });
+    const inn = leg({ id: 'in1', accountId: 'visa', amount: 700, transferDirection: 'in' });
+    const spend = leg({ id: 'buy', accountId: 'visa', amount: 20, type: 'expense', transferDirection: undefined });
+    const txns = [out, inn, spend];
+    expect(pairedLegId('out1', txns, accounts)).toBe('in1');
+    expect(pairedLegId('in1', txns, accounts)).toBe('out1');
+    expect(pairedLegId('buy', txns, accounts)).toBeNull();
   });
 });

@@ -131,7 +131,7 @@ export interface FirestoreAccount {
   name: string;
   type: 'credit_card' | 'debit_card' | 'bank_account' | 'cash' | 'personal_loan';
   provider: string;
-  balance: number;
+  openingBalance: number;
   creditLimit?: number;
   apr?: number;
   statementDate?: number;
@@ -139,6 +139,8 @@ export interface FirestoreAccount {
   lastFourDigits?: string;
   color: string;
   isActive: boolean;
+  sortIndex?: number; // user-defined display order
+  openingDate?: string; // ISO yyyy-MM-dd (Phase B)
   paymentFromAccountId?: string; // Which account pays this card/loan
   // Loan specific
   originalAmount?: number;
@@ -461,6 +463,22 @@ export async function updateAccount(
     }
     throw error;
   }
+}
+
+/** Persist a new display order: one atomic batch, one sortIndex per changed account. */
+export async function updateAccountsBatch(
+  userId: string,
+  updates: Array<{ id: string; sortIndex: number }>
+): Promise<void> {
+  if (updates.length === 0) return;
+  const batch = writeBatch(db);
+  for (const u of updates) {
+    batch.update(doc(db, 'users', userId, 'accounts', u.id), {
+      sortIndex: u.sortIndex,
+      updatedAt: serverTimestamp(),
+    });
+  }
+  await batch.commit();
 }
 
 export async function deleteAccount(userId: string, accountId: string): Promise<void> {

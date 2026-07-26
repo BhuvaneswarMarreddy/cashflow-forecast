@@ -15,7 +15,7 @@ describe('Transaction Classification', () => {
       name: 'Chase Checking',
       type: 'bank_account',
       provider: 'chase',
-      balance: 5000,
+      openingBalance: 5000, openingDate: '2000-01-01',
       color: '#1e88e5',
       isActive: true,
     },
@@ -24,7 +24,7 @@ describe('Transaction Classification', () => {
       name: 'Chase Savings',
       type: 'bank_account',
       provider: 'chase',
-      balance: 10000,
+      openingBalance: 10000, openingDate: '2000-01-01',
       color: '#43a047',
       isActive: true,
     },
@@ -33,7 +33,7 @@ describe('Transaction Classification', () => {
       name: 'AMEX Card',
       type: 'credit_card',
       provider: 'amex',
-      balance: -1500,
+      openingBalance: -1500, openingDate: '2000-01-01',
       creditLimit: 10000,
       color: '#7c3aed',
       isActive: true,
@@ -43,7 +43,7 @@ describe('Transaction Classification', () => {
       name: 'Upstart Loan',
       type: 'personal_loan',
       provider: 'other',
-      balance: -5000,
+      openingBalance: -5000, openingDate: '2000-01-01',
       color: '#ef4444',
       isActive: true,
     },
@@ -420,8 +420,8 @@ describe('Transaction Classification', () => {
 
 describe('Real statement shapes on a credit card (phantom-income fix)', () => {
   const accts: PaymentAccount[] = [
-    { id: 'card-1', name: 'Visa', type: 'credit_card', provider: 'visa', balance: 0, color: '#000', isActive: true },
-    { id: 'bank-1', name: 'Checking', type: 'bank_account', provider: 'chase', balance: 0, color: '#000', isActive: true },
+    { id: 'card-1', name: 'Visa', type: 'credit_card', provider: 'visa', openingBalance: 0, openingDate: '2000-01-01', color: '#000', isActive: true },
+    { id: 'bank-1', name: 'Checking', type: 'bank_account', provider: 'chase', openingBalance: 0, openingDate: '2000-01-01', color: '#000', isActive: true },
   ];
   const cardTxn = (title: string): Transaction => ({
     id: 't', title, amount: 500, type: 'income', category: 'other',

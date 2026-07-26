@@ -48,6 +48,7 @@ import {
 } from 'recharts';
 import { format, parseISO, isAfter, startOfDay, addDays, isWithinInterval, startOfMonth, endOfMonth } from 'date-fns';
 import { generateForecast, calculateCurrentCash, withDerivedBalances } from '@/lib/forecast';
+import { currentOf } from '@/lib/accounts';
 
 export default function DashboardPage() {
   const { isAuthenticated, isLoading: authLoading, user } = useAuth();
@@ -122,11 +123,11 @@ export default function DashboardPage() {
   // Calculate account summaries
   const totalBankBalance = derivedAccounts
     .filter((a) => a.type === 'bank_account' || a.type === 'debit_card' || a.type === 'cash')
-    .reduce((sum, a) => sum + a.balance, 0);
+    .reduce((sum, a) => sum + currentOf(a), 0);
 
   const totalCreditUsed = derivedAccounts
     .filter((a) => a.type === 'credit_card')
-    .reduce((sum, a) => sum + a.balance, 0);
+    .reduce((sum, a) => sum + currentOf(a), 0);
 
   const totalCreditLimit = derivedAccounts
     .filter((a) => a.type === 'credit_card')
@@ -134,7 +135,7 @@ export default function DashboardPage() {
 
   const totalLoanBalance = derivedAccounts
     .filter((a) => a.type === 'personal_loan')
-    .reduce((sum, a) => sum + a.balance, 0);
+    .reduce((sum, a) => sum + currentOf(a), 0);
 
   const totalMonthlyLoanPayments = derivedAccounts
     .filter((a) => a.type === 'personal_loan')
@@ -172,7 +173,7 @@ export default function DashboardPage() {
     const currentYear = new Date().getFullYear();
 
     return derivedAccounts
-      .filter((a) => a.type === 'credit_card' && a.dueDate && a.balance > 0)
+      .filter((a) => a.type === 'credit_card' && a.dueDate && currentOf(a) > 0)
       .map((account) => {
         let dueDate = new Date(currentYear, currentMonth, account.dueDate!);
         
@@ -398,7 +399,7 @@ export default function DashboardPage() {
                     </div>
                     {account.type === 'credit_card' && account.creditLimit && (
                       <span className="text-xs text-[var(--foreground-muted)]">
-                        {Math.round((account.balance / account.creditLimit) * 100)}% used
+                        {Math.round((currentOf(account) / account.creditLimit) * 100)}% used
                       </span>
                     )}
                   </div>
@@ -407,7 +408,7 @@ export default function DashboardPage() {
                     {account.lastFourDigits && ` •••• ${account.lastFourDigits}`}
                   </p>
                   <p className={`text-xl font-bold ${account.type === 'credit_card' ? 'text-[var(--accent-danger)]' : 'text-[var(--accent-success)]'}`}>
-                    {account.type === 'credit_card' && account.balance > 0 ? '-' : ''}${account.balance.toLocaleString()}
+                    {account.type === 'credit_card' && currentOf(account) > 0 ? '-' : ''}${currentOf(account).toLocaleString()}
                   </p>
                   {account.type === 'credit_card' && account.creditLimit && (
                     <div className="mt-2">
@@ -415,8 +416,8 @@ export default function DashboardPage() {
                         <div
                           className="h-full rounded-full transition-all"
                           style={{
-                            width: `${Math.min((account.balance / account.creditLimit) * 100, 100)}%`,
-                            backgroundColor: account.balance / account.creditLimit > 0.8 ? 'var(--accent-danger)' : account.color,
+                            width: `${Math.min((currentOf(account) / account.creditLimit) * 100, 100)}%`,
+                            backgroundColor: currentOf(account) / account.creditLimit > 0.8 ? 'var(--accent-danger)' : account.color,
                           }}
                         />
                       </div>
@@ -529,7 +530,7 @@ export default function DashboardPage() {
                         </div>
                       </div>
                       <p className="text-sm font-semibold text-[var(--accent-danger)]">
-                        ${bill.balance.toLocaleString()}
+                        ${(bill.currentBalance ?? bill.openingBalance).toLocaleString()}
                       </p>
                     </div>
                   ))}

@@ -12,6 +12,7 @@ import ReceiptScannerModal from '@/components/ReceiptScannerModal';
 import RunwayCalculator from '@/components/RunwayCalculator';
 import { generateForecast, calculateCurrentCash, withDerivedBalances } from '@/lib/forecast';
 import { classifyTransaction, isPositive, isReward } from '@/lib/classify';
+import { pairedLegId } from '@/lib/transfers';
 import { EXPENSE_CATEGORIES, Transaction, TransactionType, getMerchantColor, displayCategory } from '@/types';
 import {
   TrendingUp,
@@ -34,6 +35,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { format, parseISO, startOfMonth, endOfMonth, subMonths, isWithinInterval } from 'date-fns';
+import { currentOf } from '@/lib/accounts';
 
 type ViewMode = 'history' | 'runway';
 type DateFilter = 'all' | 'thisMonth' | 'lastMonth' | 'last3Months' | 'last6Months';
@@ -286,6 +288,15 @@ export default function HistoryPage() {
   }, [profile, transactions]);
 
   const handleDelete = async (id: string) => {
+    // A card payment / internal move is TWO paired legs. Deleting only one desyncs the
+    // two derived balances, so offer to delete both.
+    const other = pairedLegId(id, transactions, profile?.paymentAccounts || []);
+    if (other) {
+      const both = window.confirm(
+        'This is one leg of a transfer between your accounts. Delete BOTH legs?\n\nOK = delete both · Cancel = delete only this one (balances may drift until you reconcile).'
+      );
+      if (both) await deleteTransaction(other);
+    }
     await deleteTransaction(id);
     setDeleteConfirm(null);
   };
@@ -562,21 +573,21 @@ export default function HistoryPage() {
                   ['Borrowed', money(inbound), 'text-[var(--foreground)]'],
                   ['Paid back', money(outbound), 'text-[var(--foreground)]'],
                   ['Interest / cost', money(Math.max(0, outbound - inbound)), 'text-amber-500'],
-                  ['Balance owed', acct.balance > 0 ? money(acct.balance) : 'Paid off', acct.balance > 0 ? 'text-[var(--accent-danger)]' : 'text-emerald-500'],
+                  ['Balance owed', currentOf(acct) > 0 ? money(currentOf(acct)) : 'Paid off', currentOf(acct) > 0 ? 'text-[var(--accent-danger)]' : 'text-emerald-500'],
                 ];
               } else if (acct.type === 'credit_card') {
                 tiles = [
                   ['Spent (purchases)', money(spent), 'text-[var(--foreground)]'],
                   ['Paid to card', money(inbound), 'text-emerald-500'],
                   ['Rewards earned', money(rewards), 'text-[var(--accent-primary)]'],
-                  ['Balance owed', acct.balance > 0 ? money(acct.balance) : 'Paid off', acct.balance > 0 ? 'text-[var(--accent-danger)]' : 'text-emerald-500'],
+                  ['Balance owed', currentOf(acct) > 0 ? money(currentOf(acct)) : 'Paid off', currentOf(acct) > 0 ? 'text-[var(--accent-danger)]' : 'text-emerald-500'],
                 ];
               } else {
                 tiles = [
                   ['Income in', money(income), 'text-emerald-500'],
                   ['Spent', money(spent), 'text-[var(--accent-danger)]'],
                   ['Transfers in / out', `${money(inbound)} / ${money(outbound)}`, 'text-[var(--foreground-secondary)]'],
-                  ['Balance', money(acct.balance), 'text-[var(--foreground)]'],
+                  ['Balance', money(currentOf(acct)), 'text-[var(--foreground)]'],
                 ];
               }
               return (

@@ -28,9 +28,9 @@ function calculateTotalBalance(accounts: PaymentAccount[]): number {
     // Credit cards and loans show negative balance (what you owe)
     // Bank accounts show positive balance
     if (acc.type === 'credit_card' || acc.type === 'personal_loan') {
-      return sum + acc.balance; // Already negative
+      return sum + acc.openingBalance; // Already negative
     }
-    return sum + acc.balance;
+    return sum + acc.openingBalance;
   }, 0);
 }
 
@@ -38,14 +38,14 @@ function calculateCashOnHand(accounts: PaymentAccount[]): number {
   return accounts
     .filter(acc => acc.type === 'bank_account' || acc.type === 'cash' || acc.type === 'debit_card')
     .filter(acc => acc.isActive)
-    .reduce((sum, acc) => sum + acc.balance, 0);
+    .reduce((sum, acc) => sum + acc.openingBalance, 0);
 }
 
 function calculateTotalDebt(accounts: PaymentAccount[]): number {
   return accounts
     .filter(acc => acc.type === 'credit_card' || acc.type === 'personal_loan')
     .filter(acc => acc.isActive)
-    .reduce((sum, acc) => sum + Math.abs(acc.balance), 0);
+    .reduce((sum, acc) => sum + Math.abs(acc.openingBalance), 0);
 }
 
 function calculateMonthlyIncome(incomeSources: IncomeSource[]): number {
@@ -113,7 +113,7 @@ describe('User Flows', () => {
         name: 'Chase Checking',
         type: 'bank_account',
         provider: 'chase',
-        balance: 5000,
+        openingBalance: 5000, openingDate: '2000-01-01',
         color: '#1e88e5',
         isActive: true,
       };
@@ -131,7 +131,7 @@ describe('User Flows', () => {
           name: 'Chase Checking',
           type: 'bank_account',
           provider: 'chase',
-          balance: 5000,
+          openingBalance: 5000, openingDate: '2000-01-01',
           color: '#1e88e5',
           isActive: true,
         },
@@ -140,7 +140,7 @@ describe('User Flows', () => {
           name: 'AMEX Card',
           type: 'credit_card',
           provider: 'amex',
-          balance: -1500,
+          openingBalance: -1500, openingDate: '2000-01-01',
           creditLimit: 10000,
           apr: 24.99,
           dueDate: 15,
@@ -170,7 +170,7 @@ describe('User Flows', () => {
             name: 'Chase Checking',
             type: 'bank_account',
             provider: 'chase',
-            balance: 5000,
+            openingBalance: 5000, openingDate: '2000-01-01',
             color: '#1e88e5',
             isActive: true,
           },
@@ -204,7 +204,7 @@ describe('User Flows', () => {
         name: 'Chase Checking',
         type: 'bank_account',
         provider: 'chase',
-        balance: 5000,
+        openingBalance: 5000, openingDate: '2000-01-01',
         color: '#1e88e5',
         isActive: true,
       },
@@ -213,7 +213,7 @@ describe('User Flows', () => {
         name: 'Chase Savings',
         type: 'bank_account',
         provider: 'chase',
-        balance: 10000,
+        openingBalance: 10000, openingDate: '2000-01-01',
         color: '#43a047',
         isActive: true,
       },
@@ -222,7 +222,7 @@ describe('User Flows', () => {
         name: 'AMEX Card',
         type: 'credit_card',
         provider: 'amex',
-        balance: -1500,
+        openingBalance: -1500, openingDate: '2000-01-01',
         color: '#7c3aed',
         isActive: true,
       },
@@ -231,7 +231,7 @@ describe('User Flows', () => {
         name: 'Car Loan',
         type: 'personal_loan',
         provider: 'other',
-        balance: -15000,
+        openingBalance: -15000, openingDate: '2000-01-01',
         color: '#ef4444',
         isActive: true,
       },
@@ -258,7 +258,7 @@ describe('User Flows', () => {
           name: 'Old Account',
           type: 'bank_account',
           provider: 'other',
-          balance: 1000,
+          openingBalance: 1000, openingDate: '2000-01-01',
           color: '#9e9e9e',
           isActive: false, // Inactive
         },

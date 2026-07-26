@@ -767,3 +767,8 @@ a:focus-visible {
   padding: 0 16px;
   background: linear-gradient(90deg, transparent, var(--background-secondary));
 }
+
+/* Drag-and-drop: respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  [data-dnd-draggable] { transition: none !important; }
+}

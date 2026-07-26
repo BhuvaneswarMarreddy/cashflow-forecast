@@ -171,7 +171,6 @@ export interface PaymentAccount {
   name: string;
   type: AccountType;
   provider: PaymentMethod;
-  balance: number;
   creditLimit?: number; // For credit cards
   apr?: number; // Annual Percentage Rate for credit cards and loans
   statementDate?: number; // Day of month (1-31)
@@ -179,6 +178,10 @@ export interface PaymentAccount {
   color: string;
   lastFourDigits?: string;
   isActive: boolean;
+  sortIndex?: number; // user-defined display order; undefined sorts to the end
+  openingBalance: number; // balance AT openingDate; cash +, debt = amount owed
+  openingDate: string;    // ISO yyyy-MM-dd; net is summed from here forward
+  currentBalance?: number; // DERIVED in memory by withDerivedBalances; never stored
   // Payment linking - which account pays this card/loan
   paymentFromAccountId?: string; // ID of the account that pays this credit card or loan
   // Loan specific fields

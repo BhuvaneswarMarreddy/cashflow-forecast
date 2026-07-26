@@ -109,7 +109,16 @@ function SankeyTooltip({ active, payload }: { active?: boolean; payload?: Array<
 export default function FlowPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const { transactions } = useTransactions();
-  const { profile } = useUserProfile();
+  const { profile, reconcileAccount } = useUserProfile();
+
+  const handleReconcile = async (accountId: string, name: string, derivedCurrent: number) => {
+    const input = window.prompt(`${name} — enter your real balance right now:`, String(Math.round(derivedCurrent)));
+    if (input === null) return;
+    const entered = parseFloat(input);
+    if (Number.isNaN(entered)) return;
+    const drift = await reconcileAccount(accountId, entered, derivedCurrent);
+    window.alert(drift === 0 ? 'Reconciled — nothing changed.' : 'Reconciled — the gap is closed.');
+  };
   const router = useRouter();
   const [range, setRange] = useState<Range>('all');
   const [month, setMonth] = useState<string>(() => shiftMonth(new Date().toISOString().slice(0, 7), -1));
@@ -602,7 +611,11 @@ export default function FlowPage() {
                     <td className="px-3 py-2 text-right">{money(r.closingCents)}</td>
                     <td className="px-3 py-2">
                       {r.verdict === 'missing-rows'
-                        ? <span className="text-[var(--accent-danger)]">⚠ missing {money(r.gapCents)}</span>
+                        ? <button
+                            onClick={() => handleReconcile(r.accountId, r.name, r.closingCents / 100)}
+                            className="text-[var(--accent-danger)] hover:underline"
+                            title="Enter your real balance to fix this gap"
+                          >⚠ off by {money(r.gapCents)} — reconcile</button>
                         : <span className="text-[var(--foreground-muted)]">
                             {r.verdict === 'pre-export-debt' ? 'debt predates export' : r.verdict === 'opening' ? 'opening balance' : 'reconciles'}
                           </span>}

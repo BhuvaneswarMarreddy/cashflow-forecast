@@ -6,6 +6,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import { useTransactions } from '@/context/TransactionContext';
 import Navbar from '@/components/Navbar';
+import AccountsList from '@/components/AccountsList';
 import AccountTransactions from '@/components/AccountTransactions';
 import BudgetSettingsPanel from '@/components/BudgetSettingsPanel';
 import BudgetStatusPanel from '@/components/BudgetStatusPanel';
@@ -13,6 +14,7 @@ import DebtPlannerPanel from '@/components/DebtPlannerPanel';
 import { PAYMENT_METHODS, ACCOUNT_TYPES, PaymentAccount, IncomeSource, AccountType, PaymentMethod, CategoryBudget } from '@/types';
 import { deriveAccountBalance, withDerivedBalances } from '@/lib/forecast';
 import { matchTransfers } from '@/lib/transfers';
+import { currentOf } from '@/lib/accounts';
 import {
   TrendingUp,
   CreditCard,
@@ -42,6 +44,8 @@ export default function AccountsPage() {
     isLoading: profileLoading, 
     addPaymentAccount, 
     updatePaymentAccount,
+    reconcileAccount,
+    reorderPaymentAccounts,
     deletePaymentAccount,
     addIncomeSource,
     updateIncomeSource,
@@ -144,13 +148,25 @@ export default function AccountsPage() {
     }
   };
 
+  const handleReconcile = async (account: PaymentAccount) => {
+    const derived = account.currentBalance ?? account.openingBalance;
+    const isDebt = account.type === 'credit_card' || account.type === 'personal_loan';
+    const label = isDebt ? 'amount you currently owe' : 'real balance right now';
+    const input = window.prompt(`${account.name} — enter the ${label}:`, String(derived));
+    if (input === null) return;
+    const entered = parseFloat(input);
+    if (Number.isNaN(entered)) return;
+    const drift = await reconcileAccount(account.id, entered, derived);
+    window.alert(drift === 0 ? 'Reconciled — nothing changed.' : 'Reconciled — balance updated.');
+  };
+
   const openEditAccount = (account: PaymentAccount) => {
     setEditingAccount(account);
     setAccountForm({
       name: account.name,
       type: account.type,
       provider: account.provider,
-      balance: account.balance.toString(),
+      balance: currentOf(account).toString(),
       creditLimit: account.creditLimit?.toString() || '',
       apr: account.apr?.toString() || '',
       statementDate: account.statementDate?.toString() || '',
@@ -185,7 +201,9 @@ export default function AccountsPage() {
       name: accountForm.name,
       type: accountForm.type,
       provider: accountForm.provider,
-      balance: parseFloat(accountForm.balance) || 0,
+      // Editing the balance re-anchors: the typed value becomes the opening balance as of today.
+      openingBalance: parseFloat(accountForm.balance) || 0,
+      openingDate: new Date().toISOString().slice(0, 10),
       creditLimit: isCard ? parseFloat(accountForm.creditLimit) || undefined : undefined,
       apr: (isCard || isLoan) ? parseFloat(accountForm.apr) || undefined : undefined,
       statementDate: isCard ? (accountForm.statementDate ? parseInt(accountForm.statementDate) : undefined) : undefined,
@@ -297,9 +315,12 @@ export default function AccountsPage() {
   };
 
   // Balances derived from linked transactions for every DISPLAY below. The edit form
-  // still reads/writes account.balance as the OPENING balance (openEditAccount uses the
+  // still reads/writes currentOf(account) as the OPENING balance (openEditAccount uses the
   // original account, not a derived copy), so the write path is unchanged.
-  const derivedAccounts = withDerivedBalances(profile?.paymentAccounts || [], transactions);
+  const derivedAccounts = useMemo(
+    () => withDerivedBalances(profile?.paymentAccounts || [], transactions),
+    [profile?.paymentAccounts, transactions]
+  );
 
   const totalCreditLimit = derivedAccounts
     .filter((a) => a.type === 'credit_card')
@@ -307,11 +328,11 @@ export default function AccountsPage() {
 
   const totalCreditUsed = derivedAccounts
     .filter((a) => a.type === 'credit_card')
-    .reduce((sum, a) => sum + a.balance, 0);
+    .reduce((sum, a) => sum + currentOf(a), 0);
 
   const totalBankBalance = derivedAccounts
     .filter((a) => a.type === 'bank_account' || a.type === 'debit_card')
-    .reduce((sum, a) => sum + a.balance, 0);
+    .reduce((sum, a) => sum + currentOf(a), 0);
 
   const monthlyIncome = profile?.incomeSources?.reduce((sum, inc) => {
     const monthly = inc.frequency === 'yearly' ? inc.amount / 12 :
@@ -426,10 +447,11 @@ export default function AccountsPage() {
               </div>
 
               {profile?.paymentAccounts && profile.paymentAccounts.length > 0 ? (
-                <div className="space-y-3">
-                  {profile.paymentAccounts.map((account) => (
+                <AccountsList
+                  accounts={derivedAccounts}
+                  onReorder={reorderPaymentAccounts}
+                  renderRow={(account) => (
                     <div
-                      key={account.id}
                       className="flex items-center justify-between p-4 rounded-xl bg-[var(--background-tertiary)] border-l-4 hover:bg-[var(--background-secondary)] transition-colors"
                       style={{ borderLeftColor: account.color }}
                     >
@@ -478,20 +500,13 @@ export default function AccountsPage() {
                         <div className="text-right">
                           {/* The balance YOU set is the truth (the CSV has no balance). */}
                           <p className={`text-lg font-semibold ${account.type === 'credit_card' || account.type === 'personal_loan' ? 'text-[var(--accent-danger)]' : 'text-[var(--accent-success)]'}`}>
-                            {account.type === 'credit_card' || account.type === 'personal_loan' ? '-' : ''}${Math.abs(account.balance).toLocaleString()}
+                            {account.type === 'credit_card' || account.type === 'personal_loan' ? '-' : ''}${Math.abs(currentOf(account)).toLocaleString()}
                           </p>
-                          {(() => {
-                            const est = deriveAccountBalance(account, transactions);
-                            return Math.round(est) !== Math.round(account.balance) ? (
-                              <button
-                                onClick={() => updatePaymentAccount(account.id, { balance: est })}
-                                className="text-xs text-[var(--accent-primary)] hover:underline"
-                                title="Set the balance to the value estimated from transactions (edit the account to enter your real balance instead)"
-                              >
-                                set ≈ ${Math.abs(est).toLocaleString()} from txns
-                              </button>
-                            ) : null;
-                          })()}
+                          {account.openingDate && (
+                            <p className="text-xs text-[var(--foreground-muted)]" title="Balances derive from transactions since this date">
+                              anchored {account.openingDate}
+                            </p>
+                          )}
                           {account.creditLimit && (
                             <p className="text-xs text-[var(--foreground-muted)]">
                               Limit: ${account.creditLimit.toLocaleString()}
@@ -499,6 +514,13 @@ export default function AccountsPage() {
                           )}
                         </div>
                         <div className="flex gap-1">
+                          <button
+                            onClick={() => handleReconcile(account)}
+                            title="Reconcile — enter your real balance now"
+                            className="p-2 rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors"
+                          >
+                            <Check className="w-4 h-4" />
+                          </button>
                           <button
                             onClick={() => openEditAccount(account)}
                             className="p-2 rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors"
@@ -514,8 +536,8 @@ export default function AccountsPage() {
                         </div>
                       </div>
                     </div>
-                  ))}
-                </div>
+                  )}
+                />
               ) : (
                 <div className="text-center py-12">
                   <CreditCard className="w-16 h-16 text-[var(--foreground-muted)] mx-auto mb-4" />

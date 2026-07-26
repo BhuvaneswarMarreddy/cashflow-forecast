@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode, useCa
 import { UserProfile, PaymentAccount, IncomeSource } from '@/types';
 import { useAuth } from './AuthContext';
 import * as firestoreService from '@/lib/firestore';
+import { sortAccounts, reindex, reconcile } from '@/lib/accounts';
 
 interface UserProfileContextType {
   profile: UserProfile | null;
@@ -17,6 +18,8 @@ interface UserProfileContextType {
   // addPaymentAccount would read a stale `profile` each iteration and lose all but one.
   addPaymentAccounts: (accounts: Omit<PaymentAccount, 'id'>[]) => Promise<string[]>;
   updatePaymentAccount: (id: string, updates: Partial<PaymentAccount>) => Promise<void>;
+  reconcileAccount: (id: string, enteredCurrent: number, derivedCurrent: number) => Promise<number>;
+  reorderPaymentAccounts: (orderedIds: string[]) => Promise<void>;
   deletePaymentAccount: (id: string) => Promise<void>;
   addIncomeSource: (income: Omit<IncomeSource, 'id'>) => Promise<void>;
   updateIncomeSource: (id: string, updates: Partial<IncomeSource>) => Promise<void>;
@@ -104,7 +107,7 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
           isOnboarded: firestoreUser.metadata?.isOnboarded || false,
           monthlyBudget: firestoreUser.settings?.monthlyBudget || 0,
           currency: firestoreUser.settings?.currency || 'USD',
-          paymentAccounts: accounts,
+          paymentAccounts: sortAccounts(accounts),
           incomeSources: incomeSources,
           settings: {
             timezone: firestoreUser.settings?.timezone,
@@ -128,7 +131,7 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
         // settings — which is how a CSV import can land 2000+ rows completely unlinked.
         // Seed a profile immediately (with any accounts/income already in Firestore) and
         // create the backing doc in the background.
-        const seeded: UserProfile = { ...createDefaultProfile(user), paymentAccounts: accounts, incomeSources };
+        const seeded: UserProfile = { ...createDefaultProfile(user), paymentAccounts: sortAccounts(accounts), incomeSources };
         setProfile(seeded);
         saveLocalProfile(userId, seeded);
         firestoreService.createUserProfile(userId, {
@@ -332,6 +335,47 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Reconcile an account to the user's real balance. `derivedCurrent` is passed by the
+  // caller (which holds the transaction ledger) so this context stays ledger-free. Any
+  // drift re-anchors (openingBalance = entered, openingDate = today). Returns drift cents.
+  const reconcileAccount = async (id: string, enteredCurrent: number, derivedCurrent: number): Promise<number> => {
+    if (!profile) return 0;
+    const acc = profile.paymentAccounts.find((x) => x.id === id);
+    if (!acc) return 0;
+    const today = new Date().toISOString().slice(0, 10);
+    const { driftCents, reanchor } = reconcile(acc, enteredCurrent, derivedCurrent, today);
+    if (reanchor) await updatePaymentAccount(id, reanchor);
+    return driftCents;
+  };
+
+  // Persist a new account order: optimistic reorder + one batched sortIndex write.
+  const reorderPaymentAccounts = async (orderedIds: string[]) => {
+    if (!profile || !user?.id) return;
+    const prev = profile.paymentAccounts;
+    const byId = new Map(prev.map((acc) => [acc.id, acc]));
+    const reordered = orderedIds
+      .map((id) => byId.get(id))
+      .filter((acc): acc is PaymentAccount => Boolean(acc))
+      .map((acc, i) => ({ ...acc, sortIndex: i }));
+    const updates = reindex(orderedIds, prev);
+    const next = { ...profile, paymentAccounts: reordered };
+    setProfile(next);
+    saveLocalProfile(user.id, next);
+    try {
+      await firestoreService.updateAccountsBatch(user.id, updates);
+      setIsFirestoreOnline(true);
+    } catch (err) {
+      console.error('Failed to persist account order:', err);
+      setIsFirestoreOnline(false);
+      // Offline is tolerated (local order persists); roll back only a real failure.
+      if (!(err as { code?: string })?.code?.includes('unavailable')) {
+        const restored = { ...profile, paymentAccounts: prev };
+        setProfile(restored);
+        saveLocalProfile(user.id, restored);
+      }
+    }
+  };
+
   // Delete payment account
   const deletePaymentAccount = async (id: string) => {
     if (!profile || !user?.id) return;
@@ -459,6 +503,8 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
         addPaymentAccount,
         addPaymentAccounts,
         updatePaymentAccount,
+        reconcileAccount,
+        reorderPaymentAccounts,
         deletePaymentAccount,
         addIncomeSource,
         updateIncomeSource,

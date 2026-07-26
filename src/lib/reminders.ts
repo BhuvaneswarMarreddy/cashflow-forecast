@@ -15,8 +15,9 @@ import {
   Reminder, 
   NotificationPreferences 
 } from '@/types';
-import { 
-  addDays, 
+import { currentOf } from '@/lib/accounts';
+import {
+  addDays,
   format, 
   parseISO, 
   isBefore, 
@@ -60,7 +61,7 @@ export function generateAccountReminders(
   
   // Credit cards
   accounts
-    .filter(a => a.type === 'credit_card' && a.dueDate && a.balance > 0)
+    .filter(a => a.type === 'credit_card' && a.dueDate && currentOf(a) > 0)
     .forEach(card => {
       // Calculate next due date
       const now = new Date();
@@ -81,7 +82,7 @@ export function generateAccountReminders(
           id,
           date: dueDateStr,
           title: `${card.name} payment due`,
-          amount: card.balance,
+          amount: currentOf(card),
           relatedAccountId: card.id,
           type: 'credit_card',
           status: 'upcoming',
@@ -102,7 +103,7 @@ export function generateAccountReminders(
             id: reminderId,
             date: reminderDateStr,
             title: `${card.name} payment due in ${daysBefore} day${daysBefore > 1 ? 's' : ''}`,
-            amount: card.balance,
+            amount: currentOf(card),
             relatedAccountId: card.id,
             type: 'credit_card',
             status: 'upcoming',
