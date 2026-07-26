@@ -12,6 +12,7 @@ import ReceiptScannerModal from '@/components/ReceiptScannerModal';
 import RunwayCalculator from '@/components/RunwayCalculator';
 import { generateForecast, calculateCurrentCash, withDerivedBalances } from '@/lib/forecast';
 import { classifyTransaction, isPositive, isReward } from '@/lib/classify';
+import { pairedLegId } from '@/lib/transfers';
 import { EXPENSE_CATEGORIES, Transaction, TransactionType, getMerchantColor, displayCategory } from '@/types';
 import {
   TrendingUp,
@@ -287,6 +288,15 @@ export default function HistoryPage() {
   }, [profile, transactions]);
 
   const handleDelete = async (id: string) => {
+    // A card payment / internal move is TWO paired legs. Deleting only one desyncs the
+    // two derived balances, so offer to delete both.
+    const other = pairedLegId(id, transactions, profile?.paymentAccounts || []);
+    if (other) {
+      const both = window.confirm(
+        'This is one leg of a transfer between your accounts. Delete BOTH legs?\n\nOK = delete both · Cancel = delete only this one (balances may drift until you reconcile).'
+      );
+      if (both) await deleteTransaction(other);
+    }
     await deleteTransaction(id);
     setDeleteConfirm(null);
   };

@@ -71,3 +71,17 @@ describe('matchTransfers', () => {
     expect(m.unmatchedIn).toHaveLength(0);
   });
 });
+
+import { pairedLegId } from '@/lib/transfers';
+describe('pairedLegId', () => {
+  const accounts = [bank('bofa'), card('visa')];
+  test('returns the counterpart leg of a matched transfer, null otherwise', () => {
+    const out = leg({ id: 'out1', accountId: 'bofa', amount: 700, transferDirection: 'out' });
+    const inn = leg({ id: 'in1', accountId: 'visa', amount: 700, transferDirection: 'in' });
+    const spend = leg({ id: 'buy', accountId: 'visa', amount: 20, type: 'expense', transferDirection: undefined });
+    const txns = [out, inn, spend];
+    expect(pairedLegId('out1', txns, accounts)).toBe('in1');
+    expect(pairedLegId('in1', txns, accounts)).toBe('out1');
+    expect(pairedLegId('buy', txns, accounts)).toBeNull();
+  });
+});
