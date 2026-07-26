@@ -6,6 +6,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import { useTransactions } from '@/context/TransactionContext';
 import Navbar from '@/components/Navbar';
+import AccountsList from '@/components/AccountsList';
 import AccountTransactions from '@/components/AccountTransactions';
 import BudgetSettingsPanel from '@/components/BudgetSettingsPanel';
 import BudgetStatusPanel from '@/components/BudgetStatusPanel';
@@ -42,6 +43,7 @@ export default function AccountsPage() {
     isLoading: profileLoading, 
     addPaymentAccount, 
     updatePaymentAccount,
+    reorderPaymentAccounts,
     deletePaymentAccount,
     addIncomeSource,
     updateIncomeSource,
@@ -426,10 +428,11 @@ export default function AccountsPage() {
               </div>
 
               {profile?.paymentAccounts && profile.paymentAccounts.length > 0 ? (
-                <div className="space-y-3">
-                  {profile.paymentAccounts.map((account) => (
+                <AccountsList
+                  accounts={profile.paymentAccounts}
+                  onReorder={reorderPaymentAccounts}
+                  renderRow={(account) => (
                     <div
-                      key={account.id}
                       className="flex items-center justify-between p-4 rounded-xl bg-[var(--background-tertiary)] border-l-4 hover:bg-[var(--background-secondary)] transition-colors"
                       style={{ borderLeftColor: account.color }}
                     >
@@ -514,8 +517,8 @@ export default function AccountsPage() {
                         </div>
                       </div>
                     </div>
-                  ))}
-                </div>
+                  )}
+                />
               ) : (
                 <div className="text-center py-12">
                   <CreditCard className="w-16 h-16 text-[var(--foreground-muted)] mx-auto mb-4" />
