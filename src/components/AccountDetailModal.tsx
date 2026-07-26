@@ -29,6 +29,13 @@ export default function AccountDetailModal({ account, transactions, onClose }: {
   const isDebt = account.type === 'credit_card' || account.type === 'personal_loan';
   const current = currentOf(account);
 
+  // What "money in / out" means depends on the account: a card payment is money PAID,
+  // a purchase is money SPENT; a loan draw is BORROWED, a loan payment is PAID.
+  const [inLabel, outLabel] =
+    account.type === 'credit_card' ? ['Paid', 'Spent'] :
+    account.type === 'personal_loan' ? ['Borrowed', 'Paid'] :
+    ['In', 'Out'];
+
   const rows = useMemo(
     () => transactions
       .filter((t) => t.accountId === account.id)
@@ -107,11 +114,11 @@ export default function AccountDetailModal({ account, transactions, onClose }: {
             <>
               <div className="grid grid-cols-2 gap-3 mb-4">
                 <div className="rounded-xl bg-[var(--background-tertiary)] p-3">
-                  <p className="text-xs text-[var(--foreground-muted)]">Money in</p>
+                  <p className="text-xs text-[var(--foreground-muted)]">{inLabel}</p>
                   <p className="text-lg font-bold text-[var(--accent-success)]">{money(totalIn)}</p>
                 </div>
                 <div className="rounded-xl bg-[var(--background-tertiary)] p-3">
-                  <p className="text-xs text-[var(--foreground-muted)]">Money out</p>
+                  <p className="text-xs text-[var(--foreground-muted)]">{outLabel}</p>
                   <p className="text-lg font-bold text-[var(--accent-danger)]">{money(totalOut)}</p>
                 </div>
               </div>
@@ -123,13 +130,13 @@ export default function AccountDetailModal({ account, transactions, onClose }: {
                   <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `$${Math.round(Number(v) / 1000)}k`} width={48} />
                   <Tooltip formatter={(v) => money(Math.abs(Number(v)))} contentStyle={{ background: 'var(--background-secondary)', border: '1px solid var(--border-color)', borderRadius: 8 }} />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="in" name="In" fill="#0d9488" radius={[3, 3, 0, 0]} />
-                  <Bar dataKey="out" name="Out" fill="#be185d" radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="in" name={inLabel} fill="#0d9488" radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="out" name={outLabel} fill="#be185d" radius={[3, 3, 0, 0]} />
                   <Line type="monotone" dataKey="balance" name={isDebt ? 'Owed' : 'Balance'} stroke="#b08d3f" strokeWidth={2} dot={false} />
                 </ComposedChart>
               </ResponsiveContainer>
               <p className="text-xs text-[var(--foreground-muted)] mt-2">
-                Bars = money in/out each month · gold line = {isDebt ? 'balance owed' : 'account balance'} over time
+                Bars = {inLabel.toLowerCase()} / {outLabel.toLowerCase()} each month · gold line = {isDebt ? 'balance owed' : 'account balance'} over time
                 (ends at your real balance{isDebt ? ' owed' : ''}).
               </p>
             </>
