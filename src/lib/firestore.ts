@@ -465,6 +465,22 @@ export async function updateAccount(
   }
 }
 
+/** Persist a new display order: one atomic batch, one sortIndex per changed account. */
+export async function updateAccountsBatch(
+  userId: string,
+  updates: Array<{ id: string; sortIndex: number }>
+): Promise<void> {
+  if (updates.length === 0) return;
+  const batch = writeBatch(db);
+  for (const u of updates) {
+    batch.update(doc(db, 'users', userId, 'accounts', u.id), {
+      sortIndex: u.sortIndex,
+      updatedAt: serverTimestamp(),
+    });
+  }
+  await batch.commit();
+}
+
 export async function deleteAccount(userId: string, accountId: string): Promise<void> {
   try {
     const accountRef = doc(db, 'users', userId, 'accounts', accountId);
