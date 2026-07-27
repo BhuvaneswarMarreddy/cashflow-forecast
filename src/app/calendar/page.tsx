@@ -9,6 +9,7 @@ import Navbar from '@/components/Navbar';
 import AddTransactionModal from '@/components/AddTransactionModal';
 import { PAYMENT_METHODS, EXPENSE_CATEGORIES, Transaction } from '@/types';
 import { isPositive } from '@/lib/classify';
+import { formatMoney } from '@/lib/money';
 import {
   TrendingUp,
   Plus,
@@ -164,11 +165,12 @@ export default function CalendarPage() {
         </div>
 
         {/* Calendar */}
-        <div className="glass-card p-6">
+        <div className="glass-card p-3 sm:p-6">
           {/* Month Navigation */}
           <div className="flex items-center justify-between mb-6">
             <button
               onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
+              aria-label="Previous month"
               className="p-2 rounded-xl text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] hover:text-[var(--foreground)] transition-all"
             >
               <ChevronLeft className="w-6 h-6" />
@@ -178,6 +180,7 @@ export default function CalendarPage() {
             </h2>
             <button
               onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}
+              aria-label="Next month"
               className="p-2 rounded-xl text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] hover:text-[var(--foreground)] transition-all"
             >
               <ChevronRight className="w-6 h-6" />
@@ -185,7 +188,7 @@ export default function CalendarPage() {
           </div>
 
           {/* Week Days Header */}
-          <div className="grid grid-cols-7 gap-2 mb-2">
+          <div className="grid grid-cols-7 gap-1 sm:gap-2 mb-2">
             {weekDays.map((day) => (
               <div
                 key={day}
@@ -197,19 +200,21 @@ export default function CalendarPage() {
           </div>
 
           {/* Calendar Grid */}
-          <div className="grid grid-cols-7 gap-2">
+          <div className="grid grid-cols-7 gap-1 sm:gap-2">
             {calendarDays.map((day) => {
               const dayTxns = getDayTransactions(day);
               const { income, expense } = getDayTotal(day);
               const hasTransactions = dayTxns.length > 0;
               const hasExpense = expense > 0;
               const hasIncome = income > 0;
+              const net = income - expense;
 
               return (
                 <button
                   key={day.toISOString()}
                   onClick={() => handleDayClick(day)}
-                  className={`calendar-day ${
+                  aria-label={`${format(day, 'MMMM d')}, ${dayTxns.length} transaction${dayTxns.length === 1 ? '' : 's'}${hasTransactions ? `, net ${formatMoney(net)}` : ''}`}
+                  className={`calendar-day max-sm:p-1! max-sm:min-h-11! max-sm:aspect-auto! ${
                     !isSameMonth(day, currentMonth) ? 'opacity-30' : ''
                   } ${isToday(day) ? 'today' : ''} ${
                     hasTransactions ? 'has-expense' : ''
@@ -219,14 +224,14 @@ export default function CalendarPage() {
                     {format(day, 'd')}
                   </span>
                   {hasTransactions && (
-                    <div className="mt-1 space-y-0.5 w-full overflow-hidden">
+                    <div className="hidden sm:block mt-1 space-y-0.5 w-full overflow-hidden">
                       {hasExpense && (
-                        <div className="text-[8px] sm:text-[10px] text-[var(--accent-danger)] truncate">
+                        <div className="text-[10px] text-[var(--accent-danger)] truncate">
                           -${expense > 999 ? (expense / 1000).toFixed(1) + 'k' : expense.toFixed(0)}
                         </div>
                       )}
                       {hasIncome && (
-                        <div className="text-[8px] sm:text-[10px] text-[var(--accent-success)] truncate">
+                        <div className="text-[10px] text-[var(--accent-success)] truncate">
                           +${income > 999 ? (income / 1000).toFixed(1) + 'k' : income.toFixed(0)}
                         </div>
                       )}
