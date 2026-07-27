@@ -594,6 +594,49 @@ select option:checked {
   }
 }
 
+/* Sheet — the one <dialog> every modal rides. Desktop mirrors .modal-content exactly;
+   <=640px it becomes a bottom sheet. Padding stays 0 here (kills the UA default) —
+   content padding lives on the Sheet's inner div so Tailwind utilities keep working. */
+dialog.sheet {
+  background: var(--background-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  padding: 0;
+  width: 90%;
+  max-width: var(--sheet-max-w, 500px);
+  max-height: 90vh;
+  overflow-y: auto;
+  margin: auto;
+  color: var(--foreground);
+  animation: slideUp 0.3s ease-out;
+}
+
+dialog.sheet::backdrop {
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes sheetUp {
+  from { transform: translateY(24px); opacity: 0.6; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@media (max-width: 640px) {
+  dialog.sheet {
+    width: 100%;
+    max-width: 100%;
+    margin: auto 0 0 0; /* pin to the bottom edge */
+    border-radius: 20px 20px 0 0;
+    border-left: 0;
+    border-right: 0;
+    border-bottom: 0;
+    max-height: calc(100dvh - 32px);
+    padding-bottom: env(safe-area-inset-bottom);
+    animation: sheetUp 0.25s ease-out;
+  }
+}
+
 /* Delete confirmation modal */
 .delete-confirm-modal {
   background: var(--background-secondary);
