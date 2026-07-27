@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useTransactions } from '@/context/TransactionContext';
@@ -315,11 +316,11 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* Forecast Summary Card */}
+        {/* Forecast Summary Card — a real link, so keyboard/AT reach it */}
         {forecast && !setupIncomplete && (
-          <div 
-            className="mb-8 p-6 rounded-xl bg-[var(--background-secondary)] border border-[var(--border-color)] hover:border-[var(--border-glow)] transition-all cursor-pointer"
-            onClick={() => router.push('/forecast')}
+          <Link
+            href="/forecast"
+            className="block mb-8 p-6 rounded-xl bg-[var(--background-secondary)] border border-[var(--border-color)] hover:border-[var(--border-glow)] transition-all cursor-pointer"
           >
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
               <div className="flex items-center gap-4">
@@ -350,13 +351,13 @@ export default function DashboardPage() {
                     </span>
                   </div>
                 </div>
-                <button className="btn-primary flex items-center gap-2">
+                <span className="btn-primary flex items-center gap-2">
                   View Forecast
                   <ArrowRight className="w-4 h-4" />
-                </button>
+                </span>
               </div>
             </div>
-          </div>
+          </Link>
         )}
 
         {/* Header */}
@@ -392,11 +393,11 @@ export default function DashboardPage() {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {derivedAccounts.slice(0, 4).map((account) => (
-                <div
+                <Link
                   key={account.id}
-                  className="p-4 rounded-xl bg-[var(--background-secondary)] border border-[var(--border-color)] border-l-4 hover:border-[var(--border-glow)] transition-all cursor-pointer"
+                  href="/accounts"
+                  className="block p-4 rounded-xl bg-[var(--background-secondary)] border border-[var(--border-color)] border-l-4 hover:border-[var(--border-glow)] transition-all cursor-pointer"
                   style={{ borderLeftColor: account.color }}
-                  onClick={() => router.push('/accounts')}
                 >
                   <div className="flex items-center justify-between mb-3">
                     <div
@@ -431,7 +432,7 @@ export default function DashboardPage() {
                       </div>
                     </div>
                   )}
-                </div>
+                </Link>
               ))}
             </div>
           </div>

@@ -475,10 +475,12 @@ export default function AccountsPage() {
                       className="flex items-center justify-between p-4 rounded-xl bg-[var(--background-tertiary)] border-l-4 hover:bg-[var(--background-secondary)] transition-colors"
                       style={{ borderLeftColor: account.color }}
                     >
-                      <div
-                        className="flex items-center gap-4 flex-1 min-w-0 cursor-pointer"
+                      <button
+                        type="button"
+                        className="flex items-center gap-4 flex-1 min-w-0 cursor-pointer text-left bg-transparent border-0 p-0"
                         onClick={() => setGraphAccount(account)}
                         title="View this account's history graph"
+                        aria-label={`${account.name} — view history graph`}
                       >
                         <div
                           className="w-12 h-12 rounded-xl flex items-center justify-center"
@@ -519,7 +521,7 @@ export default function AccountsPage() {
                             </p>
                           )}
                         </div>
-                      </div>
+                      </button>
                       <div className="flex items-center gap-4">
                         <div className="text-right">
                           {/* The balance YOU set is the truth (the CSV has no balance). */}
