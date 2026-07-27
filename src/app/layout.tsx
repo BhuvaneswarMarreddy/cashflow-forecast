@@ -1,5 +1,20 @@
 import type { Metadata, Viewport } from "next";
+import { Outfit, Space_Mono } from "next/font/google";
 import "./globals.css";
+
+// Self-hosted at build time — no network fetch at runtime (offline/Capacitor requirement).
+const outfit = Outfit({
+  subsets: ["latin"],
+  weight: ["300", "400", "500", "600", "700", "800"],
+  variable: "--font-outfit",
+  display: "swap",
+});
+const spaceMono = Space_Mono({
+  subsets: ["latin"],
+  weight: ["400", "700"],
+  variable: "--font-space-mono",
+  display: "swap",
+});
 import { AuthProvider } from "@/context/AuthContext";
 import { TransactionProvider } from "@/context/TransactionContext";
 import { UserProfileProvider } from "@/context/UserProfileContext";
@@ -38,7 +53,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" className={`${outfit.variable} ${spaceMono.variable}`}>
       <body className="antialiased">
         <AuthProvider>
           <UserProfileProvider>
