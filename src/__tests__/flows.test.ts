@@ -209,6 +209,21 @@ describe('refunds are not income (owner rule)', () => {
   });
 });
 
+describe('drill-down: nodeTxnIds maps each node to the transactions behind it', () => {
+  it('threads txn ids to category and income-source nodes', () => {
+    const bank = acct({ id: 'A', balance: 100 });
+    const txns = [
+      tx({ id: 'g1', amount: 50, type: 'expense', accountId: 'A', sourceCategory: 'Groceries', date: '2026-01-03' }),
+      tx({ id: 'g2', amount: 30, type: 'expense', accountId: 'A', sourceCategory: 'Groceries', date: '2026-01-09' }),
+      tx({ id: 'pay', amount: 300, type: 'income', accountId: 'A', sourceCategory: 'Paychecks', title: 'Payroll Deposit', date: '2026-01-02' }),
+    ];
+    const g = buildFlowGraph(txns, [bank]);
+    const catNode = g.nodes.find((n) => n.kind === 'category')!;
+    expect(new Set(g.nodeTxnIds[catNode.id])).toEqual(new Set(['g1', 'g2']));
+    expect(g.nodeTxnIds['inc:Paychecks']).toEqual(['pay']);
+  });
+});
+
 describe('conservation holds at balance sign edges', () => {
   const assertConserved = (g: FlowGraph) => {
     const inBy = new Map<string, number>(), outBy = new Map<string, number>();

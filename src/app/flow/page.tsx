@@ -184,6 +184,14 @@ export default function FlowPage() {
     return { minMonth: lo, maxMonth: hi };
   }, [transactions]);
 
+  // Every month present in the data, newest → oldest, for the month picker.
+  const monthOptions = useMemo(() => {
+    if (maxMonth < minMonth) return [];
+    const out: string[] = [];
+    for (let m = maxMonth; m >= minMonth; m = shiftMonth(m, -1)) out.push(m);
+    return out;
+  }, [minMonth, maxMonth]);
+
   const graph: FlowGraph = useMemo(
     () => buildFlowGraph(transactions, accounts, periodFor(range, todayISO, month)),
     [transactions, accounts, range, todayISO, month]
@@ -236,6 +244,15 @@ export default function FlowPage() {
   // A pin from another period may not exist in this graph — treat it as no pin
   // (derived, not cleared via effect, so there is no extra render).
   const effectivePin = pinLabel && graph.nodes.some((n) => n.label === pinLabel) ? pinLabel : null;
+
+  // The actual transactions behind a pinned node — the drill-down "see more detail".
+  const pinnedTxns = useMemo(() => {
+    if (!effectivePin) return null;
+    const nodeId = graph.nodes.find((n) => n.label === effectivePin)?.id;
+    const ids = nodeId ? new Set(graph.nodeTxnIds[nodeId] ?? []) : new Set<string>();
+    if (ids.size === 0) return null;
+    return transactions.filter((t) => ids.has(t.id)).sort((a, b) => b.date.localeCompare(a.date));
+  }, [effectivePin, graph, transactions]);
 
   // Pinned node -> follow the money end-to-end: everything reachable downstream
   // (where it went) and upstream (where it came from).
@@ -380,9 +397,18 @@ export default function FlowPage() {
             className="px-2 py-1.5 rounded-md text-sm text-[var(--foreground-secondary)] hover:text-[var(--foreground)] disabled:opacity-30"
             aria-label="Previous month"
           >◀</button>
-          <span className="px-2 text-sm font-medium text-[var(--foreground)] min-w-[8.5rem] text-center">
-            {monthLabel(month)}
-          </span>
+          <select
+            value={month}
+            onChange={(e) => setMonth(e.target.value)}
+            aria-label="Jump to month"
+            className="px-2 py-1 text-sm font-medium bg-transparent text-[var(--foreground)] focus:outline-none cursor-pointer min-w-[8.5rem] text-center"
+          >
+            {monthOptions.map((m) => (
+              <option key={m} value={m} className="bg-[var(--background-secondary)] text-[var(--foreground)]">
+                {monthLabel(m)}
+              </option>
+            ))}
+          </select>
           <button
             onClick={() => setMonth((m) => shiftMonth(m, 1))}
             disabled={month >= maxMonth}
@@ -467,10 +493,13 @@ export default function FlowPage() {
           key={c.label}
           onClick={() => { setFocusKind(c.kind); setPinLabel(null); }}
           aria-pressed={focusKind === c.kind}
-          className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${focusKind === c.kind
+          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs border transition-colors ${focusKind === c.kind
             ? 'bg-[var(--accent-primary)] text-[#16181c] border-transparent'
             : 'border-[var(--border-color)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'}`}
         >
+          {c.kind && (
+            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: FLOW_COLORS[c.kind] }} aria-hidden="true" />
+          )}
           {c.label}
         </button>
       ))}
@@ -602,6 +631,18 @@ export default function FlowPage() {
                 <Maximize2 className="w-4 h-4" />
               </button>
             </div>
+            {chart === 'sankey' && (
+              <details className="mb-2 text-xs">
+                <summary className="cursor-pointer min-h-[44px] flex items-center select-none text-[var(--foreground-secondary)] hover:text-[var(--foreground)]">
+                  How to read this
+                </summary>
+                <div className="pt-1 space-y-1 text-[var(--foreground-muted)]">
+                  <p>Read left → right: money comes <strong>in</strong> on the left, flows through your accounts, and goes <strong>out</strong> on the right. Ribbon thickness = dollars.</p>
+                  <p>Color = kind (the chips above are the key). Tap any box to trace that money end-to-end and see the transactions behind it.</p>
+                  <p>Gray = money that stayed in your accounts, or moved between your own accounts.</p>
+                </div>
+              </details>
+            )}
             <div
               className="overflow-x-auto"
               role="img"
@@ -614,6 +655,35 @@ export default function FlowPage() {
               {chart === 'treemap' && 'Box size = dollars. Where every dollar ended up in this period — including what stayed in your accounts.'}
               {chart === 'waterfall' && 'Start with all money available, subtract each destination — it lands on exactly $0 because every dollar is accounted for.'}
             </p>
+
+            {/* Drill-down: the actual transactions behind the pinned node */}
+            {pinnedTxns && pinnedTxns.length > 0 && (
+              <div className="mt-3 rounded-xl border border-[var(--accent-primary)]/40 overflow-hidden">
+                <div className="px-3 py-2 bg-[var(--background-tertiary)] text-sm font-medium text-[var(--foreground)]">
+                  {pinnedTxns.length} transaction{pinnedTxns.length > 1 ? 's' : ''} behind “{effectivePin}”
+                </div>
+                <div className="max-h-64 overflow-y-auto">
+                  <table className="w-full text-sm">
+                    <thead className="text-left text-[var(--foreground-muted)] sticky top-0 bg-[var(--background-secondary)]">
+                      <tr>
+                        <th scope="col" className="px-3 py-1.5 font-normal">Date</th>
+                        <th scope="col" className="px-3 py-1.5 font-normal">Merchant</th>
+                        <th scope="col" className="px-3 py-1.5 font-normal text-right">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pinnedTxns.map((t) => (
+                        <tr key={t.id} className="border-t border-[var(--border-color)]">
+                          <td className="px-3 py-1.5 whitespace-nowrap">{t.date}</td>
+                          <td className="px-3 py-1.5">{t.merchant || t.title}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{money(Math.round(t.amount * 100))}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
             {/* Text alternative — the same ribbons as a real table (keyboard + screen-reader path) */}
             <details className="mt-3">

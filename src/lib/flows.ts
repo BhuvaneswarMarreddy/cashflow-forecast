@@ -82,6 +82,7 @@ export interface ReconRow {
 export interface FlowGraph {
   nodes: FlowNode[]; links: FlowLink[];
   reconciliation: ReconRow[]; between: BetweenRow[];
+  nodeTxnIds: Record<string, string[]>; // node id -> transaction ids behind it (drill-down)
 }
 
 const TOP_CATEGORIES = 8;
@@ -185,12 +186,22 @@ export function buildFlowGraph(
     inner.set(accNode, (inner.get(accNode) ?? 0) + cents);
     m.set(key, inner);
   };
+  // Parallel to the cent maps: which transaction ids landed at each category/person key,
+  // and (for income sources / stubs) directly at a node id — powers the /flow drill-down.
+  const catTxns = new Map<string, string[]>();
+  const sentTxns = new Map<string, string[]>();
+  const recvTxns = new Map<string, string[]>();
+  const nodeTxns = new Map<string, string[]>();
+  const pushId = (m: Map<string, string[]>, key: string, id: string) => {
+    const a = m.get(key); if (a) a.push(id); else m.set(key, [id]);
+  };
+  const tagTxn = (nodeId: string, id: string) => pushId(nodeTxns, nodeId, id);
   const accNodeOf = (t: Transaction, dir: 'in' | 'out') => {
     const a = t.accountId ? byId.get(t.accountId) : undefined;
     if (a) return `acct:${a.id}`;
     return dir === 'in'
-      ? node('unlinked-in', 'Unlinked (in)', 'stub')
-      : node('unlinked-out', 'Unlinked (out)', 'stub');
+      ? node('unlinked-in', 'No account tagged (in)', 'stub')
+      : node('unlinked-out', 'No account tagged (out)', 'stub');
   };
 
   for (const t of rows) {
@@ -200,7 +211,7 @@ export function buildFlowGraph(
     const person = personFrom(t.description ?? t.title);
     if (cls === 'income') {
       const an = accNodeOf(t, 'in');
-      if (person && !isSelfPerson(person)) { add(recv, person, an, cents); continue; }
+      if (person && !isSelfPerson(person)) { add(recv, person, an, cents); pushId(recvTxns, person, t.id); continue; }
       const a = t.accountId ? byId.get(t.accountId) : undefined;
       // A refund is not income (owner rule) — on a bank it must reach the same 'refunds'
       // node a card refund does, so the story nets it out of spending instead of counting
@@ -211,11 +222,12 @@ export function buildFlowGraph(
           ? node('refunds', 'Refunds', 'source')
           : node(`inc:${t.sourceCategory ?? 'Other income'}`, t.sourceCategory ?? 'Other income', 'source');
       link(src, an, cents);
+      tagTxn(src, t.id);
     } else {
       const an = accNodeOf(t, 'out');
-      if (person && isSelfPerson(person)) { link(an, node('self-ext-out', 'Self & external (unpaired)', 'stub'), cents); continue; }
-      if (person) { add(sent, person, an, cents); continue; }
-      add(catCents, displayCategory(t), an, cents);
+      if (person && isSelfPerson(person)) { link(an, node('self-ext-out', 'Other money out', 'stub'), cents); tagTxn('self-ext-out', t.id); continue; }
+      if (person) { add(sent, person, an, cents); pushId(sentTxns, person, t.id); continue; }
+      add(catCents, displayCategory(t), an, cents); pushId(catTxns, displayCategory(t), t.id);
     }
   }
   // stray pair legs (dangling accountId) and the person legs excluded from pairing
@@ -227,15 +239,15 @@ export function buildFlowGraph(
     const cents = toCents(t.amount);
     const an = accNodeOf(t, 'out');
     const person = personFrom(t.description ?? t.title);
-    if (person && !isSelfPerson(person)) add(sent, person, an, cents);
-    else link(an, node('self-ext-out', 'Self & external (unpaired)', 'stub'), cents);
+    if (person && !isSelfPerson(person)) { add(sent, person, an, cents); pushId(sentTxns, person, t.id); }
+    else { link(an, node('self-ext-out', 'Other money out', 'stub'), cents); tagTxn('self-ext-out', t.id); }
   }
   for (const t of [...unmatchedIn, ...strayIn]) {
     const cents = toCents(t.amount);
     const an = accNodeOf(t, 'in');
     const person = personFrom(t.description ?? t.title);
-    if (person && !isSelfPerson(person)) add(recv, person, an, cents);
-    else link(node('self-ext-in', 'Self & external (unpaired in)', 'stub'), an, cents);
+    if (person && !isSelfPerson(person)) { add(recv, person, an, cents); pushId(recvTxns, person, t.id); }
+    else { link(node('self-ext-in', 'Other money in', 'stub'), an, cents); tagTxn('self-ext-in', t.id); }
   }
 
   // categories: top-8 named, rest merged
@@ -246,6 +258,7 @@ export function buildFlowGraph(
   for (const [cat, m] of catCents) {
     const id = namedCats.has(cat) ? node(`cat:${cat}`, cat, 'category') : node('cat:other', 'Other spending', 'category');
     for (const [an, cents] of m) link(an, id, cents);
+    for (const tid of catTxns.get(cat) ?? []) tagTxn(id, tid); // merges into cat:other follow for free
   }
 
   // people: Remitly always named; top-5 others named; rest folded
@@ -261,8 +274,8 @@ export function buildFlowGraph(
     if (!named.has(p)) return node(`person-${dir}:others`, 'Others (people)', 'person');
     return node(`person-${dir}:${p}`, displayPerson(p), 'person');
   };
-  for (const [p, inner] of recv) for (const [an, cents] of inner) link(personNode(p, 'in'), an, cents);
-  for (const [p, inner] of sent) for (const [an, cents] of inner) link(an, personNode(p, 'out'), cents);
+  for (const [p, inner] of recv) { const id = personNode(p, 'in'); for (const [an, cents] of inner) link(id, an, cents); for (const tid of recvTxns.get(p) ?? []) tagTxn(id, tid); }
+  for (const [p, inner] of sent) { const id = personNode(p, 'out'); for (const [an, cents] of inner) link(an, id, cents); for (const tid of sentTxns.get(p) ?? []) tagTxn(id, tid); }
 
   // --- balancing stubs + reconciliation (verified against all 9 real accounts) ---
   const reconciliation: ReconRow[] = [];
@@ -281,27 +294,27 @@ export function buildFlowGraph(
     let verdict: ReconRow['verdict'];
     let gap = 0;
     if (plausible) {
-      if (opening > 0) link(node('opening', 'Opening balance', 'source'), id, opening);
+      if (opening > 0) link(node('opening', 'Starting balance', 'source'), id, opening);
       const r2 = residual + Math.max(opening, 0);
-      if (r2 > 0) link(id, bank ? node('held', 'Held today', 'stub') : node('debt-down', 'Pre-export debt paid down', 'stub'), r2);
-      else if (r2 < 0) link(node('debt-up', 'Card balance ↑ (new debt)', 'source'), id, -r2);
+      if (r2 > 0) link(id, bank ? node('held', 'Still in your accounts', 'stub') : node('debt-down', 'Paid down existing balance', 'stub'), r2);
+      else if (r2 < 0) link(node('debt-up', 'New card charges', 'source'), id, -r2);
       verdict = opening === 0 ? 'flat' : bank ? 'opening' : 'pre-export-debt';
     } else {
       gap = Math.abs(opening);
       verdict = 'missing-rows';
       if (bank) {
-        link(id, node('missing-out', '⚠ Missing from export', 'warning'), gap);
+        link(id, node('missing-out', '⚠ Not in your data yet', 'warning'), gap);
         // Hold the real closing so the node balances. A positive balance stays in the
         // account; a rare overdrawn (negative) balance is an inflow — clamping it to zero
         // (the old bug) left |closing| of outflow with no source and broke conservation.
-        if (closing >= 0) link(id, node('held', 'Held today', 'stub'), closing);
+        if (closing >= 0) link(id, node('held', 'Still in your accounts', 'stub'), closing);
         else link(node('overdrawn', '⚠ Overdrawn (negative balance)', 'warning'), id, -closing);
       } else {
-        link(node('missing-in', '⚠ Missing from export (in)', 'warning'), id, gap);
+        link(node('missing-in', '⚠ Not in your data yet', 'warning'), id, gap);
         // A normal card owes (negative closing → new-debt inflow); an overpaid card holds a
         // positive balance that must LEAVE the node as held, else sources exceed sinks.
-        if (closing <= 0) link(node('debt-up', 'Card balance ↑ (new debt)', 'source'), id, -closing);
-        else link(id, node('held', 'Held today', 'stub'), closing);
+        if (closing <= 0) link(node('debt-up', 'New card charges', 'source'), id, -closing);
+        else link(id, node('held', 'Still in your accounts', 'stub'), closing);
       }
     }
     reconciliation.push({
@@ -318,6 +331,7 @@ export function buildFlowGraph(
     nodes: [...nodes.values()].filter((n) => used.has(n.id)),
     links: [...links.values()],
     reconciliation, between,
+    nodeTxnIds: Object.fromEntries(nodeTxns),
   };
 }
 
