@@ -692,6 +692,24 @@ select option:checked {
   }
 }
 
+/* P0 mobile base — element-level, so inputs without .input-field are covered too */
+@media (pointer: coarse) {
+  input, select, textarea {
+    font-size: 16px; /* iOS zooms the page on focus below 16px */
+  }
+}
+
+body {
+  overscroll-behavior-y: none; /* no rubber-band chaining behind sheets/nav */
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Weak-GPU relief: below-the-fold chart cards skip layout/paint until scrolled near */
+.below-fold-chart {
+  content-visibility: auto;
+  contain-intrinsic-size: 0 320px;
+}
+
 /* Small screen adjustments */
 @media (max-width: 375px) {
   .modal-content {
