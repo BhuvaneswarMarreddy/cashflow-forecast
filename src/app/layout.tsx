@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
 import { TransactionProvider } from "@/context/TransactionContext";
@@ -20,6 +20,16 @@ export const metadata: Metadata = {
     ],
   },
   manifest: "/manifest.json",
+};
+
+// Keystone for the whole mobile layer: viewport-fit=cover activates every env(safe-area-*)
+// rule (dead until now), themeColor paints the browser chrome, and keeping zoom enabled
+// (no maximumScale/userScalable) preserves pinch-to-zoom for low-vision users.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#14161a",
 };
 
 export default function RootLayout({

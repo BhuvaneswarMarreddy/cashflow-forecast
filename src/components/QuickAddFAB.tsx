@@ -26,8 +26,8 @@ export default function QuickAddFAB() {
 
   return (
     <>
-      {/* FAB Menu */}
-      <div className="fixed bottom-6 right-6 z-50 flex flex-col-reverse items-end gap-3">
+      {/* FAB Menu — lifted above the mobile bottom nav (bottom-24) on phones */}
+      <div className="fixed bottom-24 md:bottom-6 right-6 z-50 flex flex-col-reverse items-end gap-3">
         {/* Sub-buttons (shown when open) */}
         {isOpen && (
           <>
@@ -56,6 +56,8 @@ export default function QuickAddFAB() {
         {/* Main FAB Button */}
         <button
           onClick={toggleMenu}
+          aria-label={isOpen ? 'Close quick add menu' : 'Quick add — expense or receipt'}
+          aria-expanded={isOpen}
           className={`w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 ${
             isOpen 
               ? 'bg-[var(--background-tertiary)] border border-[var(--border-color)] rotate-45' 

@@ -54,6 +54,16 @@
 
 html {
   scroll-behavior: smooth;
+  /* Respect the user's OS text size; stop iOS from auto-inflating text on rotate */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Reserve space so the fixed mobile bottom nav never covers page content */
+@media (max-width: 767px) {
+  body {
+    padding-bottom: calc(56px + env(safe-area-inset-bottom));
+  }
 }
 
 body {
@@ -768,8 +778,16 @@ a:focus-visible {
   background: linear-gradient(90deg, transparent, var(--background-secondary));
 }
 
-/* Drag-and-drop: respect reduced motion */
+/* Respect reduced motion app-wide: near-instant transitions/animations, no smooth scroll.
+   (recharts JS mount animations aren't CSS — those are disabled via isAnimationActive.) */
 @media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
   [data-dnd-draggable] { transition: none !important; }
 }
 
