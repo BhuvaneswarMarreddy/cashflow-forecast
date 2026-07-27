@@ -69,7 +69,7 @@ const CHART_COLORS = [
 
 export default function AnalyticsPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
-  const { transactions } = useTransactions();
+  const { transactions, isLoading: txnLoading } = useTransactions();
   const { profile, isLoading: profileLoading, isOnboarded } = useUserProfile();
   const router = useRouter();
 
@@ -357,7 +357,7 @@ export default function AnalyticsPage() {
     return null;
   };
 
-  if (authLoading || profileLoading) {
+  if (authLoading || profileLoading || txnLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="bg-pattern" />

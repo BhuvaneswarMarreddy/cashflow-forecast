@@ -327,7 +327,8 @@ export default function CalendarPage() {
                           {isExpense ? '-' : '+'}${txn.amount.toFixed(2)}
                         </p>
                         <button
-                          onClick={() => deleteTransaction(txn.id)}
+                          onClick={() => { if (window.confirm(`Delete "${txn.title}" (${txn.amount.toFixed(2)})? This can't be undone.`)) deleteTransaction(txn.id); }}
+                          aria-label={`Delete ${txn.title}`}
                           className="p-2 rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-danger)] hover:bg-[var(--accent-danger)]/10 transition-colors"
                         >
                           <Trash2 className="w-4 h-4" />

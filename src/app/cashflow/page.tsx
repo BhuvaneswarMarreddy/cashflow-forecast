@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useTransactions } from '@/context/TransactionContext';
@@ -23,7 +24,7 @@ type Range = '12m' | 'ytd' | 'all';
 
 export default function CashflowPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
-  const { transactions } = useTransactions();
+  const { transactions, isLoading: txnLoading } = useTransactions();
   const { profile } = useUserProfile();
   const router = useRouter();
   const [range, setRange] = useState<Range>('12m');
@@ -131,10 +132,28 @@ export default function CashflowPage() {
   }, [rows, accounts]);
   const totalRewards = rewardsByCard.reduce((s, r) => s + r.value, 0);
 
-  if (authLoading) {
+  // Gate on the transactions load too — without it the page flashes $0 on cold load.
+  if (authLoading || txnLoading) {
     return <div className="min-h-screen flex items-center justify-center"><div className="animate-pulse-glow w-16 h-16 rounded-2xl bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)]" /></div>;
   }
   if (!isAuthenticated) return null;
+
+  if (transactions.length === 0) {
+    return (
+      <div className="min-h-screen relative">
+        <div className="bg-pattern" />
+        <Navbar />
+        <main className="pt-24 pb-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto relative z-10">
+          <h1 className="text-3xl font-bold text-[var(--foreground)] mb-6">Cashflow</h1>
+          <div className="glass-card p-10 text-center">
+            <p className="text-lg font-medium text-[var(--foreground)] mb-2">No transactions yet</p>
+            <p className="text-sm text-[var(--foreground-secondary)] mb-5">Import your bank CSV to see where your income goes, month by month.</p>
+            <Link href="/history" className="btn-primary inline-flex items-center gap-2">Import from History</Link>
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   const keptRate = totals.income > 0 ? Math.round((totals.kept / totals.income) * 100) : 0;
 
