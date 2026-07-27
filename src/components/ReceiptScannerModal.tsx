@@ -16,6 +16,7 @@ import {
 import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import { Transaction, EXPENSE_CATEGORIES, ExpenseCategory, PAYMENT_METHODS, PaymentMethod } from '@/types';
+import Sheet from '@/components/Sheet';
 
 interface ReceiptScannerModalProps {
   isOpen: boolean;
@@ -241,8 +242,7 @@ export default function ReceiptScannerModal({ isOpen, onClose }: ReceiptScannerM
   const selectedCount = parsedTransactions.filter(t => t.selected).length;
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content max-w-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+    <Sheet open onClose={onClose} ariaLabel="Scan receipt" maxWidth="42rem" className="p-5 sm:p-8">
         <div className="flex justify-between items-center mb-6 sticky top-0 bg-[var(--background-secondary)] pb-4 -mt-2 pt-2">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] flex items-center justify-center">
@@ -547,8 +547,7 @@ export default function ReceiptScannerModal({ isOpen, onClose }: ReceiptScannerM
             </div>
           </div>
         )}
-      </div>
-    </div>
+    </Sheet>
   );
 }
 
