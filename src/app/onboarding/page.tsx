@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useUserProfile } from '@/context/UserProfileContext';
@@ -184,12 +184,22 @@ function OnboardingContent() {
     }
   }, [dataLoaded, isContinuing, hasInitializedStep]);
 
-  // Only redirect to dashboard if NOT continuing and already onboarded
+  // Only redirect to forecast if NOT continuing and already onboarded
   useEffect(() => {
     if (!profileLoading && profile?.isOnboarded && !isContinuing) {
       router.push('/forecast');
     }
   }, [profile, profileLoading, router, isContinuing]);
+
+  // When an add-form is revealed, scroll it into view and focus its first input
+  // (on phones the form renders below the fold, so tapping "Add" looks dead)
+  const addFormRef = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    if ((showBankForm || showCardForm || showLoanForm || showIncomeForm) && addFormRef.current) {
+      addFormRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      addFormRef.current.querySelector('input')?.focus({ preventScroll: true });
+    }
+  }, [showBankForm, showCardForm, showLoanForm, showIncomeForm]);
 
   if (authLoading || profileLoading) {
     return (
@@ -612,11 +622,16 @@ function OnboardingContent() {
       
       <div className="relative z-10 max-w-3xl mx-auto px-4 py-8">
         {/* Progress Steps */}
-        <div className="flex items-center justify-center mb-8 overflow-x-auto pb-2">
+        <ol aria-label="Setup progress" className="flex items-center justify-center mb-8 overflow-x-auto pb-2">
           {steps.map((step, index) => (
-            <React.Fragment key={step.key}>
+            <li
+              key={step.key}
+              aria-current={index === currentStepIndex ? 'step' : undefined}
+              className="flex items-center flex-shrink-0"
+            >
               <div className="flex flex-col items-center flex-shrink-0">
                 <div
+                  aria-hidden="true"
                   className={`w-9 h-9 md:w-11 md:h-11 rounded-xl flex items-center justify-center transition-all ${
                     index <= currentStepIndex
                       ? 'bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] text-white'
@@ -631,14 +646,20 @@ function OnboardingContent() {
               </div>
               {index < steps.length - 1 && (
                 <div
+                  aria-hidden="true"
                   className={`w-6 md:w-8 h-0.5 mx-1 rounded transition-all flex-shrink-0 ${
                     index < currentStepIndex ? 'bg-[var(--accent-primary)]' : 'bg-[var(--background-tertiary)]'
                   }`}
                 />
               )}
-            </React.Fragment>
+            </li>
           ))}
-        </div>
+        </ol>
+
+        {/* Mobile: current step label (per-step labels are hidden below md) */}
+        <p className="md:hidden text-center text-sm text-[var(--foreground-secondary)] -mt-4 mb-4">
+          Step {currentStepIndex + 1} of {steps.length}: {steps[currentStepIndex]?.label}
+        </p>
 
         {/* Step Content */}
         <div className="glass-card p-6 md:p-8">
@@ -748,7 +769,11 @@ function OnboardingContent() {
 
               {/* Add Bank Account Form */}
               {showBankForm ? (
-                <div className="p-5 rounded-xl bg-[var(--background-tertiary)] border border-[var(--border-color)] mt-4">
+                <form
+                  ref={addFormRef}
+                  onSubmit={(e) => { e.preventDefault(); addBankAccount(); }}
+                  className="p-5 rounded-xl bg-[var(--background-tertiary)] border border-[var(--border-color)] mt-4"
+                >
                   <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">Add Bank Account</h3>
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
@@ -772,6 +797,7 @@ function OnboardingContent() {
                         <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--foreground-muted)]" />
                         <input
                           type="text"
+                          inputMode="numeric"
                           value={bankForm.lastFourDigits}
                           onChange={(e) => setBankForm({ ...bankForm, lastFourDigits: e.target.value.replace(/\D/g, '').slice(0, 4) })}
                           placeholder="1234"
@@ -822,6 +848,7 @@ function OnboardingContent() {
                         <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--foreground-muted)]" />
                         <input
                           type="number"
+                          inputMode="decimal"
                           step="0.01"
                           value={bankForm.balance}
                           onChange={(e) => setBankForm({ ...bankForm, balance: e.target.value })}
@@ -834,7 +861,7 @@ function OnboardingContent() {
 
                   <div className="flex gap-3 pt-4 border-t border-[var(--border-color)]">
                     <button
-                      onClick={addBankAccount}
+                      type="submit"
                       disabled={!bankForm.name || isAddingBank}
                       className="btn-primary flex-1 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
@@ -851,6 +878,7 @@ function OnboardingContent() {
                       )}
                     </button>
                     <button
+                      type="button"
                       onClick={resetBankForm}
                       disabled={isAddingBank}
                       className="btn-secondary px-6"
@@ -858,7 +886,7 @@ function OnboardingContent() {
                       Cancel
                     </button>
                   </div>
-                </div>
+                </form>
               ) : (
                 <button
                   onClick={() => setShowBankForm(true)}
@@ -878,22 +906,13 @@ function OnboardingContent() {
                   <ChevronLeft className="w-4 h-4" />
                   Back
                 </button>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setCurrentStep('credit-cards')}
-                    className="btn-secondary flex items-center gap-2"
-                  >
-                    Skip
-                    <SkipForward className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => setCurrentStep('credit-cards')}
-                    className="btn-primary flex items-center gap-2"
-                  >
-                    Continue
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
+                <button
+                  onClick={() => setCurrentStep('credit-cards')}
+                  className="btn-primary flex items-center gap-2"
+                >
+                  Continue
+                  <ChevronRight className="w-4 h-4" />
+                </button>
               </div>
             </div>
           )}
@@ -961,7 +980,11 @@ function OnboardingContent() {
 
               {/* Add Credit Card Form */}
               {showCardForm ? (
-                <div className="p-5 rounded-xl bg-[var(--background-tertiary)] border border-[var(--border-color)] mt-4">
+                <form
+                  ref={addFormRef}
+                  onSubmit={(e) => { e.preventDefault(); addCreditCard(); }}
+                  className="p-5 rounded-xl bg-[var(--background-tertiary)] border border-[var(--border-color)] mt-4"
+                >
                   <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">Add Credit Card</h3>
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
@@ -985,6 +1008,7 @@ function OnboardingContent() {
                         <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--foreground-muted)]" />
                         <input
                           type="text"
+                          inputMode="numeric"
                           value={cardForm.lastFourDigits}
                           onChange={(e) => setCardForm({ ...cardForm, lastFourDigits: e.target.value.replace(/\D/g, '').slice(0, 4) })}
                           placeholder="1234"
@@ -1038,6 +1062,7 @@ function OnboardingContent() {
                         <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--foreground-muted)]" />
                         <input
                           type="number"
+                          inputMode="decimal"
                           step="0.01"
                           value={cardForm.balance}
                           onChange={(e) => setCardForm({ ...cardForm, balance: e.target.value })}
@@ -1054,6 +1079,7 @@ function OnboardingContent() {
                         <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--foreground-muted)]" />
                         <input
                           type="number"
+                          inputMode="decimal"
                           step="0.01"
                           value={cardForm.creditLimit}
                           onChange={(e) => setCardForm({ ...cardForm, creditLimit: e.target.value })}
@@ -1137,7 +1163,7 @@ function OnboardingContent() {
 
                   <div className="flex gap-3 pt-4 border-t border-[var(--border-color)]">
                     <button
-                      onClick={addCreditCard}
+                      type="submit"
                       disabled={!cardForm.name || isAddingCard}
                       className="btn-primary flex-1 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
@@ -1154,6 +1180,7 @@ function OnboardingContent() {
                       )}
                     </button>
                     <button
+                      type="button"
                       onClick={resetCardForm}
                       disabled={isAddingCard}
                       className="btn-secondary px-6"
@@ -1161,7 +1188,7 @@ function OnboardingContent() {
                       Cancel
                     </button>
                   </div>
-                </div>
+                </form>
               ) : (
                 <button
                   onClick={() => {
@@ -1187,22 +1214,13 @@ function OnboardingContent() {
                   <ChevronLeft className="w-4 h-4" />
                   Back
                 </button>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setCurrentStep('loans')}
-                    className="btn-secondary flex items-center gap-2"
-                  >
-                    Skip
-                    <SkipForward className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => setCurrentStep('loans')}
-                    className="btn-primary flex items-center gap-2"
-                  >
-                    Continue
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
+                <button
+                  onClick={() => setCurrentStep('loans')}
+                  className="btn-primary flex items-center gap-2"
+                >
+                  Continue
+                  <ChevronRight className="w-4 h-4" />
+                </button>
               </div>
             </div>
           )}
@@ -1263,7 +1281,11 @@ function OnboardingContent() {
 
               {/* Add Loan Form */}
               {showLoanForm ? (
-                <div className="p-5 rounded-xl bg-[var(--background-tertiary)] border border-[var(--border-color)] mt-4">
+                <form
+                  ref={addFormRef}
+                  onSubmit={(e) => { e.preventDefault(); addLoan(); }}
+                  className="p-5 rounded-xl bg-[var(--background-tertiary)] border border-[var(--border-color)] mt-4"
+                >
                   <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">Add Loan</h3>
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
@@ -1304,6 +1326,7 @@ function OnboardingContent() {
                         <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--foreground-muted)]" />
                         <input
                           type="number"
+                          inputMode="decimal"
                           step="0.01"
                           value={loanForm.balance}
                           onChange={(e) => setLoanForm({ ...loanForm, balance: e.target.value })}
@@ -1321,6 +1344,7 @@ function OnboardingContent() {
                         <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--foreground-muted)]" />
                         <input
                           type="number"
+                          inputMode="decimal"
                           step="0.01"
                           value={loanForm.originalAmount}
                           onChange={(e) => setLoanForm({ ...loanForm, originalAmount: e.target.value })}
@@ -1357,6 +1381,7 @@ function OnboardingContent() {
                         <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--foreground-muted)]" />
                         <input
                           type="number"
+                          inputMode="decimal"
                           step="0.01"
                           value={loanForm.monthlyPayment}
                           onChange={(e) => setLoanForm({ ...loanForm, monthlyPayment: e.target.value })}
@@ -1386,7 +1411,7 @@ function OnboardingContent() {
 
                   <div className="flex gap-3 pt-4 border-t border-[var(--border-color)]">
                     <button
-                      onClick={addLoan}
+                      type="submit"
                       disabled={!loanForm.name || isAddingLoan}
                       className="btn-primary flex-1 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
@@ -1403,6 +1428,7 @@ function OnboardingContent() {
                       )}
                     </button>
                     <button
+                      type="button"
                       onClick={resetLoanForm}
                       disabled={isAddingLoan}
                       className="btn-secondary px-6"
@@ -1410,7 +1436,7 @@ function OnboardingContent() {
                       Cancel
                     </button>
                   </div>
-                </div>
+                </form>
               ) : (
                 <button
                   onClick={() => setShowLoanForm(true)}
@@ -1430,22 +1456,13 @@ function OnboardingContent() {
                   <ChevronLeft className="w-4 h-4" />
                   Back
                 </button>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setCurrentStep('income')}
-                    className="btn-secondary flex items-center gap-2"
-                  >
-                    Skip
-                    <SkipForward className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => setCurrentStep('income')}
-                    className="btn-primary flex items-center gap-2"
-                  >
-                    Continue
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
+                <button
+                  onClick={() => setCurrentStep('income')}
+                  className="btn-primary flex items-center gap-2"
+                >
+                  Continue
+                  <ChevronRight className="w-4 h-4" />
+                </button>
               </div>
             </div>
           )}
@@ -1518,7 +1535,11 @@ function OnboardingContent() {
 
               {/* Add Income Form */}
               {showIncomeForm ? (
-                <div className="p-5 rounded-xl bg-[var(--background-tertiary)] border border-[var(--border-color)] mt-4">
+                <form
+                  ref={addFormRef}
+                  onSubmit={(e) => { e.preventDefault(); addIncome(); }}
+                  className="p-5 rounded-xl bg-[var(--background-tertiary)] border border-[var(--border-color)] mt-4"
+                >
                   <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">Add Income Source</h3>
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
@@ -1542,6 +1563,7 @@ function OnboardingContent() {
                         <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--foreground-muted)]" />
                         <input
                           type="number"
+                          inputMode="decimal"
                           step="0.01"
                           value={incomeForm.amount}
                           onChange={(e) => setIncomeForm({ ...incomeForm, amount: e.target.value })}
@@ -1589,7 +1611,7 @@ function OnboardingContent() {
 
                   <div className="flex gap-3 pt-4 border-t border-[var(--border-color)]">
                     <button
-                      onClick={addIncome}
+                      type="submit"
                       disabled={!incomeForm.name || !incomeForm.amount || isAddingIncome}
                       className="btn-primary flex-1 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
@@ -1606,6 +1628,7 @@ function OnboardingContent() {
                       )}
                     </button>
                     <button
+                      type="button"
                       onClick={resetIncomeForm}
                       disabled={isAddingIncome}
                       className="btn-secondary px-6"
@@ -1613,7 +1636,7 @@ function OnboardingContent() {
                       Cancel
                     </button>
                   </div>
-                </div>
+                </form>
               ) : (
                 <button
                   onClick={() => setShowIncomeForm(true)}
@@ -1633,22 +1656,13 @@ function OnboardingContent() {
                   <ChevronLeft className="w-4 h-4" />
                   Back
                 </button>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setCurrentStep('budget')}
-                    className="btn-secondary flex items-center gap-2"
-                  >
-                    Skip
-                    <SkipForward className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => setCurrentStep('budget')}
-                    className="btn-primary flex items-center gap-2"
-                  >
-                    Continue
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
+                <button
+                  onClick={() => setCurrentStep('budget')}
+                  className="btn-primary flex items-center gap-2"
+                >
+                  Continue
+                  <ChevronRight className="w-4 h-4" />
+                </button>
               </div>
             </div>
           )}
@@ -1679,6 +1693,7 @@ function OnboardingContent() {
                     <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[var(--foreground-muted)]" />
                     <input
                       type="number"
+                      inputMode="decimal"
                       step="0.01"
                       value={monthlyBudget}
                       onChange={(e) => setMonthlyBudget(e.target.value)}
@@ -1800,7 +1815,7 @@ function OnboardingContent() {
           )}
         </div>
 
-        {/* Skip to Dashboard - Always visible except on welcome/complete */}
+        {/* Skip to Forecast - Always visible except on welcome/complete */}
         {currentStep !== 'welcome' && currentStep !== 'complete' && (
           <div className="text-center mt-4">
             <button
@@ -1816,7 +1831,7 @@ function OnboardingContent() {
               ) : (
                 <>
                   <SkipForward className="w-3 h-3" />
-                  Save & go to Dashboard
+                  Save & go to Forecast
                 </>
               )}
             </button>
