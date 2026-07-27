@@ -7,6 +7,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import Navbar from '@/components/Navbar';
+import ChartSrTable from '@/components/ChartSrTable';
 import { classifyTransaction, isPositive, isReward } from '@/lib/classify';
 import { matchTransfers } from '@/lib/transfers';
 import { displayCategory } from '@/types';
@@ -20,6 +21,10 @@ import {
 
 // Validated categorical palette (CVD-safe in light mode with the direct labels present).
 const money = (n: number) => formatMoney(n);
+
+// <sm only: shrink recharts axis tick labels so crowded X axes stop colliding.
+// CSS-gated (max-sm:) so desktop stays pixel-identical — no matchMedia in render.
+const MOBILE_TICKS = 'max-sm:[&_.recharts-cartesian-axis-tick-value]:text-[10px]';
 
 type Range = '12m' | 'ytd' | 'all';
 
@@ -190,7 +195,12 @@ export default function CashflowPage() {
         <div className="glass-card p-5 mb-8">
           <h3 className="font-semibold text-[var(--foreground)] mb-1">Income vs Spending, by month</h3>
           <p className="text-sm text-[var(--foreground-secondary)] mb-4">The gap between the bars is what you kept. Transfers and card payments are excluded — they move money, they don&apos;t spend it.</p>
-          <ResponsiveContainer width="100%" height={320}>
+          <div
+            className={`h-[240px] sm:h-[320px] ${MOBILE_TICKS}`}
+            role="img"
+            aria-label={`Monthly income vs spending bar chart: ${money(totals.income)} in, ${money(totals.spending)} spent, ${money(totals.kept)} kept.`}
+          >
+          <ResponsiveContainer width="100%" height="100%">
             <BarChart data={monthly} margin={{ top: 8, right: 8, left: 0, bottom: 0 }} barGap={2}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
               <XAxis dataKey="month" tick={{ fontSize: 11, fill: 'var(--foreground-muted)' }} axisLine={false} tickLine={false} />
@@ -201,12 +211,23 @@ export default function CashflowPage() {
               <Bar isAnimationActive={false} dataKey="spending" name="Spending" fill="#ef4444" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
+          </div>
+          <ChartSrTable
+            caption="Income vs spending, by month"
+            columns={['Month', 'Income', 'Spending', 'Net']}
+            rows={monthly.map(m => [m.month, money(m.income), money(m.spending), money(m.net)])}
+          />
         </div>
 
         {/* Where the money went */}
         <div className="below-fold-chart glass-card p-5">
           <h3 className="font-semibold text-[var(--foreground)] mb-1">Where your money went</h3>
           <p className="text-sm text-[var(--foreground-secondary)] mb-4">Top spending categories for this period.</p>
+          <div
+            className={MOBILE_TICKS}
+            role="img"
+            aria-label={`Top spending categories bar chart: ${money(totals.spending)} total, led by ${byCategory[0]?.name ?? 'nothing'} at ${money(byCategory[0]?.value ?? 0)}.`}
+          >
           <ResponsiveContainer width="100%" height={Math.max(220, byCategory.length * 44)}>
             <BarChart data={byCategory} layout="vertical" margin={{ top: 4, right: 60, left: 8, bottom: 4 }}>
               <XAxis type="number" hide />
@@ -217,6 +238,12 @@ export default function CashflowPage() {
               </Bar>
             </BarChart>
           </ResponsiveContainer>
+          </div>
+          <ChartSrTable
+            caption="Top spending categories for this period"
+            columns={['Category', 'Spent']}
+            rows={byCategory.map(c => [c.name, money(c.value)])}
+          />
         </div>
 
         {/* Where your money left to */}

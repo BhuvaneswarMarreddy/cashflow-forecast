@@ -14,6 +14,7 @@ import {
 import { ForecastSummary } from '@/types';
 import { format, parseISO } from 'date-fns';
 import { TrendingDown, AlertTriangle } from 'lucide-react';
+import ChartSrTable from '@/components/ChartSrTable';
 
 interface ForecastChartProps {
   forecast: ForecastSummary;
@@ -141,7 +142,11 @@ export default function ForecastChart({ forecast }: ForecastChartProps) {
       )}
 
       {/* Chart */}
-      <div className="h-[350px] mt-4">
+      <div
+        className="h-[280px] sm:h-[350px] mt-4"
+        role="img"
+        aria-label={`Area chart projecting cash balance from $${forecast.startingBalance.toLocaleString()} to $${forecast.endingBalance.toLocaleString()}, with a lowest point of $${forecast.lowestBalance.toLocaleString()} on ${format(parseISO(forecast.lowestBalanceDate), 'MMM d')}.`}
+      >
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
             <defs>
@@ -214,6 +219,11 @@ export default function ForecastChart({ forecast }: ForecastChartProps) {
           </AreaChart>
         </ResponsiveContainer>
       </div>
+      <ChartSrTable
+        caption="Projected daily cash balance"
+        columns={['Date', 'Balance']}
+        rows={chartData.map((d) => [d.displayDate, `$${d.balance.toLocaleString()}`])}
+      />
     </div>
   );
 }

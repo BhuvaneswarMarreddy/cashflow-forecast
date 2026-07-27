@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { ForecastSummary } from '@/types';
 import { format, addDays, addMonths, differenceInDays } from 'date-fns';
+import ChartSrTable from '@/components/ChartSrTable';
 import {
   AreaChart,
   Area,
@@ -235,6 +236,11 @@ export default function RunwayCalculator({
   const runwayDisplay = formatRunway(currentRunway.days, currentRunway.months);
   const scenarioDisplay = formatRunway(scenarioRunway.days, scenarioRunway.months);
 
+  // Which projection the chart is showing (base vs. what-if adjustments)
+  const hasWhatIf = expenseReduction > 0 || additionalIncome > 0;
+  const activeProjection = hasWhatIf ? scenarioProjection : currentProjection;
+  const activeDisplay = hasWhatIf ? scenarioDisplay : runwayDisplay;
+
   return (
     <div className="space-y-6">
       {/* Main Runway Card */}
@@ -397,10 +403,14 @@ export default function RunwayCalculator({
       <div className="bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-xl p-6">
         <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">12-Month Projection</h3>
         
-        <div className="h-[300px]">
+        <div
+          className="h-[240px] sm:h-[300px]"
+          role="img"
+          aria-label={`Area chart of ${hasWhatIf ? 'what-if' : 'projected'} balance over 12 months, from $${currentCash.toLocaleString()} today to $${activeProjection[activeProjection.length - 1].balance.toLocaleString()}; runway: ${activeDisplay.text}.`}
+        >
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart 
-              data={expenseReduction > 0 || additionalIncome > 0 ? scenarioProjection : currentProjection}
+            <AreaChart
+              data={activeProjection}
               margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
             >
               <defs>
@@ -441,12 +451,17 @@ export default function RunwayCalculator({
             </AreaChart>
           </ResponsiveContainer>
         </div>
+        <ChartSrTable
+          caption={hasWhatIf ? 'What-if 12-month balance projection' : '12-month balance projection'}
+          columns={['Month', 'Balance']}
+          rows={activeProjection.map((d) => [d.date, `$${d.balance.toLocaleString()}`])}
+        />
 
         <div className="flex items-center gap-4 mt-4 text-sm">
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-full bg-[#c9a24e]" />
             <span className="text-[var(--foreground-secondary)]">
-              {expenseReduction > 0 || additionalIncome > 0 ? 'Scenario Balance' : 'Projected Balance'}
+              {hasWhatIf ? 'Scenario Balance' : 'Projected Balance'}
             </span>
           </div>
           <div className="flex items-center gap-2">

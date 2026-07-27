@@ -10,6 +10,7 @@ import { isPositive } from '@/lib/classify';
 import { currentOf } from '@/lib/accounts';
 import { formatMoney } from '@/lib/money';
 import Sheet from '@/components/Sheet';
+import ChartSrTable from '@/components/ChartSrTable';
 
 type Range = 'all' | '12m' | 'ytd';
 const RANGES: Array<{ key: Range; label: string }> = [
@@ -121,7 +122,13 @@ export default function AccountDetailModal({ account, transactions, onClose }: {
                 </div>
               </div>
 
-              <ResponsiveContainer width="100%" height={300}>
+              {/* max-sm: shrinks tick labels on phones only; desktop stays pixel-identical */}
+              <div
+                className="h-[240px] sm:h-[300px] max-sm:[&_.recharts-cartesian-axis-tick-value]:text-[10px]"
+                role="img"
+                aria-label={`${account.name} monthly activity chart: ${money(totalIn)} ${inLabel.toLowerCase()}, ${money(totalOut)} ${outLabel.toLowerCase()}, ending at ${money(Math.abs(current))}${isDebt ? ' owed' : ''}.`}
+              >
+              <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart data={data} margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.15} />
                   <XAxis dataKey="label" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
@@ -133,6 +140,12 @@ export default function AccountDetailModal({ account, transactions, onClose }: {
                   <Line type="monotone" dataKey="balance" name={isDebt ? 'Owed' : 'Balance'} stroke="#b08d3f" strokeWidth={2} dot={false} isAnimationActive={false} />
                 </ComposedChart>
               </ResponsiveContainer>
+              </div>
+              <ChartSrTable
+                caption={`${account.name} — monthly ${inLabel.toLowerCase()} / ${outLabel.toLowerCase()} and end-of-month ${isDebt ? 'balance owed' : 'balance'}`}
+                columns={['Month', inLabel, outLabel, isDebt ? 'Owed' : 'Balance']}
+                rows={data.map((d) => [d.label, money(d.in), money(Math.abs(d.out)), money(d.balance)])}
+              />
               <p className="text-xs text-[var(--foreground-muted)] mt-2">
                 Bars = {inLabel.toLowerCase()} / {outLabel.toLowerCase()} each month · gold line = {isDebt ? 'balance owed' : 'account balance'} over time
                 (ends at your real balance{isDebt ? ' owed' : ''}).

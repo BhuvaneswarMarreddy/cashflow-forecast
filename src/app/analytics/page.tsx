@@ -6,6 +6,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import Navbar from '@/components/Navbar';
+import ChartSrTable from '@/components/ChartSrTable';
 import { EXPENSE_CATEGORIES, Transaction, getMerchantColor, displayCategory } from '@/types';
 import { classifyTransaction } from '@/lib/classify';
 import {
@@ -63,9 +64,13 @@ type ViewMode = 'weekly' | 'monthly';
 type ChartType = 'area' | 'bar' | 'composed';
 
 const CHART_COLORS = [
-  '#7c3aed', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', 
+  '#7c3aed', '#06b6d4', '#10b981', '#f59e0b', '#ef4444',
   '#ec4899', '#8b5cf6', '#14b8a6', '#f97316', '#6366f1'
 ];
+
+// <sm only: shrink recharts axis tick labels so crowded X axes stop colliding.
+// CSS-gated (max-sm:) so desktop stays pixel-identical — no matchMedia in render.
+const MOBILE_TICKS = 'max-sm:[&_.recharts-cartesian-axis-tick-value]:text-[10px]';
 
 export default function AnalyticsPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
@@ -319,6 +324,9 @@ export default function AnalyticsPage() {
     };
   }, [dateRange, totals, transactions, viewMode]);
 
+  // One source for the trend chart and its screen-reader table
+  const trendData = viewMode === 'weekly' ? weeklyComparison : monthlyComparison;
+
   // Navigation handlers
   const goToPrevious = () => {
     if (viewMode === 'weekly') {
@@ -550,7 +558,11 @@ export default function AnalyticsPage() {
             </div>
           </div>
 
-          <div className="h-[300px] sm:h-[350px]">
+          <div
+            className={`h-[300px] sm:h-[350px] ${MOBILE_TICKS}`}
+            role="img"
+            aria-label={`Daily spending chart: $${totals.expenses.toLocaleString()} spent this ${viewMode === 'weekly' ? 'week' : 'month'} against a $${totals.budget.toLocaleString()} budget.`}
+          >
             <ResponsiveContainer width="100%" height="100%">
               {chartType === 'area' ? (
                 <AreaChart data={dailyData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
@@ -601,6 +613,16 @@ export default function AnalyticsPage() {
               )}
             </ResponsiveContainer>
           </div>
+          <ChartSrTable
+            caption={`Daily spending, ${format(dateRange.start, 'MMM d')} – ${format(dateRange.end, 'MMM d, yyyy')}`}
+            columns={['Date', 'Expenses', 'Income', 'Projected']}
+            rows={dailyData.map(d => [
+              d.date,
+              d.expenses != null ? `$${d.expenses.toLocaleString()}` : '—',
+              d.income != null ? `$${d.income.toLocaleString()}` : '—',
+              d.projectedExpenses != null ? `$${d.projectedExpenses.toFixed(0)}` : '—',
+            ])}
+          />
 
           {/* Legend */}
           <div className="flex flex-wrap items-center justify-center gap-4 mt-4 text-sm">
@@ -628,9 +650,13 @@ export default function AnalyticsPage() {
             <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">
               {viewMode === 'weekly' ? '12-Week' : '12-Month'} Trend
             </h3>
-            <div className="h-[250px]">
+            <div
+              className={`h-[250px] ${MOBILE_TICKS}`}
+              role="img"
+              aria-label={`${viewMode === 'weekly' ? '12-week' : '12-month'} spending trend chart: spending is ${projections.trend >= 0 ? 'up' : 'down'} ${Math.abs(projections.trend).toFixed(1)}% vs last ${viewMode === 'weekly' ? 'week' : 'month'}.`}
+            >
               <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={viewMode === 'weekly' ? weeklyComparison : monthlyComparison}>
+                <ComposedChart data={trendData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
                   <XAxis dataKey={viewMode === 'weekly' ? 'week' : 'month'} stroke="var(--foreground-muted)" fontSize={10} tickLine={false} />
                   <YAxis stroke="var(--foreground-muted)" fontSize={10} tickLine={false} tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} />
@@ -640,6 +666,16 @@ export default function AnalyticsPage() {
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
+            <ChartSrTable
+              caption={`${viewMode === 'weekly' ? '12-week' : '12-month'} spending trend`}
+              columns={[viewMode === 'weekly' ? 'Week' : 'Month', 'Expenses', 'Income', 'Budget']}
+              rows={trendData.map(d => [
+                'week' in d ? d.week : d.month,
+                `$${d.expenses.toLocaleString()}`,
+                `$${d.income.toLocaleString()}`,
+                `$${d.budget.toLocaleString()}`,
+              ])}
+            />
           </div>
 
           {/* Category Breakdown */}
@@ -647,7 +683,11 @@ export default function AnalyticsPage() {
             <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">Category Breakdown</h3>
             {categoryBreakdown.length > 0 ? (
               <div className="flex flex-col sm:flex-row items-center gap-4">
-                <div className="w-[180px] h-[180px]">
+                <div
+                  className="w-[180px] h-[180px]"
+                  role="img"
+                  aria-label={`Category breakdown pie chart: $${totals.expenses.toLocaleString()} across ${categoryBreakdown.length} categories, led by ${categoryBreakdown[0].name} at $${categoryBreakdown[0].value.toLocaleString()}.`}
+                >
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie isAnimationActive={false}
@@ -667,6 +707,11 @@ export default function AnalyticsPage() {
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
+                <ChartSrTable
+                  caption="Spending by category this period"
+                  columns={['Category', 'Spent']}
+                  rows={categoryBreakdown.map(c => [c.name, `$${c.value.toLocaleString()}`])}
+                />
                 <div className="flex-1 space-y-2 max-h-[200px] overflow-y-auto">
                   {categoryBreakdown.slice(0, 6).map((cat, i) => (
                     <div key={i} className="flex items-center justify-between">
@@ -708,7 +753,11 @@ export default function AnalyticsPage() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Merchant Pie Chart */}
               <div className="flex flex-col items-center">
-                <div className="w-[220px] h-[220px]">
+                <div
+                  className="w-[220px] h-[220px]"
+                  role="img"
+                  aria-label={`Top merchants pie chart: led by ${merchantBreakdown[0].name} at $${merchantBreakdown[0].value.toLocaleString()} of $${totals.expenses.toLocaleString()} spent.`}
+                >
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie isAnimationActive={false}
@@ -728,6 +777,11 @@ export default function AnalyticsPage() {
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
+                <ChartSrTable
+                  caption="Top merchants this period"
+                  columns={['Merchant', 'Spent', 'Transactions']}
+                  rows={topMerchantsPieData.map(m => [m.name, `$${m.value.toLocaleString()}`, m.count || '—'])}
+                />
                 <p className="text-sm text-[var(--foreground-muted)] mt-2">
                   {merchantBreakdown.length} merchants this period
                 </p>

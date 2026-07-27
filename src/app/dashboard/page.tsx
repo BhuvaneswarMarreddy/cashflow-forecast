@@ -8,6 +8,7 @@ import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import Navbar from '@/components/Navbar';
 import AddTransactionModal from '@/components/AddTransactionModal';
+import ChartSrTable from '@/components/ChartSrTable';
 import { PAYMENT_METHODS, EXPENSE_CATEGORIES, AccountType } from '@/types';
 import { isPositive } from '@/lib/classify';
 import {
@@ -231,6 +232,10 @@ export default function DashboardPage() {
     income: m.income,
     expenses: m.expenses,
   }));
+
+  // Headline figures for the charts' aria-labels (text alternative, not new math)
+  const latestMonth = monthlyChartData[monthlyChartData.length - 1];
+  const pieTotal = pieChartData.reduce((sum, d) => sum + d.value, 0);
 
   // Filter transactions for the list
   const getFilteredTransactions = () => {
@@ -571,31 +576,44 @@ export default function DashboardPage() {
           <div className="chart-container">
             <h3 className="text-lg font-semibold text-[var(--foreground)] mb-6">Monthly Overview</h3>
             {monthlyChartData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={monthlyChartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
-                  <XAxis dataKey="month" stroke="var(--foreground-secondary)" fontSize={12} />
-                  <YAxis stroke="var(--foreground-secondary)" fontSize={12} />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Legend />
-                  <Line isAnimationActive={false}
-                    type="monotone"
-                    dataKey="income"
-                    stroke="var(--accent-success)"
-                    strokeWidth={3}
-                    dot={{ fill: 'var(--accent-success)', strokeWidth: 2 }}
-                    name="Income"
-                  />
-                  <Line isAnimationActive={false}
-                    type="monotone"
-                    dataKey="expenses"
-                    stroke="var(--accent-danger)"
-                    strokeWidth={3}
-                    dot={{ fill: 'var(--accent-danger)', strokeWidth: 2 }}
-                    name="Expenses"
-                  />
-                </LineChart>
-              </ResponsiveContainer>
+              <>
+                <div
+                  className="h-[240px] sm:h-[300px]"
+                  role="img"
+                  aria-label={`Line chart of income versus expenses across ${monthlyChartData.length} months; ${latestMonth.month}: income $${latestMonth.income.toLocaleString()}, expenses $${latestMonth.expenses.toLocaleString()}.`}
+                >
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={monthlyChartData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
+                      <XAxis dataKey="month" stroke="var(--foreground-secondary)" fontSize={12} />
+                      <YAxis stroke="var(--foreground-secondary)" fontSize={12} />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Legend />
+                      <Line isAnimationActive={false}
+                        type="monotone"
+                        dataKey="income"
+                        stroke="var(--accent-success)"
+                        strokeWidth={3}
+                        dot={{ fill: 'var(--accent-success)', strokeWidth: 2 }}
+                        name="Income"
+                      />
+                      <Line isAnimationActive={false}
+                        type="monotone"
+                        dataKey="expenses"
+                        stroke="var(--accent-danger)"
+                        strokeWidth={3}
+                        dot={{ fill: 'var(--accent-danger)', strokeWidth: 2 }}
+                        name="Expenses"
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+                <ChartSrTable
+                  caption="Monthly income and expenses"
+                  columns={['Month', 'Income', 'Expenses']}
+                  rows={monthlyChartData.map((m) => [m.month, `$${m.income.toLocaleString()}`, `$${m.expenses.toLocaleString()}`])}
+                />
+              </>
             ) : (
               <div className="h-[300px] flex flex-col items-center justify-center text-[var(--foreground-muted)]">
                 <TrendingUp className="w-12 h-12 mb-3 opacity-50" />
@@ -611,30 +629,43 @@ export default function DashboardPage() {
           <div className="below-fold-chart chart-container">
             <h3 className="text-lg font-semibold text-[var(--foreground)] mb-6">By Payment Method</h3>
             {pieChartData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={300}>
-                <PieChart>
-                  <Pie isAnimationActive={false}
-                    data={pieChartData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={100}
-                    paddingAngle={2}
-                    dataKey="value"
-                  >
-                    {pieChartData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip content={<CustomTooltip />} />
-                  <Legend
-                    layout="vertical"
-                    align="right"
-                    verticalAlign="middle"
-                    formatter={(value) => <span className="text-[var(--foreground-secondary)] text-sm">{value}</span>}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
+              <>
+                <div
+                  className="h-[240px] sm:h-[300px]"
+                  role="img"
+                  aria-label={`Donut chart of $${pieTotal.toLocaleString()} in spending split across ${pieChartData.length} payment methods.`}
+                >
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie isAnimationActive={false}
+                        data={pieChartData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={100}
+                        paddingAngle={2}
+                        dataKey="value"
+                      >
+                        {pieChartData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip content={<CustomTooltip />} />
+                      <Legend
+                        layout="vertical"
+                        align="right"
+                        verticalAlign="middle"
+                        formatter={(value) => <span className="text-[var(--foreground-secondary)] text-sm">{value}</span>}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <ChartSrTable
+                  caption="Spending by payment method"
+                  columns={['Payment method', 'Total']}
+                  rows={pieChartData.map((d) => [d.name, `$${d.value.toLocaleString()}`])}
+                />
+              </>
             ) : (
               <div className="h-[300px] flex flex-col items-center justify-center text-[var(--foreground-muted)]">
                 <CreditCard className="w-12 h-12 mb-3 opacity-50" />
@@ -648,29 +679,40 @@ export default function DashboardPage() {
         {categoryChartData.length > 0 && (
           <div className="below-fold-chart chart-container mb-8">
             <h3 className="text-lg font-semibold text-[var(--foreground)] mb-6">Expenses by Category</h3>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={categoryChartData} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" horizontal={false} />
-                <XAxis type="number" stroke="var(--foreground-secondary)" fontSize={12} />
-                <YAxis
-                  dataKey="name"
-                  type="category"
-                  stroke="var(--foreground-secondary)"
-                  fontSize={12}
-                  width={120}
-                  tickFormatter={(value, index) => `${categoryChartData[index]?.icon || ''} ${value}`}
-                />
-                <Tooltip content={<CustomTooltip />} />
-                <Bar isAnimationActive={false} dataKey="total" fill="url(#colorGradient)" radius={[0, 8, 8, 0]} name="Total">
-                  <defs>
-                    <linearGradient id="colorGradient" x1="0" y1="0" x2="1" y2="0">
-                      <stop offset="0%" stopColor="var(--accent-primary)" />
-                      <stop offset="100%" stopColor="var(--accent-secondary)" />
-                    </linearGradient>
-                  </defs>
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            <div
+              className="h-[240px] sm:h-[300px]"
+              role="img"
+              aria-label={`Bar chart of the top ${categoryChartData.length} expense categories; highest is ${categoryChartData[0].name} at $${categoryChartData[0].total.toLocaleString()}.`}
+            >
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={categoryChartData} layout="vertical">
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" horizontal={false} />
+                  <XAxis type="number" stroke="var(--foreground-secondary)" fontSize={12} />
+                  <YAxis
+                    dataKey="name"
+                    type="category"
+                    stroke="var(--foreground-secondary)"
+                    fontSize={12}
+                    width={120}
+                    tickFormatter={(value, index) => `${categoryChartData[index]?.icon || ''} ${value}`}
+                  />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Bar isAnimationActive={false} dataKey="total" fill="url(#colorGradient)" radius={[0, 8, 8, 0]} name="Total">
+                    <defs>
+                      <linearGradient id="colorGradient" x1="0" y1="0" x2="1" y2="0">
+                        <stop offset="0%" stopColor="var(--accent-primary)" />
+                        <stop offset="100%" stopColor="var(--accent-secondary)" />
+                      </linearGradient>
+                    </defs>
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <ChartSrTable
+              caption="Top expense categories"
+              columns={['Category', 'Total']}
+              rows={categoryChartData.map((c) => [c.name, `$${c.total.toLocaleString()}`])}
+            />
           </div>
         )}
 
