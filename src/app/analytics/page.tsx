@@ -624,7 +624,7 @@ export default function AnalyticsPage() {
         {/* Historical Comparison */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
           {/* Trend Chart */}
-          <div className="bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-xl p-4 sm:p-6">
+          <div className="below-fold-chart bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-xl p-4 sm:p-6">
             <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">
               {viewMode === 'weekly' ? '12-Week' : '12-Month'} Trend
             </h3>
@@ -643,7 +643,7 @@ export default function AnalyticsPage() {
           </div>
 
           {/* Category Breakdown */}
-          <div className="bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-xl p-4 sm:p-6">
+          <div className="below-fold-chart bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-xl p-4 sm:p-6">
             <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">Category Breakdown</h3>
             {categoryBreakdown.length > 0 ? (
               <div className="flex flex-col sm:flex-row items-center gap-4">

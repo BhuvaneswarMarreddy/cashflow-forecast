@@ -607,7 +607,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Payment Method Breakdown */}
-          <div className="chart-container">
+          <div className="below-fold-chart chart-container">
             <h3 className="text-lg font-semibold text-[var(--foreground)] mb-6">By Payment Method</h3>
             {pieChartData.length > 0 ? (
               <ResponsiveContainer width="100%" height={300}>
@@ -645,7 +645,7 @@ export default function DashboardPage() {
 
         {/* Category Breakdown */}
         {categoryChartData.length > 0 && (
-          <div className="chart-container mb-8">
+          <div className="below-fold-chart chart-container mb-8">
             <h3 className="text-lg font-semibold text-[var(--foreground)] mb-6">Expenses by Category</h3>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={categoryChartData} layout="vertical">

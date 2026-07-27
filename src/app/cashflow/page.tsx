@@ -184,7 +184,7 @@ export default function CashflowPage() {
         </div>
 
         {/* Where the money went */}
-        <div className="glass-card p-5">
+        <div className="below-fold-chart glass-card p-5">
           <h3 className="font-semibold text-[var(--foreground)] mb-1">Where your money went</h3>
           <p className="text-sm text-[var(--foreground-secondary)] mb-4">Top spending categories for this period.</p>
           <ResponsiveContainer width="100%" height={Math.max(220, byCategory.length * 44)}>
