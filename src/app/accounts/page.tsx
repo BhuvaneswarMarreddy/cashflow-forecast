@@ -419,7 +419,7 @@ export default function AccountsPage() {
         </div>
 
         {/* Tabs */}
-        <div className="flex flex-wrap gap-2 mb-6 scroll-x-mobile">
+        <div className="flex flex-nowrap sm:flex-wrap whitespace-nowrap sm:whitespace-normal gap-2 mb-6 scroll-x-mobile">
           {[
             { key: 'accounts', label: 'Accounts', fullLabel: 'Payment Accounts', icon: CreditCard },
             { key: 'spending', label: 'Spending', fullLabel: 'Account Spending', icon: Receipt },
@@ -472,7 +472,7 @@ export default function AccountsPage() {
                   onReorder={reorderPaymentAccounts}
                   renderRow={(account) => (
                     <div
-                      className="flex items-center justify-between p-4 rounded-xl bg-[var(--background-tertiary)] border-l-4 hover:bg-[var(--background-secondary)] transition-colors"
+                      className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-0 p-4 rounded-xl bg-[var(--background-tertiary)] border-l-4 hover:bg-[var(--background-secondary)] transition-colors"
                       style={{ borderLeftColor: account.color }}
                     >
                       <button
@@ -522,8 +522,8 @@ export default function AccountsPage() {
                           )}
                         </div>
                       </button>
-                      <div className="flex items-center gap-4">
-                        <div className="text-right">
+                      <div className="flex items-center justify-between sm:justify-end gap-4">
+                        <div className="text-left sm:text-right">
                           {/* The balance YOU set is the truth (the CSV has no balance). */}
                           <p className={`text-lg font-semibold ${account.type === 'credit_card' || account.type === 'personal_loan' ? 'text-[var(--accent-danger)]' : 'text-[var(--accent-success)]'}`}>
                             {account.type === 'credit_card' || account.type === 'personal_loan' ? '-' : ''}${Math.abs(currentOf(account)).toLocaleString()}
@@ -543,19 +543,22 @@ export default function AccountsPage() {
                           <button
                             onClick={() => handleReconcile(account)}
                             title="Reconcile — enter your real balance now"
-                            className="p-2 rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors"
+                            aria-label={`Reconcile ${account.name}`}
+                            className="p-2.5 min-w-11 min-h-11 sm:p-2 sm:min-w-auto sm:min-h-auto rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors"
                           >
                             <Check className="w-4 h-4" />
                           </button>
                           <button
                             onClick={() => openEditAccount(account)}
-                            className="p-2 rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors"
+                            aria-label={`Edit ${account.name}`}
+                            className="p-2.5 min-w-11 min-h-11 sm:p-2 sm:min-w-auto sm:min-h-auto rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors"
                           >
                             <Edit3 className="w-4 h-4" />
                           </button>
                           <button
                             onClick={() => confirmDelete(account.id, 'account')}
-                            className="p-2 rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-danger)] hover:bg-[var(--accent-danger)]/10 transition-colors"
+                            aria-label={`Delete ${account.name}`}
+                            className="p-2.5 min-w-11 min-h-11 sm:p-2 sm:min-w-auto sm:min-h-auto rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-danger)] hover:bg-[var(--accent-danger)]/10 transition-colors"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -798,7 +801,7 @@ export default function AccountsPage() {
                   {profile.incomeSources.map((income) => (
                     <div
                       key={income.id}
-                      className="flex items-center justify-between p-4 rounded-xl bg-[var(--background-tertiary)] border-l-4 border-l-[var(--accent-success)] hover:bg-[var(--background-secondary)] transition-colors"
+                      className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-0 p-4 rounded-xl bg-[var(--background-tertiary)] border-l-4 border-l-[var(--accent-success)] hover:bg-[var(--background-secondary)] transition-colors"
                     >
                       <div className="flex items-center gap-4">
                         <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-[var(--accent-success)]/20 text-[var(--accent-success)]">
@@ -812,20 +815,22 @@ export default function AccountsPage() {
                           </p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-4">
+                      <div className="flex items-center justify-between sm:justify-end gap-4">
                         <p className="text-lg font-semibold text-[var(--accent-success)]">
                           +${income.amount.toLocaleString()}
                         </p>
                         <div className="flex gap-1">
                           <button
                             onClick={() => openEditIncome(income)}
-                            className="p-2 rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors"
+                            aria-label={`Edit ${income.name}`}
+                            className="p-2.5 min-w-11 min-h-11 sm:p-2 sm:min-w-auto sm:min-h-auto rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors"
                           >
                             <Edit3 className="w-4 h-4" />
                           </button>
                           <button
                             onClick={() => confirmDelete(income.id, 'income')}
-                            className="p-2 rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-danger)] hover:bg-[var(--accent-danger)]/10 transition-colors"
+                            aria-label={`Delete ${income.name}`}
+                            className="p-2.5 min-w-11 min-h-11 sm:p-2 sm:min-w-auto sm:min-h-auto rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-danger)] hover:bg-[var(--accent-danger)]/10 transition-colors"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
