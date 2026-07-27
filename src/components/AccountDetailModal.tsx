@@ -8,6 +8,7 @@ import { X } from 'lucide-react';
 import { PaymentAccount, Transaction } from '@/types';
 import { isPositive } from '@/lib/classify';
 import { currentOf } from '@/lib/accounts';
+import { formatMoney } from '@/lib/money';
 import Sheet from '@/components/Sheet';
 
 type Range = 'all' | '12m' | 'ytd';
@@ -17,7 +18,7 @@ const RANGES: Array<{ key: Range; label: string }> = [
   { key: 'ytd', label: 'This year' },
 ];
 
-const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
+const money = (n: number) => formatMoney(n);
 const monthLabel = (ym: string) => {
   const [y, m] = ym.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, 1)).toLocaleString('en-US', { month: 'short', year: '2-digit', timeZone: 'UTC' });

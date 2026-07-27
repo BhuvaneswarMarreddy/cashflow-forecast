@@ -11,6 +11,7 @@ import { classifyTransaction, isPositive, isReward } from '@/lib/classify';
 import { matchTransfers } from '@/lib/transfers';
 import { displayCategory } from '@/types';
 import { CAT_COLORS } from '@/lib/palette';
+import { formatMoney } from '@/lib/money';
 import { format, parseISO, subMonths, startOfMonth } from 'date-fns';
 import { TrendingUp, ArrowDownRight, ArrowUpRight, Wallet } from 'lucide-react';
 import {
@@ -18,7 +19,7 @@ import {
 } from 'recharts';
 
 // Validated categorical palette (CVD-safe in light mode with the direct labels present).
-const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
+const money = (n: number) => formatMoney(n);
 
 type Range = '12m' | 'ytd' | 'all';
 

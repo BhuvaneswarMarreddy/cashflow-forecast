@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import { format, parseISO, startOfMonth, endOfMonth, subMonths, isWithinInterval } from 'date-fns';
 import { currentOf } from '@/lib/accounts';
+import { formatMoney } from '@/lib/money';
 
 type ViewMode = 'history' | 'runway';
 type DateFilter = 'all' | 'thisMonth' | 'lastMonth' | 'last3Months' | 'last6Months';
@@ -572,7 +573,7 @@ export default function HistoryPage() {
             {/* Per-account summary — metrics adapt to the account type */}
             {accountSummary && (() => {
               const { acct, spent, income, inbound, outbound, rewards } = accountSummary;
-              const money = (n: number) => `$${n.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+              const money = (n: number) => formatMoney(n, profile?.currency ?? 'USD', 2);
               // (label, value, color) tiles, chosen by account type
               let tiles: [string, string, string][];
               if (acct.type === 'personal_loan') {

@@ -14,9 +14,9 @@ import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import { buildFlowGraph, detectRecurring, projectNetWorth, day, FlowGraph } from '@/lib/flows';
 import { FLOW_COLORS, FlowColorKey } from '@/lib/palette';
+import { formatMoneyCents } from '@/lib/money';
 
-const money = (cents: number) =>
-  (cents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+const money = (cents: number) => formatMoneyCents(cents);
 
 type Range = 'all' | '2024' | '2025' | '2026' | '12m' | 'month';
 const RANGES: Array<{ key: Range; label: string }> = [
