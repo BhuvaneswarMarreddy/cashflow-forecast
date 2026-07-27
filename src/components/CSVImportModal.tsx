@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useMemo } from 'react';
 import { X, Upload, FileText, AlertCircle, CheckCircle, Download, HelpCircle, CreditCard, Building2, Link2, Plus } from 'lucide-react';
+import Sheet from '@/components/Sheet';
 import * as XLSX from 'xlsx';
 import { format as formatDate } from 'date-fns';
 import { useTransactions } from '@/context/TransactionContext';
@@ -703,8 +704,7 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
   const invalidCount = parsedData.filter(t => !t.isValid).length;
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content max-w-2xl" onClick={(e) => e.stopPropagation()}>
+    <Sheet open onClose={onClose} ariaLabel="Import transactions" maxWidth="42rem" className="p-5 sm:p-8">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-bold text-[var(--foreground)]">Import Transactions</h2>
           <button
@@ -1022,8 +1022,7 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
             </button>
           </div>
         )}
-      </div>
-    </div>
+    </Sheet>
   );
 }
 
