@@ -431,7 +431,7 @@ export default function RunwayCalculator({
                 }}
               />
               <ReferenceLine y={0} stroke="#ef4444" strokeWidth={2} />
-              <Area
+              <Area isAnimationActive={false}
                 type="monotone"
                 dataKey="balance"
                 stroke="#c9a24e"

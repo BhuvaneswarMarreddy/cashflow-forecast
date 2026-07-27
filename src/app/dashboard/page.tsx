@@ -577,7 +577,7 @@ export default function DashboardPage() {
                   <YAxis stroke="var(--foreground-secondary)" fontSize={12} />
                   <Tooltip content={<CustomTooltip />} />
                   <Legend />
-                  <Line
+                  <Line isAnimationActive={false}
                     type="monotone"
                     dataKey="income"
                     stroke="var(--accent-success)"
@@ -585,7 +585,7 @@ export default function DashboardPage() {
                     dot={{ fill: 'var(--accent-success)', strokeWidth: 2 }}
                     name="Income"
                   />
-                  <Line
+                  <Line isAnimationActive={false}
                     type="monotone"
                     dataKey="expenses"
                     stroke="var(--accent-danger)"
@@ -612,7 +612,7 @@ export default function DashboardPage() {
             {pieChartData.length > 0 ? (
               <ResponsiveContainer width="100%" height={300}>
                 <PieChart>
-                  <Pie
+                  <Pie isAnimationActive={false}
                     data={pieChartData}
                     cx="50%"
                     cy="50%"
@@ -660,7 +660,7 @@ export default function DashboardPage() {
                   tickFormatter={(value, index) => `${categoryChartData[index]?.icon || ''} ${value}`}
                 />
                 <Tooltip content={<CustomTooltip />} />
-                <Bar dataKey="total" fill="url(#colorGradient)" radius={[0, 8, 8, 0]} name="Total">
+                <Bar isAnimationActive={false} dataKey="total" fill="url(#colorGradient)" radius={[0, 8, 8, 0]} name="Total">
                   <defs>
                     <linearGradient id="colorGradient" x1="0" y1="0" x2="1" y2="0">
                       <stop offset="0%" stopColor="var(--accent-primary)" />

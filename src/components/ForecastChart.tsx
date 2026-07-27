@@ -188,7 +188,7 @@ export default function ForecastChart({ forecast }: ForecastChartProps) {
               strokeWidth={1}
             />
             
-            <Area
+            <Area isAnimationActive={false}
               type="monotone"
               dataKey="balance"
               stroke="#c9a24e"

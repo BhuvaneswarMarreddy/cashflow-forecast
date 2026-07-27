@@ -568,9 +568,9 @@ export default function AnalyticsPage() {
                   <XAxis dataKey="date" stroke="var(--foreground-muted)" fontSize={12} tickLine={false} />
                   <YAxis stroke="var(--foreground-muted)" fontSize={12} tickLine={false} tickFormatter={(v) => `$${v}`} />
                   <Tooltip content={<CustomTooltip />} />
-                  <Area type="monotone" dataKey="expenses" stroke="#ef4444" strokeWidth={2} fill="url(#expenseGradient)" name="Expenses" />
+                  <Area isAnimationActive={false} type="monotone" dataKey="expenses" stroke="#ef4444" strokeWidth={2} fill="url(#expenseGradient)" name="Expenses" />
                   {showProjection && (
-                    <Area type="monotone" dataKey="projectedExpenses" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 5" fill="url(#projectedGradient)" name="Projected" />
+                    <Area isAnimationActive={false} type="monotone" dataKey="projectedExpenses" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 5" fill="url(#projectedGradient)" name="Projected" />
                   )}
                   <ReferenceLine y={totals.budget / (viewMode === 'weekly' ? 7 : 30)} stroke="#10b981" strokeDasharray="5 5" label={{ value: 'Daily Budget', position: 'right', fill: '#10b981', fontSize: 10 }} />
                 </AreaChart>
@@ -580,9 +580,9 @@ export default function AnalyticsPage() {
                   <XAxis dataKey="date" stroke="var(--foreground-muted)" fontSize={12} tickLine={false} />
                   <YAxis stroke="var(--foreground-muted)" fontSize={12} tickLine={false} tickFormatter={(v) => `$${v}`} />
                   <Tooltip content={<CustomTooltip />} />
-                  <Bar dataKey="expenses" fill="#ef4444" radius={[4, 4, 0, 0]} name="Expenses" />
+                  <Bar isAnimationActive={false} dataKey="expenses" fill="#ef4444" radius={[4, 4, 0, 0]} name="Expenses" />
                   {showProjection && (
-                    <Bar dataKey="projectedExpenses" fill="#f59e0b" opacity={0.5} radius={[4, 4, 0, 0]} name="Projected" />
+                    <Bar isAnimationActive={false} dataKey="projectedExpenses" fill="#f59e0b" opacity={0.5} radius={[4, 4, 0, 0]} name="Projected" />
                   )}
                   <ReferenceLine y={totals.budget / (viewMode === 'weekly' ? 7 : 30)} stroke="#10b981" strokeDasharray="5 5" />
                 </BarChart>
@@ -592,9 +592,9 @@ export default function AnalyticsPage() {
                   <XAxis dataKey="date" stroke="var(--foreground-muted)" fontSize={12} tickLine={false} />
                   <YAxis stroke="var(--foreground-muted)" fontSize={12} tickLine={false} tickFormatter={(v) => `$${v}`} />
                   <Tooltip content={<CustomTooltip />} />
-                  <Bar dataKey="expenses" fill="#ef4444" opacity={0.8} radius={[4, 4, 0, 0]} name="Expenses" />
+                  <Bar isAnimationActive={false} dataKey="expenses" fill="#ef4444" opacity={0.8} radius={[4, 4, 0, 0]} name="Expenses" />
                   {showProjection && (
-                    <Line type="monotone" dataKey="projectedExpenses" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Projected" />
+                    <Line isAnimationActive={false} type="monotone" dataKey="projectedExpenses" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Projected" />
                   )}
                   <ReferenceLine y={totals.budget / (viewMode === 'weekly' ? 7 : 30)} stroke="#10b981" strokeDasharray="5 5" />
                 </ComposedChart>
@@ -635,8 +635,8 @@ export default function AnalyticsPage() {
                   <XAxis dataKey={viewMode === 'weekly' ? 'week' : 'month'} stroke="var(--foreground-muted)" fontSize={10} tickLine={false} />
                   <YAxis stroke="var(--foreground-muted)" fontSize={10} tickLine={false} tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} />
                   <Tooltip content={<CustomTooltip />} />
-                  <Bar dataKey="expenses" fill="#ef4444" opacity={0.8} radius={[2, 2, 0, 0]} name="Expenses" />
-                  <Line type="monotone" dataKey="budget" stroke="#10b981" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Budget" />
+                  <Bar isAnimationActive={false} dataKey="expenses" fill="#ef4444" opacity={0.8} radius={[2, 2, 0, 0]} name="Expenses" />
+                  <Line isAnimationActive={false} type="monotone" dataKey="budget" stroke="#10b981" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Budget" />
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
@@ -650,7 +650,7 @@ export default function AnalyticsPage() {
                 <div className="w-[180px] h-[180px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
-                      <Pie
+                      <Pie isAnimationActive={false}
                         data={categoryBreakdown}
                         cx="50%"
                         cy="50%"
@@ -711,7 +711,7 @@ export default function AnalyticsPage() {
                 <div className="w-[220px] h-[220px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
-                      <Pie
+                      <Pie isAnimationActive={false}
                         data={topMerchantsPieData}
                         cx="50%"
                         cy="50%"

@@ -873,7 +873,7 @@ export default function FlowPage() {
                 <XAxis dataKey="month" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `$${Math.round(Number(v) / 1000)}k`} width={56} />
                 <Tooltip formatter={(v) => money(Math.round(Number(v) * 100))} />
-                <Line type="monotone" dataKey="value" stroke="#b08d3f" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="value" stroke="#b08d3f" strokeWidth={2} dot={false} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>

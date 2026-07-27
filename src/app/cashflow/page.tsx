@@ -177,8 +177,8 @@ export default function CashflowPage() {
               <YAxis tick={{ fontSize: 11, fill: 'var(--foreground-muted)' }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
               <Tooltip formatter={(v) => money(Number(v))} contentStyle={{ background: 'var(--background-secondary)', border: '1px solid var(--border-color)', borderRadius: 8 }} />
               <Legend />
-              <Bar dataKey="income" name="Income" fill="#10b981" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="spending" name="Spending" fill="#ef4444" radius={[4, 4, 0, 0]} />
+              <Bar isAnimationActive={false} dataKey="income" name="Income" fill="#10b981" radius={[4, 4, 0, 0]} />
+              <Bar isAnimationActive={false} dataKey="spending" name="Spending" fill="#ef4444" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -192,7 +192,7 @@ export default function CashflowPage() {
               <XAxis type="number" hide />
               <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 12, fill: 'var(--foreground-secondary)' }} axisLine={false} tickLine={false} />
               <Tooltip formatter={(v) => money(Number(v))} contentStyle={{ background: 'var(--background-secondary)', border: '1px solid var(--border-color)', borderRadius: 8 }} />
-              <Bar dataKey="value" radius={[0, 4, 4, 0]} label={{ position: 'right', formatter: (v: number | string) => money(Number(v)), fontSize: 11, fill: 'var(--foreground-secondary)' } as never}>
+              <Bar isAnimationActive={false} dataKey="value" radius={[0, 4, 4, 0]} label={{ position: 'right', formatter: (v: number | string) => money(Number(v)), fontSize: 11, fill: 'var(--foreground-secondary)' } as never}>
                 {byCategory.map((_, i) => <Cell key={i} fill={CAT_COLORS[i % CAT_COLORS.length]} />)}
               </Bar>
             </BarChart>
