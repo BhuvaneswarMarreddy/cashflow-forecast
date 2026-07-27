@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { X, DollarSign, Calendar, CreditCard, Tag, FileText, Building2, Wallet, Store, ChevronDown } from 'lucide-react';
+import Sheet from '@/components/Sheet';
 import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import { PAYMENT_METHODS, EXPENSE_CATEGORIES, COMMON_MERCHANTS, Transaction, TransactionType, TransferDirection, PaymentMethod, ExpenseCategory, AccountType, suggestCategoryFromMerchant, getMerchantColor } from '@/types';
@@ -290,8 +291,7 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
   const accountsList = profile?.paymentAccounts || [];
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+    <Sheet open onClose={onClose} ariaLabel={editTransaction ? 'Edit transaction' : 'Add transaction'} className="p-5 sm:p-8">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-bold text-[var(--foreground)]">
             {editTransaction ? 'Edit Transaction' : 'Add Transaction'}
@@ -788,7 +788,6 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
             }
           </button>
         </form>
-      </div>
-    </div>
+    </Sheet>
   );
 }
