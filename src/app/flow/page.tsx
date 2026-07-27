@@ -8,6 +8,7 @@ import {
 } from 'recharts';
 import { Maximize2, Minimize2 } from 'lucide-react';
 import Navbar from '@/components/Navbar';
+import ReconcileSheet from '@/components/ReconcileSheet';
 import { useAuth } from '@/context/AuthContext';
 import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
@@ -111,14 +112,7 @@ export default function FlowPage() {
   const { transactions } = useTransactions();
   const { profile, reconcileAccount } = useUserProfile();
 
-  const handleReconcile = async (accountId: string, name: string, derivedCurrent: number) => {
-    const input = window.prompt(`${name} — enter your real balance right now:`, String(Math.round(derivedCurrent)));
-    if (input === null) return;
-    const entered = parseFloat(input);
-    if (Number.isNaN(entered)) return;
-    const drift = await reconcileAccount(accountId, entered, derivedCurrent);
-    window.alert(drift === 0 ? 'Reconciled — nothing changed.' : 'Reconciled — the gap is closed.');
-  };
+  const [reconcileFor, setReconcileFor] = useState<{ accountId: string; name: string; derived: number } | null>(null);
   const router = useRouter();
   const [range, setRange] = useState<Range>('all');
   const [month, setMonth] = useState<string>(() => shiftMonth(new Date().toISOString().slice(0, 7), -1));
@@ -778,7 +772,7 @@ export default function FlowPage() {
                     <td className="px-3 py-2">
                       {r.verdict === 'missing-rows'
                         ? <button
-                            onClick={() => handleReconcile(r.accountId, r.name, r.closingCents / 100)}
+                            onClick={() => setReconcileFor({ accountId: r.accountId, name: r.name, derived: r.closingCents / 100 })}
                             className="text-[var(--accent-danger)] hover:underline"
                             title="Enter your real balance to fix this gap"
                           >⚠ off by {money(r.gapCents)} — reconcile</button>
@@ -884,6 +878,16 @@ export default function FlowPage() {
             </ResponsiveContainer>
           </div>
         </section>
+
+        {reconcileFor && (
+          <ReconcileSheet
+            accountName={reconcileFor.name}
+            inputLabel="real balance right now"
+            derivedCurrent={reconcileFor.derived}
+            onConfirm={async (entered) => { await reconcileAccount(reconcileFor.accountId, entered, reconcileFor.derived); }}
+            onClose={() => setReconcileFor(null)}
+          />
+        )}
       </main>
     </div>
   );

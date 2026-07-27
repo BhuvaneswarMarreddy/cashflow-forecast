@@ -8,6 +8,7 @@ import { useTransactions } from '@/context/TransactionContext';
 import Navbar from '@/components/Navbar';
 import AccountsList from '@/components/AccountsList';
 import AccountDetailModal from '@/components/AccountDetailModal';
+import ReconcileSheet from '@/components/ReconcileSheet';
 import AccountTransactions from '@/components/AccountTransactions';
 import BudgetSettingsPanel from '@/components/BudgetSettingsPanel';
 import BudgetStatusPanel from '@/components/BudgetStatusPanel';
@@ -89,6 +90,7 @@ export default function AccountsPage() {
   const [showIncomeModal, setShowIncomeModal] = useState(false);
   const [editingAccount, setEditingAccount] = useState<PaymentAccount | null>(null);
   const [graphAccount, setGraphAccount] = useState<PaymentAccount | null>(null);
+  const [reconcileTarget, setReconcileTarget] = useState<PaymentAccount | null>(null);
   const [editingIncome, setEditingIncome] = useState<IncomeSource | null>(null);
   
   const [accountForm, setAccountForm] = useState({
@@ -156,17 +158,7 @@ export default function AccountsPage() {
     }
   };
 
-  const handleReconcile = async (account: PaymentAccount) => {
-    const derived = account.currentBalance ?? account.openingBalance;
-    const isDebt = account.type === 'credit_card' || account.type === 'personal_loan';
-    const label = isDebt ? 'amount you currently owe' : 'real balance right now';
-    const input = window.prompt(`${account.name} — enter the ${label}:`, String(derived));
-    if (input === null) return;
-    const entered = parseFloat(input);
-    if (Number.isNaN(entered)) return;
-    const drift = await reconcileAccount(account.id, entered, derived);
-    window.alert(drift === 0 ? 'Reconciled — nothing changed.' : 'Reconciled — balance updated.');
-  };
+  const handleReconcile = (account: PaymentAccount) => setReconcileTarget(account);
 
   const openEditAccount = (account: PaymentAccount) => {
     setEditingAccount(account);
@@ -938,6 +930,20 @@ export default function AccountsPage() {
           account={graphAccount}
           transactions={transactions}
           onClose={() => setGraphAccount(null)}
+        />
+      )}
+
+      {reconcileTarget && (
+        <ReconcileSheet
+          accountName={reconcileTarget.name}
+          inputLabel={reconcileTarget.type === 'credit_card' || reconcileTarget.type === 'personal_loan'
+            ? 'amount you currently owe'
+            : 'real balance right now'}
+          derivedCurrent={reconcileTarget.currentBalance ?? reconcileTarget.openingBalance}
+          onConfirm={async (entered) => {
+            await reconcileAccount(reconcileTarget.id, entered, reconcileTarget.currentBalance ?? reconcileTarget.openingBalance);
+          }}
+          onClose={() => setReconcileTarget(null)}
         />
       )}
 
