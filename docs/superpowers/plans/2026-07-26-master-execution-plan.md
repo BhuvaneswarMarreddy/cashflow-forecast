@@ -49,6 +49,13 @@ Every task below = **one commit**, self-contained, tests green. Phases end in a 
 
 None of these block **starting** their phase — each blocks exactly one named task, so sequencing around them is possible.
 
+**Resolved 2026-07-27 (owner):**
+- **D1** = link `/analytics` into the nav More set; fold `/payment-methods` content into Accounts and delete that route.
+- **D2** = honor `profile.currency` in the shared `money()` (Intl.NumberFormat).
+- **D3** = post-onboarding home (and app home destination) = **Forecast**.
+- **D5** = chat entry = Navbar icon opening the Sheet + a Settings row for rules management; no new bottom tab.
+- D4, D6, D7, D8 remain open (each gates a later phase as tabled).
+
 ---
 
 # TRACK 1 — Mobile-first completion
