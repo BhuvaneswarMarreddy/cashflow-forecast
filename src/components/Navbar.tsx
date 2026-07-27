@@ -10,21 +10,15 @@ import { useTransactions } from '@/context/TransactionContext';
 import { withDerivedBalances } from '@/lib/forecast';
 import { currentOf } from '@/lib/accounts';
 import {
-  LayoutDashboard,
-  Calendar,
   CreditCard,
   LogOut,
-  TrendingUp,
   Menu,
   X,
   Settings,
   User,
   ChevronDown,
-  LineChart,
-  History,
-  BarChart3,
-  GitBranch,
 } from 'lucide-react';
+import { NAV_ITEMS } from '@/lib/nav';
 
 export default function Navbar() {
   const { user, logout } = useAuth();
@@ -35,17 +29,8 @@ export default function Navbar() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
 
-  // Core navigation: Focused on what helps users decide TODAY
-  // Forecast is primary - it answers "Can I spend this?"
-  // Analytics removed from primary nav - it's backward-looking, not decision-focused
-  const navItems = [
-    { href: '/forecast', label: 'Forecast', icon: LineChart },
-    { href: '/cashflow', label: 'Cashflow', icon: BarChart3 },
-    { href: '/flow', label: 'Flow', icon: GitBranch },
-    { href: '/dashboard', label: 'Overview', icon: LayoutDashboard },
-    { href: '/history', label: 'History', icon: History },
-    { href: '/accounts', label: 'Accounts', icon: CreditCard },
-  ];
+  // Single source of truth (src/lib/nav.ts) — BottomNav consumes the same list.
+  const navItems = NAV_ITEMS;
 
   const isActive = (path: string) => pathname === path;
 

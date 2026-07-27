@@ -3,17 +3,11 @@
 import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, LineChart, GitBranch, CreditCard, History } from 'lucide-react';
+import { NAV_ITEMS } from '@/lib/nav';
 
-// Mobile-only primary navigation (thumb-reach). The full route set stays in the top
-// Navbar/drawer on md+; these five are the most-used. Kept in sync with Navbar.navItems.
-const TABS = [
-  { href: '/dashboard', label: 'Overview', icon: LayoutDashboard },
-  { href: '/forecast', label: 'Forecast', icon: LineChart },
-  { href: '/flow', label: 'Flow', icon: GitBranch },
-  { href: '/accounts', label: 'Accounts', icon: CreditCard },
-  { href: '/history', label: 'History', icon: History },
-];
+// Mobile-only primary navigation (thumb-reach). Same single source as the Navbar;
+// only `tab: true` items appear here.
+const TABS = NAV_ITEMS.filter((n) => n.tab);
 
 export default function BottomNav() {
   const pathname = usePathname();

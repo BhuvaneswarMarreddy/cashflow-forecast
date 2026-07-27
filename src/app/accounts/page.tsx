@@ -591,6 +591,41 @@ export default function AccountsPage() {
                 </div>
               </div>
 
+              {/* By payment method — folded in from the deleted /payment-methods page (D1) */}
+              {(() => {
+                const byMethod = new Map<string, number>();
+                for (const t of transactions) {
+                  if (t.type !== 'expense') continue;
+                  byMethod.set(t.paymentMethod, (byMethod.get(t.paymentMethod) ?? 0) + t.amount);
+                }
+                const rows = [...byMethod.entries()]
+                  .map(([method, total]) => ({
+                    label: PAYMENT_METHODS.find((m) => m.value === method)?.label ?? method,
+                    total,
+                  }))
+                  .sort((a, b) => b.total - a.total);
+                const grand = rows.reduce((s, r) => s + r.total, 0);
+                if (rows.length === 0) return null;
+                return (
+                  <div className="glass-card p-5 mb-6">
+                    <h3 className="font-semibold text-[var(--foreground)] mb-3">Spending by payment method</h3>
+                    <div className="space-y-2">
+                      {rows.map((r) => (
+                        <div key={r.label} className="flex items-center gap-3">
+                          <span className="text-sm text-[var(--foreground-secondary)] w-40 truncate">{r.label}</span>
+                          <div className="flex-1 h-2 bg-[var(--background-tertiary)] rounded-full overflow-hidden">
+                            <div className="h-full rounded-full bg-[var(--accent-primary)]" style={{ width: `${grand > 0 ? (r.total / grand) * 100 : 0}%` }} />
+                          </div>
+                          <span className="text-sm font-medium text-[var(--foreground)] tabular-nums w-24 text-right">
+                            ${Math.round(r.total).toLocaleString()}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
               {profile?.paymentAccounts && profile.paymentAccounts.length > 0 ? (
                 <div className="space-y-4">
                   {derivedAccounts.map((account) => (
