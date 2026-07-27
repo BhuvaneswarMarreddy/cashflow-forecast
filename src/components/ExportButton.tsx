@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { UserProfile, Transaction, SavingsGoal, DebtPayoffPlan } from '@/types';
 import { Download, FileSpreadsheet, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { buildExportWorkbook, workbookToBlob } from '@/lib/export-xlsx';
 
 interface ExportButtonProps {
   profile: UserProfile | null;
@@ -27,7 +28,8 @@ export default function ExportButton({
     setExportStatus('idle');
     
     try {
-      const exportData = {
+      // Built entirely in the browser — no server round-trip, works offline.
+      const wb = buildExportWorkbook({
         profile: {
           name: profile.name,
           email: profile.email,
@@ -40,22 +42,8 @@ export default function ExportButton({
         transactions,
         savingsGoals,
         debtPlan,
-      };
-      
-      const response = await fetch('/api/export', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(exportData),
       });
-      
-      if (!response.ok) {
-        throw new Error('Export failed');
-      }
-      
-      // Download the file
-      const blob = await response.blob();
+      const blob = workbookToBlob(wb);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
