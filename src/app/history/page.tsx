@@ -69,6 +69,8 @@ export default function HistoryPage() {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+  // Mobile-only: filters collapse behind a "Filters (n)" toggle; desktop always shows them
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -322,6 +324,14 @@ export default function HistoryPage() {
 
   if (!isAuthenticated) return null;
 
+  // How many filters differ from their defaults — shown on the mobile "Filters" toggle
+  const activeFilterCount =
+    (searchQuery ? 1 : 0) +
+    (dateFilter !== 'all' ? 1 : 0) +
+    (typeFilter !== 'all' ? 1 : 0) +
+    (accountFilter !== 'all' ? 1 : 0) +
+    (categoryFilter !== 'all' ? 1 : 0);
+
   const currentCash = calculateCurrentCash(withDerivedBalances(profile?.paymentAccounts || [], transactions));
   const monthlyIncome = profile?.incomeSources?.reduce((sum, inc) => {
     const monthly = inc.frequency === 'yearly' ? inc.amount / 12 :
@@ -424,8 +434,22 @@ export default function HistoryPage() {
                 </div>
               </div>
 
-              {/* Filters Row */}
-              <div className="flex flex-wrap items-center gap-3 pt-4">
+              {/* Mobile-only disclosure toggle for the filters row below */}
+              <button
+                type="button"
+                onClick={() => setFiltersOpen(o => !o)}
+                aria-expanded={filtersOpen}
+                className="sm:hidden mt-4 w-full min-h-[44px] px-3 py-2 rounded-lg bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground-secondary)] flex items-center justify-between"
+              >
+                <span className="flex items-center gap-2">
+                  <Filter className="w-4 h-4" />
+                  Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
+                </span>
+                {filtersOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              </button>
+
+              {/* Filters Row — always visible on sm+, collapsed behind the toggle on mobile */}
+              <div className={`${filtersOpen ? 'flex' : 'hidden sm:flex'} flex-wrap items-center gap-3 pt-4`}>
                 {/* Search */}
                 <div className="relative flex-1 min-w-[200px]">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--foreground-muted)]" />
@@ -434,7 +458,8 @@ export default function HistoryPage() {
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Search..."
-                    className="w-full py-2 pl-9 pr-3 rounded-lg bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground)] placeholder:text-[var(--foreground-muted)]"
+                    aria-label="Search transactions"
+                    className="w-full py-2 pl-9 pr-3 rounded-lg bg-[var(--background)] border border-[var(--border-color)] text-base sm:text-sm text-[var(--foreground)] placeholder:text-[var(--foreground-muted)]"
                   />
                 </div>
 
@@ -685,7 +710,7 @@ export default function HistoryPage() {
                               key={txn.id}
                               className="p-4 flex items-center justify-between hover:bg-[var(--background-tertiary)] border-b border-[var(--border-color)] last:border-b-0"
                             >
-                              <div className="flex items-center gap-4">
+                              <div className="flex items-center gap-4 max-sm:min-w-0">
                                 {/* Show merchant badge or category icon */}
                                 {txn.merchant ? (
                                   <div 
@@ -699,9 +724,10 @@ export default function HistoryPage() {
                                     {category?.icon || '📋'}
                                   </div>
                                 )}
-                                <div>
+                                <div className="max-sm:min-w-0">
                                   <div className="flex items-center gap-2 flex-wrap">
-                                    <p className="font-medium text-[var(--foreground)]">{txn.title}</p>
+                                    {/* max-sm: long titles ellipsize instead of wrapping the 360px row */}
+                                    <p className="font-medium text-[var(--foreground)] max-sm:min-w-0 max-sm:truncate">{txn.title}</p>
                                     {txn.merchant && (
                                       <span 
                                         className="text-xs px-2 py-0.5 rounded-full text-white"
@@ -746,13 +772,15 @@ export default function HistoryPage() {
                                   <div className="flex items-center gap-2">
                                     <button
                                       onClick={() => handleDelete(txn.id)}
-                                      className="text-xs px-2 py-1 rounded bg-red-500 text-white"
+                                      aria-label={`Confirm delete ${txn.title}`}
+                                      className="text-xs px-2 py-1 rounded bg-red-500 text-white max-sm:min-w-[44px] max-sm:min-h-[44px]"
                                     >
                                       Confirm
                                     </button>
                                     <button
                                       onClick={() => setDeleteConfirm(null)}
-                                      className="text-xs px-2 py-1 rounded bg-[var(--background-tertiary)]"
+                                      aria-label="Cancel delete"
+                                      className="text-xs px-2 py-1 rounded bg-[var(--background-tertiary)] max-sm:min-w-[44px] max-sm:min-h-[44px]"
                                     >
                                       Cancel
                                     </button>
@@ -764,14 +792,16 @@ export default function HistoryPage() {
                                         setEditingTransaction(txn);
                                         setIsAddModalOpen(true);
                                       }}
-                                      className="p-2 rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors"
+                                      aria-label={`Edit ${txn.title}`}
+                                      className="p-2 rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors max-sm:min-w-[44px] max-sm:min-h-[44px] flex items-center justify-center"
                                       title="Edit transaction"
                                     >
                                       <Edit2 className="w-4 h-4" />
                                     </button>
                                     <button
                                       onClick={() => setDeleteConfirm(txn.id)}
-                                      className="p-2 rounded-lg text-[var(--foreground-muted)] hover:text-red-500 hover:bg-red-500/10 transition-colors"
+                                      aria-label={`Delete ${txn.title}`}
+                                      className="p-2 rounded-lg text-[var(--foreground-muted)] hover:text-red-500 hover:bg-red-500/10 transition-colors max-sm:min-w-[44px] max-sm:min-h-[44px] flex items-center justify-center"
                                       title="Delete transaction"
                                     >
                                       <Trash2 className="w-4 h-4" />
