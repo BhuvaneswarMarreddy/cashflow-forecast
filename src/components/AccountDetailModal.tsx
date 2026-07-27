@@ -8,6 +8,7 @@ import { X } from 'lucide-react';
 import { PaymentAccount, Transaction } from '@/types';
 import { isPositive } from '@/lib/classify';
 import { currentOf } from '@/lib/accounts';
+import Sheet from '@/components/Sheet';
 
 type Range = 'all' | '12m' | 'ytd';
 const RANGES: Array<{ key: Range; label: string }> = [
@@ -77,11 +78,7 @@ export default function AccountDetailModal({ account, transactions, onClose }: {
   const totalOut = data.reduce((s, d) => s + Math.abs(d.out), 0);
 
   return (
-    <div className="fixed inset-0 z-[80] bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
-      <div
-        className="bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <Sheet open onClose={onClose} ariaLabel={`${account.name} — balance and activity`} maxWidth="48rem">
         <div className="flex items-start justify-between p-5 border-b border-[var(--border-color)]">
           <div>
             <h2 className="text-xl font-bold text-[var(--foreground)]">{account.name}</h2>
@@ -130,9 +127,9 @@ export default function AccountDetailModal({ account, transactions, onClose }: {
                   <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `$${Math.round(Number(v) / 1000)}k`} width={48} />
                   <Tooltip formatter={(v) => money(Math.abs(Number(v)))} contentStyle={{ background: 'var(--background-secondary)', border: '1px solid var(--border-color)', borderRadius: 8 }} />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="in" name={inLabel} fill="#0d9488" radius={[3, 3, 0, 0]} />
-                  <Bar dataKey="out" name={outLabel} fill="#be185d" radius={[3, 3, 0, 0]} />
-                  <Line type="monotone" dataKey="balance" name={isDebt ? 'Owed' : 'Balance'} stroke="#b08d3f" strokeWidth={2} dot={false} />
+                  <Bar dataKey="in" name={inLabel} fill="#0d9488" radius={[3, 3, 0, 0]} isAnimationActive={false} />
+                  <Bar dataKey="out" name={outLabel} fill="#be185d" radius={[3, 3, 0, 0]} isAnimationActive={false} />
+                  <Line type="monotone" dataKey="balance" name={isDebt ? 'Owed' : 'Balance'} stroke="#b08d3f" strokeWidth={2} dot={false} isAnimationActive={false} />
                 </ComposedChart>
               </ResponsiveContainer>
               <p className="text-xs text-[var(--foreground-muted)] mt-2">
@@ -142,7 +139,6 @@ export default function AccountDetailModal({ account, transactions, onClose }: {
             </>
           )}
         </div>
-      </div>
-    </div>
+    </Sheet>
   );
 }
