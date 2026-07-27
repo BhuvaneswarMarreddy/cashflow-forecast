@@ -29,10 +29,10 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 relative">
+    <main className="min-h-screen flex items-center justify-center p-4 relative">
       {/* Background pattern */}
       <div className="bg-pattern" />
-      
+
       <div className="w-full max-w-md relative z-10">
         {/* Logo */}
         <div className="text-center mb-8 animate-fade-in-up">
@@ -98,20 +98,24 @@ export default function ForgotPasswordPage() {
               </div>
 
               {error && (
-                <div className="mb-6 p-4 rounded-xl bg-[var(--accent-danger)]/10 border border-[var(--accent-danger)]/30 text-[var(--accent-danger)] text-sm">
+                <div role="alert" className="mb-6 p-4 rounded-xl bg-[var(--accent-danger)]/10 border border-[var(--accent-danger)]/30 text-[var(--accent-danger)] text-sm">
                   {error}
                 </div>
               )}
 
               <form onSubmit={handleSubmit} className="space-y-5">
                 <div>
-                  <label className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">
+                  <label htmlFor="reset-email" className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">
                     Email Address
                   </label>
                   <div className="relative">
                     <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--foreground-muted)] pointer-events-none" />
                     <input
+                      id="reset-email"
+                      name="email"
                       type="email"
+                      autoComplete="email"
+                      enterKeyHint="go"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="Enter your email address"
@@ -152,6 +156,6 @@ export default function ForgotPasswordPage() {
           )}
         </div>
       </div>
-    </div>
+    </main>
   );
 }

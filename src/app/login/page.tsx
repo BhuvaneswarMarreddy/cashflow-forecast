@@ -77,10 +77,10 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 relative">
+    <main className="min-h-screen flex items-center justify-center p-4 relative">
       {/* Background pattern */}
       <div className="bg-pattern" />
-      
+
       <div className="w-full max-w-md relative z-10">
         {/* Logo */}
         <div className="text-center mb-8 animate-fade-in-up">
@@ -102,7 +102,7 @@ export default function LoginPage() {
           </h2>
 
           {error && (
-            <div className="mb-6 p-4 rounded-xl bg-[var(--accent-danger)]/10 border border-[var(--accent-danger)]/30 text-[var(--accent-danger)] text-sm">
+            <div role="alert" className="mb-6 p-4 rounded-xl bg-[var(--accent-danger)]/10 border border-[var(--accent-danger)]/30 text-[var(--accent-danger)] text-sm">
               {error}
             </div>
           )}
@@ -136,13 +136,16 @@ export default function LoginPage() {
 
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <label className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">
+              <label htmlFor="login-email" className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">
                 Email Address
               </label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--foreground-muted)] pointer-events-none" />
                 <input
+                  id="login-email"
+                  name="email"
                   type="email"
+                  autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@example.com"
@@ -154,7 +157,7 @@ export default function LoginPage() {
 
             <div>
               <div className="flex justify-between items-center mb-2">
-                <label className="text-sm font-medium text-[var(--foreground-secondary)]">
+                <label htmlFor="login-password" className="text-sm font-medium text-[var(--foreground-secondary)]">
                   Password
                 </label>
                 <Link
@@ -167,7 +170,11 @@ export default function LoginPage() {
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--foreground-muted)] pointer-events-none" />
                 <input
+                  id="login-password"
+                  name="password"
                   type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
+                  enterKeyHint="go"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Enter your password"
@@ -177,6 +184,8 @@ export default function LoginPage() {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  aria-pressed={showPassword}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--foreground-muted)] hover:text-[var(--foreground)] transition-colors"
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -216,6 +225,6 @@ export default function LoginPage() {
           New here? Create an account to get started with sample data.
         </p>
       </div>
-    </div>
+    </main>
   );
 }

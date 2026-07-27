@@ -122,10 +122,10 @@ export default function SignupPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 relative">
+    <main className="min-h-screen flex items-center justify-center p-4 relative">
       {/* Background pattern */}
       <div className="bg-pattern" />
-      
+
       <div className="w-full max-w-md relative z-10">
         {/* Logo */}
         <div className="text-center mb-8 animate-fade-in-up">
@@ -148,7 +148,7 @@ export default function SignupPage() {
 
           {/* Status Message */}
           {status && (
-            <div className="mb-6 p-4 rounded-xl bg-[var(--accent-primary)]/10 border border-[var(--accent-primary)]/30 text-[var(--accent-primary)] text-sm flex items-center gap-3">
+            <div role="alert" className="mb-6 p-4 rounded-xl bg-[var(--accent-primary)]/10 border border-[var(--accent-primary)]/30 text-[var(--accent-primary)] text-sm flex items-center gap-3">
               <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin flex-shrink-0" />
               {status}
             </div>
@@ -156,7 +156,7 @@ export default function SignupPage() {
 
           {/* Success Message */}
           {success && (
-            <div className="mb-6 p-4 rounded-xl bg-[var(--accent-success)]/10 border border-[var(--accent-success)]/30 text-[var(--accent-success)] text-sm flex items-center gap-3">
+            <div role="alert" className="mb-6 p-4 rounded-xl bg-[var(--accent-success)]/10 border border-[var(--accent-success)]/30 text-[var(--accent-success)] text-sm flex items-center gap-3">
               <CheckCircle className="w-4 h-4 flex-shrink-0" />
               {success}
             </div>
@@ -164,7 +164,7 @@ export default function SignupPage() {
 
           {/* Error Message */}
           {error && (
-            <div className="mb-6 p-4 rounded-xl bg-[var(--accent-danger)]/10 border border-[var(--accent-danger)]/30 text-[var(--accent-danger)] text-sm">
+            <div role="alert" className="mb-6 p-4 rounded-xl bg-[var(--accent-danger)]/10 border border-[var(--accent-danger)]/30 text-[var(--accent-danger)] text-sm">
               ⚠️ {error}
             </div>
           )}
@@ -198,13 +198,16 @@ export default function SignupPage() {
 
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <label className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">
+              <label htmlFor="signup-name" className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">
                 Full Name
               </label>
               <div className="relative">
                 <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--foreground-muted)] pointer-events-none" />
                 <input
+                  id="signup-name"
+                  name="name"
                   type="text"
+                  autoComplete="name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Enter your full name"
@@ -215,13 +218,16 @@ export default function SignupPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">
+              <label htmlFor="signup-email" className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">
                 Email Address
               </label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--foreground-muted)] pointer-events-none" />
                 <input
+                  id="signup-email"
+                  name="email"
                   type="email"
+                  autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@example.com"
@@ -232,13 +238,16 @@ export default function SignupPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">
+              <label htmlFor="signup-password" className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">
                 Password
               </label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--foreground-muted)] pointer-events-none" />
                 <input
+                  id="signup-password"
+                  name="password"
                   type={showPassword ? 'text' : 'password'}
+                  autoComplete="new-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Create a secure password"
@@ -248,6 +257,8 @@ export default function SignupPage() {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  aria-pressed={showPassword}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--foreground-muted)] hover:text-[var(--foreground)] transition-colors"
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -278,13 +289,17 @@ export default function SignupPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">
+              <label htmlFor="signup-confirm-password" className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">
                 Confirm Password
               </label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--foreground-muted)] pointer-events-none" />
                 <input
+                  id="signup-confirm-password"
+                  name="confirmPassword"
                   type={showPassword ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  enterKeyHint="go"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   placeholder="Confirm your password"
@@ -326,6 +341,6 @@ export default function SignupPage() {
           </p>
         </div>
       </div>
-    </div>
+    </main>
   );
 }
