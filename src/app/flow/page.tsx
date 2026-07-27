@@ -308,8 +308,8 @@ export default function FlowPage() {
         aria-pressed={effectivePin === payload.label}
         opacity={bright ? 1 : 0.22}
         style={{ cursor: 'pointer', transition: 'opacity 150ms' }}
-        onMouseEnter={() => setHoverLabel(payload.label ?? null)}
-        onMouseLeave={() => setHoverLabel(null)}
+        onPointerEnter={(e) => { if (e.pointerType === 'mouse') setHoverLabel(payload.label ?? null); }}
+        onPointerLeave={(e) => { if (e.pointerType === 'mouse') setHoverLabel(null); }}
         onFocus={() => setHoverLabel(payload.label ?? null)}
         onBlur={() => setHoverLabel(null)}
         onClick={() => setPinLabel((p) => (p === payload.label ? null : payload.label ?? null))}
@@ -320,6 +320,14 @@ export default function FlowPage() {
           }
         }}
       >
+        {/* Invisible hit target so the 12px node is thumb-tappable (44px min). */}
+        <rect
+          x={x - 10}
+          y={y + height / 2 - Math.max(height, 44) / 2}
+          width={width + 20}
+          height={Math.max(height, 44)}
+          fill="transparent"
+        />
         <rect x={x} y={y} width={width} height={height} fill={FLOW_COLORS[kind]} rx={2} />
         <text
           x={labelLeft ? x - 6 : x + width + 6}
