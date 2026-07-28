@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { MessageSquare, Send, Loader2, RefreshCw } from 'lucide-react';
 import { ForecastSummary } from '@/types';
 import { prepareForecastForAI } from '@/lib/forecast';
+import { aiDecision } from '@/lib/callables';
 
 interface AIQuestionPanelProps {
   forecast: ForecastSummary;
@@ -35,18 +36,12 @@ export default function AIQuestionPanel({ forecast }: AIQuestionPanelProps) {
     setIsLoading(true);
 
     try {
-      const response = await fetch('/api/ai/decision', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'question',
-          forecastData: prepareForecastForAI(forecast),
-          question: userQuestion,
-        }),
+      const data = await aiDecision({
+        type: 'question',
+        forecastData: prepareForecastForAI(forecast),
+        question: userQuestion,
       });
 
-      const data = await response.json();
-      
       if (data.explanation) {
         setMessages(prev => [...prev, { type: 'ai', content: data.explanation }]);
       } else {

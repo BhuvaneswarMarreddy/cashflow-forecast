@@ -17,10 +17,41 @@ import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import { Transaction, EXPENSE_CATEGORIES, ExpenseCategory, PAYMENT_METHODS, PaymentMethod } from '@/types';
 import Sheet from '@/components/Sheet';
+import { parseReceiptCallable, callableErrorMessage } from '@/lib/callables';
 
 interface ReceiptScannerModalProps {
   isOpen: boolean;
   onClose: () => void;
+}
+
+function readAsDataURL(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+// Images: downscale to max 1600px edge, JPEG q0.8, to keep the callable payload small.
+// PDFs can't go through a canvas, so they pass through unmodified.
+async function fileToBase64(file: File): Promise<{ base64: string; mimeType: string }> {
+  const dataUrl = await readAsDataURL(file);
+  if (!file.type.startsWith('image/')) {
+    return { base64: dataUrl.split(',')[1], mimeType: file.type };
+  }
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error('Could not read image'));
+    el.src = dataUrl;
+  });
+  const scale = Math.min(1, 1600 / Math.max(img.width, img.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(img.width * scale);
+  canvas.height = Math.round(img.height * scale);
+  canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height);
+  return { base64: canvas.toDataURL('image/jpeg', 0.8).split(',')[1], mimeType: 'image/jpeg' };
 }
 
 interface ParsedTransaction {
@@ -122,20 +153,8 @@ export default function ReceiptScannerModal({ isOpen, onClose }: ReceiptScannerM
     setError(null);
 
     try {
-      const formData = new FormData();
-      formData.append('file', fileToProcess);
-
-      const response = await fetch('/api/parse-receipt', {
-        method: 'POST',
-        body: formData,
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        setError(data.error || 'Failed to parse receipt');
-        return;
-      }
+      const { base64, mimeType } = await fileToBase64(fileToProcess);
+      const data = await parseReceiptCallable(base64, mimeType);
 
       if (data.parsed?.transactions?.length > 0) {
         // Mark all as selected by default and enhance with matched payment methods
@@ -158,7 +177,7 @@ export default function ReceiptScannerModal({ isOpen, onClose }: ReceiptScannerM
       }
     } catch (err) {
       console.error('Process error:', err);
-      setError('Failed to process the image. Please try again.');
+      setError(callableErrorMessage(err));
     } finally {
       setIsProcessing(false);
     }

@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { DollarSign, AlertTriangle, CheckCircle, XCircle, Loader2, HelpCircle } from 'lucide-react';
 import { ForecastSummary, SpendingSimulation } from '@/types';
 import { simulateSpending, prepareForecastForAI } from '@/lib/forecast';
+import { aiDecision } from '@/lib/callables';
 import { format } from 'date-fns';
 
 interface DecisionCheckPanelProps {
@@ -30,22 +31,17 @@ export default function DecisionCheckPanel({ forecast }: DecisionCheckPanelProps
 
     // Get AI explanation (with fallback)
     try {
-      const response = await fetch('/api/ai/decision', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'decision_check',
-          forecastData: prepareForecastForAI(forecast),
-          amount: spendAmount,
-          riskLevel: sim.riskLevel,
-          newLowestBalance: sim.newLowestBalance,
-          lowestDate: sim.newLowestDate,
-          safetyThreshold: forecast.safetyThreshold,
-          affectedBills: sim.affectedBills,
-        }),
+      const data = await aiDecision({
+        type: 'decision_check',
+        forecastData: prepareForecastForAI(forecast),
+        amount: spendAmount,
+        riskLevel: sim.riskLevel,
+        newLowestBalance: sim.newLowestBalance,
+        lowestDate: sim.newLowestDate,
+        safetyThreshold: forecast.safetyThreshold,
+        affectedBills: sim.affectedBills,
       });
 
-      const data = await response.json();
       if (data.explanation) {
         setAiExplanation(data.explanation);
       } else {

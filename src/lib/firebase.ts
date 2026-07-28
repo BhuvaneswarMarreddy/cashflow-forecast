@@ -71,8 +71,9 @@ googleProvider.setCustomParameters({
 });
 
 // Auth exports
-export { 
-  auth, 
+export {
+  app,
+  auth,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut,

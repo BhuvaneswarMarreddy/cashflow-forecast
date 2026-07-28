@@ -4,6 +4,7 @@ import React, { useState, useMemo } from 'react';
 import { Shield, TrendingDown, Calendar, Loader2, Sparkles, AlertTriangle, CheckCircle, Settings, Target, DollarSign, Percent } from 'lucide-react';
 import { ForecastSummary } from '@/types';
 import { useUserProfile } from '@/context/UserProfileContext';
+import { aiDecision } from '@/lib/callables';
 
 interface EmergencyFundPanelProps {
   forecast: ForecastSummary;
@@ -108,25 +109,20 @@ export default function EmergencyFundPanel({
   const getAIInsight = async () => {
     setIsLoadingAI(true);
     try {
-      const response = await fetch('/api/ai/decision', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'emergency_fund',
-          question: `Based on my financial situation, give me a brief, encouraging insight about my emergency fund. Current cash: $${currentCash.toLocaleString()}, Monthly expenses: $${monthlyExpenses.toLocaleString()}, Runway: ${metrics.runwayMonths.toFixed(1)} months (${metrics.runwayDays} days), Goal: ${metrics.targetMonths} months ($${metrics.targetAmount.toLocaleString()}). ${metrics.status === 'critical' ? 'I need help building this fund.' : metrics.status === 'warning' ? 'I\'m working on building this.' : 'I\'m doing well but want to improve.'} Keep it short (2-3 sentences), practical, and non-judgmental.`,
-          forecast: {
-            currentBalance: currentCash,
-            lowestBalance: forecast.lowestBalance,
-            lowestBalanceDate: forecast.lowestBalanceDate,
-            totalIncome: forecast.totalIncome,
-            totalExpenses: forecast.totalExpenses,
-            daysUntilUnsafe: forecast.daysUntilUnsafe,
-            safetyThreshold: forecast.safetyThreshold,
-          },
-        }),
+      const data = await aiDecision({
+        type: 'emergency_fund',
+        question: `Based on my financial situation, give me a brief, encouraging insight about my emergency fund. Current cash: $${currentCash.toLocaleString()}, Monthly expenses: $${monthlyExpenses.toLocaleString()}, Runway: ${metrics.runwayMonths.toFixed(1)} months (${metrics.runwayDays} days), Goal: ${metrics.targetMonths} months ($${metrics.targetAmount.toLocaleString()}). ${metrics.status === 'critical' ? 'I need help building this fund.' : metrics.status === 'warning' ? 'I\'m working on building this.' : 'I\'m doing well but want to improve.'} Keep it short (2-3 sentences), practical, and non-judgmental.`,
+        forecast: {
+          currentBalance: currentCash,
+          lowestBalance: forecast.lowestBalance,
+          lowestBalanceDate: forecast.lowestBalanceDate,
+          totalIncome: forecast.totalIncome,
+          totalExpenses: forecast.totalExpenses,
+          daysUntilUnsafe: forecast.daysUntilUnsafe,
+          safetyThreshold: forecast.safetyThreshold,
+        },
       });
-      
-      const data = await response.json();
+
       if (data.explanation) {
         setAiInsight(data.explanation);
       } else {

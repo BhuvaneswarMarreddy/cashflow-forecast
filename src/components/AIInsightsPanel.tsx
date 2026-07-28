@@ -3,6 +3,7 @@
 import React, { useState, useMemo } from 'react';
 import { Transaction, PaymentAccount, IncomeSource } from '@/types';
 import { classifyTransaction } from '@/lib/classify';
+import { aiDecision } from '@/lib/callables';
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -178,22 +179,12 @@ export default function AIInsightsPanel({
           }, 0),
       };
 
-      const response = await fetch('/api/ai/decision', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'insights',
-          data: summaryData,
-        }),
+      const result = await aiDecision({
+        type: 'insights',
+        data: summaryData,
       });
 
-      if (response.ok) {
-        const result = await response.json();
-        setAiInsight(result.explanation || result.insight);
-      } else {
-        // Fallback insight
-        setAiInsight(generateFallbackInsight());
-      }
+      setAiInsight(result.explanation || result.insight || generateFallbackInsight());
     } catch (error) {
       setAiInsight(generateFallbackInsight());
     } finally {
