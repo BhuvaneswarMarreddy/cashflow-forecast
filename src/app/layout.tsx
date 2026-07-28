@@ -44,7 +44,10 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  themeColor: "#14161a",
+  themeColor: [
+    { media: "(prefers-color-scheme: dark)", color: "#14161a" },
+    { media: "(prefers-color-scheme: light)", color: "#f6f3ec" },
+  ],
 };
 
 export default function RootLayout({
@@ -55,6 +58,13 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${outfit.variable} ${spaceMono.variable}`}>
       <body className="antialiased">
+        {/* Apply the saved theme before paint — prevents a wrong-theme flash */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "try{var t=localStorage.getItem('theme');if(t==='light'||t==='dark'){document.documentElement.dataset.theme=t}}catch(e){}",
+          }}
+        />
         <AuthProvider>
           <UserProfileProvider>
             <TransactionProvider>

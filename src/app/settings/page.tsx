@@ -7,6 +7,7 @@ import { useUserProfile } from '@/context/UserProfileContext';
 import { useTransactions } from '@/context/TransactionContext';
 import Navbar from '@/components/Navbar';
 import ExportButton from '@/components/ExportButton';
+import ThemeToggle from '@/components/ThemeToggle';
 import {
   TrendingUp,
   User,
@@ -193,6 +194,20 @@ export default function SettingsPage() {
                 </span>
               )}
             </div>
+          </div>
+        </div>
+
+        {/* Appearance */}
+        <div className="mb-6">
+          <h3 className="text-sm font-medium text-[var(--foreground-muted)] uppercase tracking-wide mb-3">
+            Appearance
+          </h3>
+          <div className="bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-xl p-4 flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <p className="font-medium text-[var(--foreground)]">Theme</p>
+              <p className="text-sm text-[var(--foreground-muted)]">Auto follows your device setting</p>
+            </div>
+            <ThemeToggle />
           </div>
         </div>
 

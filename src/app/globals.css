@@ -38,6 +38,58 @@
   /* Border */
   --border-color: #2b2f35;
   --border-glow: rgba(201, 162, 78, 0.5);
+
+  /* Glass surface (theme-dependent) */
+  --glass-bg: rgba(22, 27, 34, 0.8);
+
+  color-scheme: dark;
+}
+
+/* Light theme — Ink & Gold on warm paper. Gold CTAs (gradient) stay identical;
+   the gold TEXT token deepens for contrast. Toggle wins over OS preference:
+   [data-theme] is stamped on <html> by the Settings toggle / boot script. */
+:root[data-theme="light"] {
+  --background: #f6f3ec;
+  --background-secondary: #fdfcf8;
+  --background-tertiary: #ebe6d9;
+  --foreground: #1d1f24;
+  --foreground-secondary: #4b4e55;
+  --foreground-muted: #6c6f68;
+  --accent-primary: #9a7b30;
+  --accent-secondary: #83672a;
+  --accent-tertiary: #b08d3f;
+  --accent-success: #157f5f;
+  --accent-danger: #cf3a41;
+  --accent-warning: #9a6a05;
+  --border-color: #ded7c8;
+  --border-glow: rgba(154, 123, 48, 0.5);
+  --shadow-glow: 0 0 40px rgba(154, 123, 48, 0.18);
+  --shadow-card: 0 4px 20px rgba(70, 60, 30, 0.1);
+  --glass-bg: rgba(255, 255, 255, 0.75);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --background: #f6f3ec;
+    --background-secondary: #fdfcf8;
+    --background-tertiary: #ebe6d9;
+    --foreground: #1d1f24;
+    --foreground-secondary: #4b4e55;
+    --foreground-muted: #6c6f68;
+    --accent-primary: #9a7b30;
+    --accent-secondary: #83672a;
+    --accent-tertiary: #b08d3f;
+    --accent-success: #157f5f;
+    --accent-danger: #cf3a41;
+    --accent-warning: #9a6a05;
+    --border-color: #ded7c8;
+    --border-glow: rgba(154, 123, 48, 0.5);
+    --shadow-glow: 0 0 40px rgba(154, 123, 48, 0.18);
+    --shadow-card: 0 4px 20px rgba(70, 60, 30, 0.1);
+    --glass-bg: rgba(255, 255, 255, 0.75);
+    color-scheme: light;
+  }
 }
 
 @theme inline {
@@ -87,7 +139,7 @@ body {
 
 /* Glass morphism card */
 .glass-card {
-  background: rgba(22, 27, 34, 0.8);
+  background: var(--glass-bg);
   backdrop-filter: blur(20px);
   border: 1px solid var(--border-color);
   border-radius: 16px;
@@ -429,20 +481,12 @@ input[type="number"].input-field::-webkit-inner-spin-button {
   padding: 12px;
 }
 
-/* Inline select/input styles for components using Tailwind */
-select,
-input[type="text"],
-input[type="number"],
-input[type="date"],
-input[type="email"],
-input[type="password"] {
-  color-scheme: dark;
-}
+/* Form controls follow the theme via :root's color-scheme (inherited property). */
 
-/* Dropdown styles for better contrast - Deep Blue Theme */
+/* Dropdown styles for better contrast */
 select option {
-  background-color: #24282e;
-  color: #f0f6fc;
+  background-color: var(--background-tertiary);
+  color: var(--foreground);
   padding: 10px;
 }
 
