@@ -704,17 +704,18 @@ dialog.sheet::backdrop {
     width: 100%;
   }
 
-  /* Reduce heading sizes */
+  /* Fluid heading scale — smooth 320→640px instead of one hard jump.
+     !important is load-bearing: it must beat per-page text-3xl utilities. */
   h1 {
-    font-size: 1.75rem !important;
+    font-size: clamp(1.5rem, 5.5vw + 0.4rem, 1.75rem) !important;
   }
 
   h2 {
-    font-size: 1.25rem !important;
+    font-size: clamp(1.1rem, 3.5vw + 0.4rem, 1.25rem) !important;
   }
 
   h3 {
-    font-size: 1.1rem !important;
+    font-size: clamp(1rem, 3vw + 0.35rem, 1.1rem) !important;
   }
 
   /* Improve touch targets */
@@ -750,6 +751,17 @@ body {
 .below-fold-chart {
   content-visibility: auto;
   contain-intrinsic-size: 0 320px;
+}
+
+/* Landscape phones: cap chart card heights so the page isn't one chart tall.
+   ponytail: only reaches %-height charts inside these wrappers; fixed height
+   props (flow's maximize view) manage themselves. */
+@media (max-height: 480px) and (pointer: coarse) {
+  .chart-container,
+  .below-fold-chart {
+    max-height: 240px;
+    overflow: hidden;
+  }
 }
 
 /* Small screen adjustments */
