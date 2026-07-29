@@ -16,7 +16,10 @@ import BudgetStatusPanel from '@/components/BudgetStatusPanel';
 import UpcomingBillsPanel from '@/components/UpcomingBillsPanel';
 import SavingsGoalsPanel from '@/components/SavingsGoalsPanel';
 import PlannedPaymentsPanel from '@/components/PlannedPaymentsPanel';
+import AssumptionsPanel from '@/components/AssumptionsPanel';
 import { generateForecast, calculateCurrentCash, generateAccountForecast, getAllAccountForecasts, withDerivedBalances } from '@/lib/forecast';
+import { buildAssumptions, AssumptionOverrides } from '@/lib/behavior';
+import { loadOverrides, saveOverrides } from '@/lib/assumption-overrides';
 import * as firestoreService from '@/lib/firestore';
 import { format } from 'date-fns';
 import { TrendingUp, AlertTriangle, ArrowRight, Shield, CreditCard, ChevronDown, Wallet, Landmark, Building } from 'lucide-react';
@@ -38,6 +41,8 @@ export default function ForecastPage() {
   const [forecastDays, setForecastDays] = useState(90);
   const [selectedAccountId, setSelectedAccountId] = useState<string>('all'); // 'all' for combined view
   const [savingsGoals, setSavingsGoals] = useState<SavingsGoal[]>([]);
+  // User corrections to the behavior engine's assumptions (localStorage-backed).
+  const [overrides, setOverrides] = useState<AssumptionOverrides>(() => loadOverrides());
   
   // Load savings goals from Firestore
   useEffect(() => {
@@ -117,6 +122,12 @@ export default function ForecastPage() {
     [profile?.paymentAccounts, transactions]
   );
 
+  // What the forecast believes — regenerated whenever the user corrects an assumption.
+  const assumptions = useMemo(
+    () => buildAssumptions(transactions, derivedAccounts, overrides),
+    [transactions, derivedAccounts, overrides]
+  );
+
   // Generate all account forecasts
   const accountForecasts = useMemo(() => {
     if (!profile?.paymentAccounts) return [];
@@ -148,9 +159,15 @@ export default function ForecastPage() {
       profile.incomeSources || [],
       transactions,
       threshold,
-      forecastDays
+      forecastDays,
+      overrides
     );
-  }, [profile, derivedAccounts, transactions, forecastDays]);
+  }, [profile, derivedAccounts, transactions, forecastDays, overrides]);
+
+  const handleOverridesChange = (o: AssumptionOverrides) => {
+    setOverrides(o);
+    saveOverrides(o);
+  };
 
   // Use selected forecast or combined
   const forecast = selectedAccountForecast?.forecast || combinedForecast;
@@ -406,6 +423,7 @@ export default function ForecastPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left Column - Chart, Timeline, and AI Insights */}
           <div className="lg:col-span-2 space-y-6">
+            <AssumptionsPanel assumptions={assumptions} onOverridesChange={handleOverridesChange} />
             <ForecastChart forecast={forecast} />
             <ForecastTimeline forecast={forecast} />
             <AIInsightsPanel

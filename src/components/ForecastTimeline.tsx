@@ -3,7 +3,29 @@
 import React, { useState, useMemo } from 'react';
 import { Calendar, ArrowUp, ArrowDown, AlertTriangle, ChevronDown, ChevronUp, List, Grid3X3 } from 'lucide-react';
 import { ForecastEvent, ForecastSummary } from '@/types';
+import { formatMoney } from '@/lib/money';
 import { format, parseISO, isToday, isTomorrow, isThisWeek, startOfMonth, isSameMonth } from 'date-fns';
+
+// Projected events can explain themselves (breakdown/confidence/contributors).
+const isExplainable = (e: ForecastEvent) =>
+  e.source === 'projected' || !!e.breakdown || e.confidence !== undefined;
+
+// The quiet expansion body shared by both views.
+const explainBlock = (event: ForecastEvent) => (
+  <div className="mt-2 ml-11 space-y-1 text-xs text-[var(--foreground-muted)]">
+    {event.breakdown?.map((b) => (
+      <p key={b.label} className="flex items-center justify-between gap-4">
+        <span>{b.label}</span>
+        {/* breakdown amounts are MONTHLY baselines; the event amount is the daily slice */}
+        <span className="tabular-nums">{formatMoney(b.amount)}/mo</span>
+      </p>
+    ))}
+    {event.confidence !== undefined && <p>Confidence: {Math.round(event.confidence * 100)}%</p>}
+    {event.contributors && event.contributors.length > 0 && (
+      <p>Based on: {event.contributors.join(', ')}</p>
+    )}
+  </div>
+);
 
 interface ForecastTimelineProps {
   forecast: ForecastSummary;
@@ -218,33 +240,48 @@ export default function ForecastTimeline({ forecast }: ForecastTimelineProps) {
                 {/* Month Events */}
                 {isExpanded && (
                   <div className="p-4 border-t border-[var(--border-color)] space-y-3 max-h-[400px] overflow-y-auto">
-                    {group.events.map((event, i) => (
-                      <div
-                        key={`${monthKey}-${i}`}
-                        className={`flex items-center justify-between p-4 rounded-lg transition-all ${
-                          event.isCritical
-                            ? 'bg-red-500/10 border border-red-500/30'
-                            : 'bg-[var(--background-secondary)] border border-[var(--border-color)]/50 hover:border-[var(--border-color)]'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          {getEventIcon(event)}
-                          <div>
-                            <p className="text-sm font-semibold text-[var(--foreground)] mb-1">
-                              {event.description}
+                    {group.events.map((event, i) => {
+                      const rowClass = `p-4 rounded-lg transition-all ${
+                        event.isCritical
+                          ? 'bg-red-500/10 border border-red-500/30'
+                          : 'bg-[var(--background-secondary)] border border-[var(--border-color)]/50 hover:border-[var(--border-color)]'
+                      }`;
+                      const content = (
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            {getEventIcon(event)}
+                            <div>
+                              <p className="text-sm font-semibold text-[var(--foreground)] mb-1">
+                                {event.description}
+                              </p>
+                              <p className="text-xs text-[var(--foreground-muted)]">
+                                {format(parseISO(event.date), 'MMM d, yyyy')} • Balance: <span className="font-medium">${event.balanceAfter.toLocaleString()}</span>
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <p className={`text-base font-bold ${
+                              event.amount > 0 ? 'text-emerald-500' : 'text-[var(--foreground)]'
+                            }`}>
+                              {event.amount > 0 ? '+' : ''}${Math.abs(event.amount).toLocaleString()}
                             </p>
-                            <p className="text-xs text-[var(--foreground-muted)]">
-                              {format(parseISO(event.date), 'MMM d, yyyy')} • Balance: <span className="font-medium">${event.balanceAfter.toLocaleString()}</span>
-                            </p>
+                            {isExplainable(event) && (
+                              <ChevronDown className="w-4 h-4 text-[var(--foreground-muted)] transition-transform group-open:rotate-180" aria-hidden="true" />
+                            )}
                           </div>
                         </div>
-                        <p className={`text-base font-bold ${
-                          event.amount > 0 ? 'text-emerald-500' : 'text-[var(--foreground)]'
-                        }`}>
-                          {event.amount > 0 ? '+' : ''}${Math.abs(event.amount).toLocaleString()}
-                        </p>
-                      </div>
-                    ))}
+                      );
+                      return isExplainable(event) ? (
+                        <details key={`${monthKey}-${i}`} className={`group ${rowClass}`}>
+                          <summary className="cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden">
+                            {content}
+                          </summary>
+                          {explainBlock(event)}
+                        </details>
+                      ) : (
+                        <div key={`${monthKey}-${i}`} className={rowClass}>{content}</div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -268,33 +305,48 @@ export default function ForecastTimeline({ forecast }: ForecastTimelineProps) {
 
                 {/* Events for this date */}
                 <div className="space-y-3 ml-3 border-l-2 border-[var(--border-color)] pl-5 pt-3">
-                  {dateEvents.map((event, i) => (
-                    <div
-                      key={`${date}-${i}`}
-                      className={`flex items-center justify-between p-4 rounded-lg transition-all ${
-                        event.isCritical
-                          ? 'bg-red-500/10 border border-red-500/30'
-                          : 'bg-[var(--background-tertiary)] border border-[var(--border-color)]/50 hover:border-[var(--border-color)]'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        {getEventIcon(event)}
-                        <div>
-                          <p className="text-sm font-semibold text-[var(--foreground)] mb-1">
-                            {event.description}
+                  {dateEvents.map((event, i) => {
+                    const rowClass = `p-4 rounded-lg transition-all ${
+                      event.isCritical
+                        ? 'bg-red-500/10 border border-red-500/30'
+                        : 'bg-[var(--background-tertiary)] border border-[var(--border-color)]/50 hover:border-[var(--border-color)]'
+                    }`;
+                    const content = (
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          {getEventIcon(event)}
+                          <div>
+                            <p className="text-sm font-semibold text-[var(--foreground)] mb-1">
+                              {event.description}
+                            </p>
+                            <p className="text-xs text-[var(--foreground-muted)]">
+                              Balance after: <span className="font-medium">${event.balanceAfter.toLocaleString()}</span>
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <p className={`text-base font-bold ${
+                            event.amount > 0 ? 'text-emerald-500' : 'text-[var(--foreground)]'
+                          }`}>
+                            {event.amount > 0 ? '+' : ''}${Math.abs(event.amount).toLocaleString()}
                           </p>
-                          <p className="text-xs text-[var(--foreground-muted)]">
-                            Balance after: <span className="font-medium">${event.balanceAfter.toLocaleString()}</span>
-                          </p>
+                          {isExplainable(event) && (
+                            <ChevronDown className="w-4 h-4 text-[var(--foreground-muted)] transition-transform group-open:rotate-180" aria-hidden="true" />
+                          )}
                         </div>
                       </div>
-                      <p className={`text-base font-bold ${
-                        event.amount > 0 ? 'text-emerald-500' : 'text-[var(--foreground)]'
-                      }`}>
-                        {event.amount > 0 ? '+' : ''}${Math.abs(event.amount).toLocaleString()}
-                      </p>
-                    </div>
-                  ))}
+                    );
+                    return isExplainable(event) ? (
+                      <details key={`${date}-${i}`} className={`group ${rowClass}`}>
+                        <summary className="cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden">
+                          {content}
+                        </summary>
+                        {explainBlock(event)}
+                      </details>
+                    ) : (
+                      <div key={`${date}-${i}`} className={rowClass}>{content}</div>
+                    );
+                  })}
                 </div>
               </div>
             ))}
