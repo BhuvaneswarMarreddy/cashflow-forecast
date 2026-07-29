@@ -344,6 +344,10 @@ export interface RecurringItem {
   cadence: 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'yearly';
   medianCents: number; monthlyCents: number;
   occurrences: number; firstSeen: string; lastSeen: string; active: boolean;
+  /** The account most of this merchant's charges hit (autopay source). */
+  accountId: string | null;
+  /** Next expected charge: lastSeen + the observed median gap. */
+  nextDue: string;
 }
 
 const BANDS: Array<[RecurringItem['cadence'], number, number, number]> = [
@@ -389,12 +393,16 @@ export function detectRecurring(
     const [cadence, lo, hi, mult] = band;
     if (gaps.filter((g) => g >= lo && g <= hi).length / gaps.length < 0.6) continue; // rule 2
     const lastSeen = dates[dates.length - 1];
+    const acctCount = new Map<string, number>();
+    for (const t of txs) if (t.accountId) acctCount.set(t.accountId, (acctCount.get(t.accountId) ?? 0) + 1);
     out.push({
       merchant, cadence, medianCents: med, monthlyCents: Math.round(med * mult),
       occurrences: dates.length, firstSeen: dates[0], lastSeen,
       // Active = seen within ~1.5 of its own cycle length, not a flat 45 days — else a
       // healthy quarterly/yearly subscription reads as lapsed and drops off the /mo total.
       active: daysBetween(lastSeen, day(todayISO)) <= hi * 1.5,
+      accountId: [...acctCount.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null,
+      nextDue: new Date(Date.parse(`${lastSeen}T00:00:00Z`) + mg * 86_400_000).toISOString().slice(0, 10),
     });
   }
   return out.sort((a, b) => b.monthlyCents - a.monthlyCents);

@@ -274,6 +274,8 @@ describe('detectRecurring', () => {
     expect(item).toMatchObject({
       merchant: 'VERIZON', cadence: 'monthly', medianCents: 4999,
       monthlyCents: 4999, occurrences: 7, active: true,
+      accountId: 'A',          // autopay source = the account the charges hit
+      nextDue: '2026-08-14',   // last seen 07-14 + observed 31-day median gap
     });
   });
 

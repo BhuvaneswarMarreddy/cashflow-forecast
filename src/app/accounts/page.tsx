@@ -10,6 +10,7 @@ import AccountsList from '@/components/AccountsList';
 import AccountDetailModal from '@/components/AccountDetailModal';
 import ReconcileSheet from '@/components/ReconcileSheet';
 import AccountTransactions from '@/components/AccountTransactions';
+import SubscriptionsPanel from '@/components/SubscriptionsPanel';
 import BudgetSettingsPanel from '@/components/BudgetSettingsPanel';
 import BudgetStatusPanel from '@/components/BudgetStatusPanel';
 import DebtPlannerPanel from '@/components/DebtPlannerPanel';
@@ -57,7 +58,7 @@ export default function AccountsPage() {
   const { transactions } = useTransactions();
   const router = useRouter();
   
-  const [activeTab, setActiveTab] = useState<'accounts' | 'spending' | 'transfers' | 'income' | 'budget' | 'budgets' | 'debt'>('accounts');
+  const [activeTab, setActiveTab] = useState<'accounts' | 'subscriptions' | 'spending' | 'transfers' | 'income' | 'budget' | 'budgets' | 'debt'>('accounts');
 
   // Live transfer pairing: match each leg leaving an account to the leg arriving in
   // another, so an internal move reads as ONE net-zero movement. Unpaired legs = the
@@ -422,6 +423,7 @@ export default function AccountsPage() {
         <div className="flex flex-nowrap sm:flex-wrap whitespace-nowrap sm:whitespace-normal gap-2 mb-6 scroll-x-mobile">
           {[
             { key: 'accounts', label: 'Accounts', fullLabel: 'Payment Accounts', icon: CreditCard },
+            { key: 'subscriptions', label: 'Subscriptions', fullLabel: 'Subscriptions & Autopay', icon: Calendar },
             { key: 'spending', label: 'Spending', fullLabel: 'Account Spending', icon: Receipt },
             { key: 'transfers', label: 'Transfers', fullLabel: 'Transfers', icon: ArrowLeftRight },
             { key: 'income', label: 'Income', fullLabel: 'Income Sources', icon: Banknote },
@@ -677,6 +679,23 @@ export default function AccountsPage() {
                   </button>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Subscriptions & autopay — recurring charges across all accounts */}
+          {activeTab === 'subscriptions' && (
+            <div>
+              <div className="mb-6">
+                <h2 className="text-xl font-semibold text-[var(--foreground)]">Subscriptions & autopay</h2>
+                <p className="text-sm text-[var(--foreground-secondary)] mt-1">
+                  Recurring charges detected across all your accounts and cards — what&apos;s paid this month and what&apos;s coming up.
+                </p>
+              </div>
+              <SubscriptionsPanel
+                accounts={derivedAccounts}
+                transactions={transactions}
+                currency={profile?.currency}
+              />
             </div>
           )}
 
