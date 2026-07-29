@@ -5,6 +5,9 @@ import { MessageSquare, Send, Loader2, RefreshCw } from 'lucide-react';
 import { ForecastSummary } from '@/types';
 import { prepareForecastForAI } from '@/lib/forecast';
 import { aiDecision } from '@/lib/callables';
+import { financialContext } from '@/lib/ai-context';
+import { useUserProfile } from '@/context/UserProfileContext';
+import { useTransactions } from '@/context/TransactionContext';
 
 interface AIQuestionPanelProps {
   forecast: ForecastSummary;
@@ -23,6 +26,8 @@ const SUGGESTED_QUESTIONS = [
 ];
 
 export default function AIQuestionPanel({ forecast }: AIQuestionPanelProps) {
+  const { profile } = useUserProfile();
+  const { transactions } = useTransactions();
   const [question, setQuestion] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -40,6 +45,7 @@ export default function AIQuestionPanel({ forecast }: AIQuestionPanelProps) {
         type: 'question',
         forecastData: prepareForecastForAI(forecast),
         question: userQuestion,
+        ...financialContext(profile, transactions), // debts/budget/goals in scope for any question
       });
 
       if (data.explanation) {

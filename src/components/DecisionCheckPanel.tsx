@@ -5,6 +5,9 @@ import { DollarSign, AlertTriangle, CheckCircle, XCircle, Loader2, HelpCircle } 
 import { ForecastSummary, SpendingSimulation } from '@/types';
 import { simulateSpending, prepareForecastForAI } from '@/lib/forecast';
 import { aiDecision } from '@/lib/callables';
+import { financialContext } from '@/lib/ai-context';
+import { useUserProfile } from '@/context/UserProfileContext';
+import { useTransactions } from '@/context/TransactionContext';
 import { format } from 'date-fns';
 
 interface DecisionCheckPanelProps {
@@ -12,6 +15,8 @@ interface DecisionCheckPanelProps {
 }
 
 export default function DecisionCheckPanel({ forecast }: DecisionCheckPanelProps) {
+  const { profile } = useUserProfile();
+  const { transactions } = useTransactions();
   const [amount, setAmount] = useState('');
   const [simulation, setSimulation] = useState<SpendingSimulation | null>(null);
   const [aiExplanation, setAiExplanation] = useState<string | null>(null);
@@ -40,6 +45,9 @@ export default function DecisionCheckPanel({ forecast }: DecisionCheckPanelProps
         lowestDate: sim.newLowestDate,
         safetyThreshold: forecast.safetyThreshold,
         affectedBills: sim.affectedBills,
+        // Full picture: debts, budget, goals — so "safe to spend" weighs card
+        // utilization and loan obligations, not just the checking forecast.
+        ...financialContext(profile, transactions),
       });
 
       if (data.explanation) {
