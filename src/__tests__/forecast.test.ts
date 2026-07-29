@@ -364,5 +364,57 @@ describe('Forecast Engine', () => {
       expect(forecast.startingBalance).toBe(-500);
     });
   });
+
+  describe('typical-spend drain (projection realism)', () => {
+    test('everyday spending history drains the projection instead of income-only optimism', () => {
+      const bank: PaymentAccount = {
+        id: 'b', name: 'b', type: 'bank_account', provider: 'chase',
+        openingBalance: 10000, openingDate: '2000-01-01', color: '#000', isActive: true,
+      } as PaymentAccount;
+      // ~$3,000/mo of ordinary (non-recurring) spending across the last 6 full months
+      const now = new Date();
+      const txns: Transaction[] = [];
+      for (let back = 1; back <= 6; back++) {
+        const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - back, 12));
+        txns.push({
+          id: `e${back}`, title: 'groceries etc', amount: 3000, type: 'expense',
+          category: 'other', paymentMethod: 'chase',
+          date: d.toISOString().slice(0, 10), accountId: 'b',
+        } as Transaction);
+      }
+      const f = generateForecast(10000, [bank], [], txns, 500, 90);
+      // ~$98.6/day * 90d ≈ $8,876 projected out — the curve must come DOWN
+      expect(f.events.some(e => e.description.includes('Typical daily spending'))).toBe(true);
+      expect(f.endingBalance).toBeLessThan(3000);
+      expect(f.endingBalance).toBeGreaterThan(-500);
+    });
+
+    test('no double count: recurring-projected bills reduce the drain', () => {
+      const loan: PaymentAccount = {
+        id: 'l', name: 'loan', type: 'personal_loan', provider: 'other',
+        openingBalance: 5000, openingDate: '2000-01-01', monthlyPayment: 3000, dueDate: 15,
+        color: '#000', isActive: true,
+      } as PaymentAccount;
+      const bank: PaymentAccount = {
+        id: 'b', name: 'b', type: 'bank_account', provider: 'chase',
+        openingBalance: 10000, openingDate: '2000-01-01', color: '#000', isActive: true,
+      } as PaymentAccount;
+      // History: the ONLY spending is the $3,000/mo loan payment itself
+      const now = new Date();
+      const txns: Transaction[] = [];
+      for (let back = 1; back <= 6; back++) {
+        const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - back, 15));
+        txns.push({
+          id: `p${back}`, title: 'Loan payment', amount: 3000, type: 'expense',
+          category: 'other', paymentMethod: 'chase',
+          date: d.toISOString().slice(0, 10), accountId: 'b',
+        } as Transaction);
+      }
+      const f = generateForecast(10000, [bank, loan], [], txns, 500, 90);
+      // The loan bill is projected as events; average spend matches it, so the
+      // residual everyday drain must be ~zero (no Typical-spending events).
+      expect(f.events.filter(e => e.description.includes('Typical daily spending')).length).toBe(0);
+    });
+  });
 });
 

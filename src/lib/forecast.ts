@@ -446,6 +446,42 @@ function transactionsToEvents(
  * MAIN FORECAST FUNCTION
  * Generates complete cash flow forecast for the next N days
  */
+/**
+ * Everyday spending the projection would otherwise miss: income sources and
+ * recurring-flagged bills are projected as events, but the bulk of real spending
+ * (groceries, dining, gas — imported un-flagged) isn't, so the curve only went up.
+ * Drain the 6-month average spend daily, minus what recurring events already cover.
+ */
+function generateTypicalSpendEvents(
+  transactions: Transaction[],
+  accounts: PaymentAccount[],
+  alreadyProjected: ForecastEvent[],
+  today: Date,
+  endDate: Date
+): ForecastEvent[] {
+  const { spending } = monthlyAverages(transactions, accounts);
+  if (spending <= 0) return [];
+  const todayISO = format(today, 'yyyy-MM-dd');
+  const cut = format(addDays(today, 30), 'yyyy-MM-dd');
+  const recurringMonthly = alreadyProjected
+    .filter((e) => e.amount < 0 && e.date > todayISO && e.date <= cut)
+    .reduce((s, e) => s - e.amount, 0);
+  const residualDaily = (Math.max(0, spending - recurringMonthly) * 12) / 365;
+  if (residualDaily < 1) return [];
+  const events: ForecastEvent[] = [];
+  for (let d = addDays(today, 1); !isAfter(d, endDate); d = addDays(d, 1)) {
+    events.push({
+      date: format(d, 'yyyy-MM-dd'),
+      type: 'expense',
+      description: 'Typical daily spending (projected)',
+      amount: -Math.round(residualDaily * 100) / 100,
+      balanceAfter: 0,
+      source: 'projected',
+    });
+  }
+  return events;
+}
+
 export function generateForecast(
   startingCash: number,
   accounts: PaymentAccount[],
@@ -456,11 +492,14 @@ export function generateForecast(
 ): ForecastSummary {
   const today = startOfDay(new Date());
   const endDate = addDays(today, days);
-  
+
   // Gather all events
   const billEvents = generateBillEvents(accounts, today, endDate);
   const incomeEvents = generateIncomeEvents(incomeSources, today, endDate);
   const txnEvents = transactionsToEvents(transactions, accounts, today, endDate);
+  const typicalEvents = generateTypicalSpendEvents(
+    transactions, accounts, [...billEvents, ...txnEvents], today, endDate
+  );
   
   // Combine and sort by date
   const startingEvent: ForecastEvent = {
@@ -477,6 +516,7 @@ export function generateForecast(
     ...billEvents,
     ...incomeEvents,
     ...txnEvents,
+    ...typicalEvents,
   ].sort((a, b) => a.date.localeCompare(b.date));
   
   // Calculate running balance
