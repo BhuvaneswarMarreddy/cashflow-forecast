@@ -221,6 +221,10 @@ export function buildAssumptions(
       monthlyMedian: median([...byMonth.values()]) / 100,
       monthsObserved: byMonth.size,
     }))
+    // A category seen in <3 of the last 6 months is irregular spending, not a
+    // baseline — projecting it is exactly the averaging artifact this engine
+    // replaces. (Big irregulars are also caught by one-time detection.)
+    .filter((b) => b.monthsObserved >= 3)
     .sort((a, b) => b.monthlyMedian - a.monthlyMedian);
 
   const count = (cls: BehaviorClass) =>

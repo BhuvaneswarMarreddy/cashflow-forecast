@@ -57,7 +57,8 @@ function AmountInput({ label, value, onCommit }: {
         if (!Number.isNaN(n) && n >= 0 && n !== value) onCommit(n);
       }}
       onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-      className="input-field w-28 min-h-[44px] text-right tabular-nums"
+      // !w-28: .input-field is unlayered CSS with width:100%, which beats layered utilities
+      className="input-field !w-28 min-h-[44px] text-right tabular-nums shrink-0"
     />
   );
 }
@@ -138,7 +139,7 @@ export default function AssumptionsPanel({ assumptions, onOverridesChange }: {
                   aria-label="Pay cadence"
                   value={inc.cadence}
                   onChange={(e) => patchIncome({ cadence: e.target.value as IncomeCadence })}
-                  className="input-field min-h-[44px] text-sm"
+                  className="input-field !w-auto min-h-[44px] text-sm shrink-0"
                 >
                   <option value="weekly">Weekly</option>
                   <option value="biweekly">Every 2 weeks</option>
@@ -224,14 +225,15 @@ export default function AssumptionsPanel({ assumptions, onOverridesChange }: {
           ) : (
             <ul role="list" className={listClass}>
               {assumptions.categoryBaselines.slice(0, 8).map((b) => (
-                <li key={b.category} className="p-3 flex items-center gap-3">
+                <li key={b.category} className="p-3 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-[var(--foreground)] truncate">{b.category}</p>
-                    <p className="text-xs text-[var(--foreground-muted)]">
+                    <p className="text-xs text-[var(--foreground-muted)] whitespace-nowrap">
                       {formatMoney(b.monthlyMedian)}/mo
-                      {b.monthsObserved > 0 ? ` · seen in ${b.monthsObserved} of the last 6 months` : ' · added by you'}
+                      {b.monthsObserved > 0 ? ` · ${b.monthsObserved} of last 6 months` : ' · added by you'}
                     </p>
                   </div>
+                  <div className="flex items-center gap-2">
                   <AmountInput
                     label={`${b.category} monthly baseline in dollars`}
                     value={b.monthlyMedian}
@@ -244,6 +246,7 @@ export default function AssumptionsPanel({ assumptions, onOverridesChange }: {
                   >
                     Remove
                   </button>
+                  </div>
                 </li>
               ))}
               {removedBaselines.map(([category]) => (
