@@ -239,6 +239,10 @@ export interface ForecastEvent {
   relatedAccountName?: string; // Name of related account for display
   isLastPayment?: boolean; // Marks the final payment of a recurring series
   endsOn?: string; // Date when this recurring item ends
+  // Behavior-forecast explanation fields (src/lib/behavior.ts). All optional/additive.
+  breakdown?: Array<{ label: string; amount: number }>; // e.g. per-category share of a living-costs event
+  confidence?: number; // 0..1 — how regular the pattern behind this projection is
+  contributors?: string[]; // merchants/categories that produced this projection
 }
 
 export interface ForecastSummary {

@@ -18,6 +18,8 @@ import {
 import { addDays, format, parseISO, startOfDay, isBefore, isAfter, isSameDay } from 'date-fns';
 import { isPositive, classifyTransaction } from '@/lib/classify';
 import { currentOf } from '@/lib/accounts';
+import { buildAssumptions, behaviorEvents, AssumptionOverrides } from '@/lib/behavior';
+import { normalizeMerchant } from '@/lib/flows';
 
 const DEFAULT_SAFETY_THRESHOLD = 500;
 const FORECAST_DAYS = 90;
@@ -298,7 +300,11 @@ function transactionsToEvents(
   transactions: Transaction[],
   accounts: PaymentAccount[],
   startDate: Date,
-  endDate: Date
+  endDate: Date,
+  // Merchants the behavior engine already projects as fixed bills (normalized keys).
+  // Their FUTURE recurring projections are suppressed here to avoid double-counting;
+  // past real transactions keep flowing through unchanged.
+  suppressRecurringFor?: Set<string>
 ): ForecastEvent[] {
   const events: ForecastEvent[] = [];
   
@@ -359,7 +365,8 @@ function transactionsToEvents(
     
     // Generate future recurring events for EXPENSES ONLY
     // Income recurring events come from incomeSources, not transactions
-    if (t.isRecurring && t.recurringFrequency && t.type === 'expense') {
+    if (t.isRecurring && t.recurringFrequency && t.type === 'expense'
+        && !suppressRecurringFor?.has(normalizeMerchant(t.merchant || t.title))) {
       const recurringEndDate = t.recurringEndDate ? parseISO(t.recurringEndDate) : null;
       let paymentCount = 0;
       const maxPayments = t.recurringCount || Infinity;
@@ -445,62 +452,36 @@ function transactionsToEvents(
 /**
  * MAIN FORECAST FUNCTION
  * Generates complete cash flow forecast for the next N days
+ *
+ * Projection model (src/lib/behavior.ts): income at the detected pay cadence when the
+ * ledger has paycheck rows (falls back to hand-entered incomeSources otherwise), fixed
+ * bills on their real due dates, and a per-day "Projected living costs" drain built
+ * from category baselines — replacing the old flat typical-daily-spending average.
  */
-/**
- * Everyday spending the projection would otherwise miss: income sources and
- * recurring-flagged bills are projected as events, but the bulk of real spending
- * (groceries, dining, gas — imported un-flagged) isn't, so the curve only went up.
- * Drain the 6-month average spend daily, minus what recurring events already cover.
- */
-function generateTypicalSpendEvents(
-  transactions: Transaction[],
-  accounts: PaymentAccount[],
-  alreadyProjected: ForecastEvent[],
-  today: Date,
-  endDate: Date
-): ForecastEvent[] {
-  const { spending } = monthlyAverages(transactions, accounts);
-  if (spending <= 0) return [];
-  const todayISO = format(today, 'yyyy-MM-dd');
-  const cut = format(addDays(today, 30), 'yyyy-MM-dd');
-  const recurringMonthly = alreadyProjected
-    .filter((e) => e.amount < 0 && e.date > todayISO && e.date <= cut)
-    .reduce((s, e) => s - e.amount, 0);
-  const residualDaily = (Math.max(0, spending - recurringMonthly) * 12) / 365;
-  if (residualDaily < 1) return [];
-  const events: ForecastEvent[] = [];
-  for (let d = addDays(today, 1); !isAfter(d, endDate); d = addDays(d, 1)) {
-    events.push({
-      date: format(d, 'yyyy-MM-dd'),
-      type: 'expense',
-      description: 'Typical daily spending (projected)',
-      amount: -Math.round(residualDaily * 100) / 100,
-      balanceAfter: 0,
-      source: 'projected',
-    });
-  }
-  return events;
-}
-
 export function generateForecast(
   startingCash: number,
   accounts: PaymentAccount[],
   incomeSources: IncomeSource[],
   transactions: Transaction[],
   safetyThreshold: number = DEFAULT_SAFETY_THRESHOLD,
-  days: number = FORECAST_DAYS
+  days: number = FORECAST_DAYS,
+  overrides?: AssumptionOverrides
 ): ForecastSummary {
   const today = startOfDay(new Date());
   const endDate = addDays(today, days);
 
   // Gather all events
+  const assumptions = buildAssumptions(transactions, accounts, overrides);
   const billEvents = generateBillEvents(accounts, today, endDate);
-  const incomeEvents = generateIncomeEvents(incomeSources, today, endDate);
-  const txnEvents = transactionsToEvents(transactions, accounts, today, endDate);
-  const typicalEvents = generateTypicalSpendEvents(
-    transactions, accounts, [...billEvents, ...txnEvents], today, endDate
+  // A paycheck assumption replaces the incomeSources income line — the ledger knows
+  // the real cadence and amount better than the onboarding form.
+  const incomeEvents = assumptions.income ? [] : generateIncomeEvents(incomeSources, today, endDate);
+  const txnEvents = transactionsToEvents(
+    transactions, accounts, today, endDate,
+    new Set(assumptions.fixedBills.map((b) => b.merchant))
   );
-  
+  const behaviorEvts = behaviorEvents(assumptions, accounts, format(today, 'yyyy-MM-dd'), days);
+
   // Combine and sort by date
   const startingEvent: ForecastEvent = {
     date: format(today, 'yyyy-MM-dd'),
@@ -516,7 +497,7 @@ export function generateForecast(
     ...billEvents,
     ...incomeEvents,
     ...txnEvents,
-    ...typicalEvents,
+    ...behaviorEvts,
   ].sort((a, b) => a.date.localeCompare(b.date));
   
   // Calculate running balance

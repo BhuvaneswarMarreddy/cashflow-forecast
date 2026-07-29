@@ -348,6 +348,8 @@ export interface RecurringItem {
   accountId: string | null;
   /** Next expected charge: lastSeen + the observed median gap. */
   nextDue: string;
+  /** In-band gap ratio (0..1): how regular the cadence actually is. */
+  confidence: number;
 }
 
 const BANDS: Array<[RecurringItem['cadence'], number, number, number]> = [
@@ -355,16 +357,16 @@ const BANDS: Array<[RecurringItem['cadence'], number, number, number]> = [
   ['quarterly', 80, 100, 1 / 3], ['yearly', 350, 380, 1 / 12],
 ];
 
-const median = (xs: number[]) => {
+export const median = (xs: number[]) => {
   const s = [...xs].sort((a, b) => a - b);
   const n = s.length;
   return n % 2 ? s[(n - 1) / 2] : Math.round((s[n / 2 - 1] + s[n / 2]) / 2);
 };
-const daysBetween = (a: string, b: string) =>
+export const daysBetween = (a: string, b: string) =>
   Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
 
 // Strip #…/*… suffixes and TRAILING digit runs only — "650 INDUSTRIES" is a real brand.
-const normalizeMerchant = (s: string) =>
+export const normalizeMerchant = (s: string) =>
   s.toUpperCase().replace(/[#*]\S*/g, '').replace(/\s+\d{3,}$/, '').replace(/\s+/g, ' ').trim();
 
 export function detectRecurring(
@@ -391,7 +393,8 @@ export function detectRecurring(
     const band = BANDS.find(([, lo, hi]) => mg >= lo && mg <= hi);
     if (!band) continue;
     const [cadence, lo, hi, mult] = band;
-    if (gaps.filter((g) => g >= lo && g <= hi).length / gaps.length < 0.6) continue; // rule 2
+    const inBand = gaps.filter((g) => g >= lo && g <= hi).length / gaps.length;
+    if (inBand < 0.6) continue; // rule 2
     const lastSeen = dates[dates.length - 1];
     const acctCount = new Map<string, number>();
     for (const t of txs) if (t.accountId) acctCount.set(t.accountId, (acctCount.get(t.accountId) ?? 0) + 1);
@@ -403,6 +406,7 @@ export function detectRecurring(
       active: daysBetween(lastSeen, day(todayISO)) <= hi * 1.5,
       accountId: [...acctCount.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null,
       nextDue: new Date(Date.parse(`${lastSeen}T00:00:00Z`) + mg * 86_400_000).toISOString().slice(0, 10),
+      confidence: inBand,
     });
   }
   return out.sort((a, b) => b.monthlyCents - a.monthlyCents);
