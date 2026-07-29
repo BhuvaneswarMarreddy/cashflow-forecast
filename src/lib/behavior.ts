@@ -282,6 +282,9 @@ export function buildAssumptions(
 // ------------------------------------------------------------------
 // behaviorEvents — assumption-driven events replacing the flat drain.
 // ------------------------------------------------------------------
+
+/** Marker for the daily living-costs drain — UIs fold these into one strip, not N rows. */
+export const LIVING_COSTS_LABEL = 'Projected living costs';
 const INCOME_STEP_DAYS: Record<Exclude<IncomeCadence, 'monthly'>, number> = {
   weekly: 7, biweekly: 14, semimonthly: 15,
 };
@@ -348,7 +351,7 @@ export function behaviorEvents(
     const amount = -Math.round(residualDaily * 100) / 100;
     for (let d = addDays(parseISO(today), 1); inWindow(format(d, 'yyyy-MM-dd')); d = addDays(d, 1)) {
       events.push({
-        date: format(d, 'yyyy-MM-dd'), type: 'expense', description: 'Projected living costs',
+        date: format(d, 'yyyy-MM-dd'), type: 'expense', description: LIVING_COSTS_LABEL,
         amount, balanceAfter: 0, source: 'projected',
         breakdown: top.map((b) => ({ label: b.category, amount: b.monthlyMedian })),
         confidence: Math.min(1, monthsObserved / WINDOW_MONTHS),

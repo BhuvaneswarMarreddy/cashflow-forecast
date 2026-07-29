@@ -4,6 +4,7 @@ import React, { useState, useMemo } from 'react';
 import { Calendar, ArrowUp, ArrowDown, AlertTriangle, ChevronDown, ChevronUp, List, Grid3X3 } from 'lucide-react';
 import { ForecastEvent, ForecastSummary } from '@/types';
 import { formatMoney } from '@/lib/money';
+import { LIVING_COSTS_LABEL } from '@/lib/behavior';
 import { format, parseISO, isToday, isTomorrow, isThisWeek, startOfMonth, isSameMonth } from 'date-fns';
 
 // Projected events can explain themselves (breakdown/confidence/contributors).
@@ -39,7 +40,12 @@ export default function ForecastTimeline({ forecast }: ForecastTimelineProps) {
   
   // Filter out starting balance
   const allEvents = forecast.events.filter(e => e.type !== 'starting_balance');
-  const totalEvents = allEvents.length;
+  // The daily living-costs drain stays in the MATH (balances/chart) but renders as
+  // ONE explainable strip, not 90 identical rows drowning the real events.
+  const livingEvents = allEvents.filter(e => e.description === LIVING_COSTS_LABEL);
+  const discreteEvents = allEvents.filter(e => e.description !== LIVING_COSTS_LABEL);
+  const livingDaily = livingEvents.length > 0 ? Math.abs(livingEvents[0].amount) : 0;
+  const totalEvents = discreteEvents.length;
 
   const getDateLabel = (dateStr: string) => {
     const date = parseISO(dateStr);
@@ -95,8 +101,9 @@ export default function ForecastTimeline({ forecast }: ForecastTimelineProps) {
         };
       }
       
-      groups[monthKey].events.push(event);
-      
+      // living-costs rows are folded into totals/balances only, never listed
+      if (event.description !== LIVING_COSTS_LABEL) groups[monthKey].events.push(event);
+
       if (event.amount > 0) {
         groups[monthKey].totalIncome += event.amount;
       } else {
@@ -111,7 +118,7 @@ export default function ForecastTimeline({ forecast }: ForecastTimelineProps) {
 
   // Group events by date for daily view
   const dailyGroups = useMemo(() => {
-    const events = showAll ? allEvents : allEvents.slice(0, 15);
+    const events = showAll ? discreteEvents : discreteEvents.slice(0, 15);
     const groups: { [date: string]: ForecastEvent[] } = {};
     
     events.forEach(event => {
@@ -122,7 +129,7 @@ export default function ForecastTimeline({ forecast }: ForecastTimelineProps) {
     });
     
     return groups;
-  }, [allEvents, showAll]);
+  }, [discreteEvents, showAll]);
 
   const [expandedMonths, setExpandedMonths] = useState<Set<string>>(new Set());
 
@@ -179,6 +186,30 @@ export default function ForecastTimeline({ forecast }: ForecastTimelineProps) {
           </button>
         </div>
       </div>
+
+      {/* Living costs: one explainable strip instead of a row per day */}
+      {livingDaily > 0 && (
+        <details className="mb-6 -mt-2 rounded-lg bg-[var(--background-tertiary)]/50 border border-[var(--border-color)]">
+          <summary className="cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden min-h-[44px] px-3 flex items-center gap-2 text-sm text-[var(--foreground-secondary)]">
+            <span aria-hidden="true">≈</span>
+            All balances below include projected living costs of{' '}
+            <span className="font-semibold text-[var(--foreground)] tabular-nums">{formatMoney(livingDaily, 'USD', 2)}/day</span>
+            <span className="ml-auto text-xs text-[var(--foreground-muted)]">what&apos;s in this?</span>
+          </summary>
+          <div className="px-3 pb-3 space-y-1 text-xs text-[var(--foreground-muted)]">
+            {livingEvents[0]?.breakdown?.map((b) => (
+              <p key={b.label} className="flex items-center justify-between gap-4">
+                <span>{b.label}</span>
+                <span className="tabular-nums">{formatMoney(b.amount)}/mo</span>
+              </p>
+            ))}
+            {livingEvents[0]?.confidence !== undefined && (
+              <p>Confidence: {Math.round((livingEvents[0].confidence ?? 0) * 100)}%</p>
+            )}
+            <p>Adjust any of this in “What this forecast believes” above.</p>
+          </div>
+        </details>
+      )}
 
       {/* Monthly View */}
       {viewMode === 'monthly' && (
