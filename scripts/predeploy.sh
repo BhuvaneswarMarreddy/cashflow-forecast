@@ -29,32 +29,23 @@ if [ "$HOOKS" != "0" ]; then
   exit 1
 fi
 
-echo "gate 4/5: static export build + hosting-emulator smoke"
-# output:'export' — a stray route.ts / SSR API fails the BUILD here, forever.
+echo "gate 4/4: local boot smoke (real backend)"
 npm run build > /tmp/predeploy_build.log 2>&1 || { tail -25 /tmp/predeploy_build.log; echo "BLOCKED: build failed"; exit 1; }
-[ -f out/index.html ] || { echo "BLOCKED: out/index.html missing — not a static export"; exit 1; }
-# serve out/ through the REAL firebase.json rewrites, not a generic static server
-npx firebase emulators:start --only hosting > /tmp/predeploy_server.log 2>&1 &
+npm run start > /tmp/predeploy_server.log 2>&1 &
 SRV=$!
 trap "kill $SRV 2>/dev/null" EXIT
+# wait for the server, then smoke the key routes (same Firebase backend the app uses)
 ok=0
 for i in $(seq 1 30); do
-  if curl -s -o /dev/null "http://localhost:3005/"; then ok=1; break; fi
+  if curl -s -o /dev/null "http://localhost:3000/"; then ok=1; break; fi
   sleep 1
 done
-[ "$ok" = "1" ] || { tail -25 /tmp/predeploy_server.log; echo "BLOCKED: hosting emulator did not start"; exit 1; }
-for route in / /login/ /accounts/ /flow/ /forecast/ /history/ /cashflow/ /no-such-page; do
-  code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:3005$route")
+[ "$ok" = "1" ] || { tail -25 /tmp/predeploy_server.log; echo "BLOCKED: server did not start"; exit 1; }
+for route in / /login /accounts /flow /forecast /history /cashflow; do
+  code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:3000$route")
   echo "  $route -> $code"
-  case "$code" in 200) ;; *) echo "BLOCKED: $route returned $code"; exit 1;; esac
+  case "$code" in 200|307|308) ;; *) echo "BLOCKED: $route returned $code"; exit 1;; esac
 done
 kill $SRV 2>/dev/null || true; trap - EXIT
-
-echo "gate 5/5: no dead /api fetches"
-if grep -rn "fetch('/api\|fetch(\`/api\|fetch(\"/api" src > /tmp/predeploy_api.log 2>/dev/null; then
-  cat /tmp/predeploy_api.log
-  echo "BLOCKED: relative /api fetch in a static bundle (routes no longer exist)"
-  exit 1
-fi
 
 echo "predeploy gate: PASS"

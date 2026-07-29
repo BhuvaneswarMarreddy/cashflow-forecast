@@ -8,18 +8,15 @@
     "predeploy": ["npm --prefix functions run build"]
   },
   "hosting": {
-    "public": "out",
-    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-    "rewrites": [
-      {
-        "source": "**",
-        "destination": "/index.html"
-      }
+    "source": ".",
+    "frameworksBackend": {
+      "region": "us-central1"
+    },
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
     ]
-  },
-  "emulators": {
-    "hosting": {
-      "port": 3005
-    }
   }
 }
+
