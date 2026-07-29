@@ -18,6 +18,7 @@ export default function DecisionCheckPanel({ forecast }: DecisionCheckPanelProps
   const { profile } = useUserProfile();
   const { transactions } = useTransactions();
   const [amount, setAmount] = useState('');
+  const [cautionReasons, setCautionReasons] = useState<string[]>([]);
   const [simulation, setSimulation] = useState<SpendingSimulation | null>(null);
   const [aiExplanation, setAiExplanation] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -30,9 +31,22 @@ export default function DecisionCheckPanel({ forecast }: DecisionCheckPanelProps
     setIsLoading(true);
     setError(null);
 
-    // Run local simulation (source of truth)
-    const sim = simulateSpending(forecast, spendAmount);
+    // Run local simulation (source of truth), then let the wider picture
+    // downgrade a green verdict: cash-safe is not the same as financially wise.
+    const ctx = financialContext(profile, transactions);
+    const cautions: string[] = [];
+    if (ctx.budgetContext && ctx.budgetContext.remainingThisMonth < 0) {
+      cautions.push(`You're over budget this month by $${Math.abs(ctx.budgetContext.remainingThisMonth).toLocaleString()}`);
+    }
+    for (const c of ctx.debtContext?.creditCards ?? []) {
+      if ((c.utilizationPct ?? 0) >= 50) cautions.push(`${c.name} is at ${c.utilizationPct}% utilization`);
+    }
+    const rawSim = simulateSpending(forecast, spendAmount);
+    const sim = rawSim.riskLevel === 'safe' && cautions.length > 0
+      ? { ...rawSim, riskLevel: 'caution' as const }
+      : rawSim;
     setSimulation(sim);
+    setCautionReasons(cautions);
 
     // Get AI explanation (with fallback)
     try {
@@ -47,7 +61,7 @@ export default function DecisionCheckPanel({ forecast }: DecisionCheckPanelProps
         affectedBills: sim.affectedBills,
         // Full picture: debts, budget, goals — so "safe to spend" weighs card
         // utilization and loan obligations, not just the checking forecast.
-        ...financialContext(profile, transactions),
+        ...ctx,
       });
 
       if (data.explanation) {
@@ -194,6 +208,9 @@ export default function DecisionCheckPanel({ forecast }: DecisionCheckPanelProps
               <p className="text-sm text-[var(--foreground-secondary)]">
                 Spending ${parseFloat(amount).toLocaleString()}
               </p>
+              {cautionReasons.map((r) => (
+                <p key={r} className="text-sm text-[var(--accent-warning)] mt-1">• {r}</p>
+              ))}
             </div>
           </div>
 
