@@ -36,7 +36,10 @@ import {
 // Your web app's Firebase configuration
 const firebaseConfig = {
   apiKey: "AIzaSyAUv5SbN1OF4ugO1mICBtEzBzPRlb4F00k",
-  authDomain: "marreddy-cashflow.firebaseapp.com",
+  // Custom domain: popup shows the brand, and same-origin auth sidesteps
+  // Safari/iOS third-party-cookie blocking. The /__/auth/* handler is served
+  // by Firebase Hosting on this domain (verified 200).
+  authDomain: "cashflowforcast.com",
   projectId: "marreddy-cashflow",
   storageBucket: "marreddy-cashflow.firebasestorage.app",
   messagingSenderId: "958007946272",
