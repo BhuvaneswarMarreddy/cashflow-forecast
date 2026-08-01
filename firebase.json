@@ -2,11 +2,18 @@
   "firestore": {
     "rules": "firestore.rules"
   },
-  "functions": {
-    "source": "functions",
-    "codebase": "api",
-    "predeploy": ["npm --prefix functions run build"]
-  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "api",
+      "predeploy": ["npm --prefix functions run build"]
+    },
+    {
+      "source": "functions-sync",
+      "codebase": "sync",
+      "runtime": "python312"
+    }
+  ],
   "hosting": {
     "source": ".",
     "frameworksBackend": {
