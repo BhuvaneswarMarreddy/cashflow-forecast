@@ -1,7 +1,7 @@
 # functions-sync — daily Monarch Money → Firestore sync
 
 Python 3.12 Firebase Cloud Functions (2nd gen), codebase `sync` — separate from the
-Node `api` codebase in `functions/`. Runs every day at **07:30 America/New_York**,
+Node `api` codebase in `functions/`. Runs every day at **07:30 America/Chicago**,
 pulls accounts + transactions from Monarch, and writes them exactly the way the
 in-app CSV import does (same fields, same classifier conventions, dedup against
 CSV-imported rows via the `importKey` twin id).

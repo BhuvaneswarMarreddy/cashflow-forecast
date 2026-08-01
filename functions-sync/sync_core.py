@@ -32,10 +32,19 @@ from zoneinfo import ZoneInfo
 
 OWNER_EMAIL = "bhuvaneswar.marreddy@gmail.com"
 PROJECT = "marreddy-cashflow"
-CUTOVER = "2026-07-23"  # last full CSV import — first-run cursor
-OVERLAP_DAYS = 5  # re-fetch window for late-posting rows
-TZ = ZoneInfo("America/New_York")
+CUTOVER = "2026-07-18"  # before the last full CSV import — twin guard dedups the overlap
+# Re-fetch window. Wide on purpose: writes are idempotent (mm_ doc ids), so the
+# only cost is reads, while a narrow window PERMANENTLY loses any row that posts
+# late (a hold released after N days is never seen again).
+OVERLAP_DAYS = 45
+# Must match what the browser importer produced: `new Date(y, m-1, d)` is LOCAL
+# midnight, and the owner's machine runs America/Chicago. Writing any other zone
+# shifts the rendered calendar day of every synced row.
+TZ = ZoneInfo("America/Chicago")
 DEBT_TYPES = {"credit_card", "personal_loan"}
+# A Monarch balance older than this is a broken/stale bank connection — never let
+# it overwrite a good anchor.
+STALE_BALANCE_HOURS = 36
 
 
 def now_iso() -> str:
@@ -195,6 +204,60 @@ def match_account(monarch_name: str, monarch_mask, app_accounts: list):
     return None
 
 
+def resolve_matches(monarch_accounts: list, app_accounts: list):
+    """Match Monarch accounts -> app accounts, refusing ambiguity.
+
+    Two Monarch accounts claiming one app account would make the balance
+    re-anchor last-write-wins and misattribute transactions, so a collision
+    demotes ALL of its claimants to unmatched (the same 'never guess' rule
+    already applied to no-match accounts)."""
+    claims = defaultdict(list)
+    unmatched = []
+    for ma in monarch_accounts:
+        name = ma.get("displayName") or ""
+        # A closed/hidden/manual Monarch account must never claim a live one.
+        if ma.get("deactivatedAt") or ma.get("isHidden"):
+            continue
+        app = match_account(name, ma.get("mask"), app_accounts)
+        if app:
+            claims[app["id"]].append((ma, app))
+        else:
+            unmatched.append(name or str(ma.get("id")))
+
+    matched, ambiguous = {}, []
+    for app_id, pairs in claims.items():
+        if len(pairs) > 1:
+            names = sorted((ma.get("displayName") or str(ma.get("id"))) for ma, _ in pairs)
+            ambiguous.append(f"{pairs[0][1].get('name')} <- {', '.join(names)}")
+            unmatched.extend(names)
+            continue
+        ma, app = pairs[0]
+        matched[str(ma.get("id"))] = (ma, app)
+    return matched, unmatched, ambiguous
+
+
+def balance_is_trustworthy(ma: dict, now: dt.datetime | None = None):
+    """(ok, reason). A manual/disabled/stale account's currentBalance must never
+    overwrite a good anchor — a broken bank connection reporting 0.00 would
+    otherwise wipe the account's real balance."""
+    if ma.get("isManual"):
+        return False, "manual account"
+    if ma.get("syncDisabled"):
+        return False, "sync disabled"
+    stamp = ma.get("displayLastUpdatedAt") or ma.get("updatedAt")
+    if stamp:
+        try:
+            seen = dt.datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+            if seen.tzinfo is None:
+                seen = seen.replace(tzinfo=dt.timezone.utc)
+            age_h = ((now or dt.datetime.now(dt.timezone.utc)) - seen).total_seconds() / 3600
+            if age_h > STALE_BALANCE_HOURS:
+                return False, f"balance {int(age_h)}h stale"
+        except ValueError:
+            pass  # unparseable stamp — fall through, the change-guard still applies
+    return True, ""
+
+
 def opening_balance_for(account_type, monarch_balance: float) -> float:
     """App stores debt as POSITIVE amount owed (seed_balances.py); Monarch reports
     liabilities as negative currentBalance. Negate for debt — never clamp, a
@@ -240,14 +303,25 @@ async def connect_monarch(saved_token, email, password, mfa_secret, log=print):
         raise RuntimeError("no valid Monarch session and MONARCH_EMAIL/MONARCH_PASSWORD not set")
     mm = MonarchMoney()
     mfa = (mfa_secret or "").strip()  # empty/whitespace secret -> login without MFA
-    await mm.login(email, password, mfa_secret_key=mfa or None)
+    # Firestore meta/monarchSync.session is the session store; the library's own
+    # on-disk session would resurrect a stale token on a warm instance.
+    await mm.login(email, password, mfa_secret_key=mfa or None,
+                   use_saved_session=False, save_session=False)
     return mm, await mm.get_accounts(), True
 
 
-async def fetch_transactions(mm, start_date: str, page: int = 500) -> list:
+async def fetch_transactions(mm, start_date: str, page: int = 500,
+                             end_date: str | None = None) -> list:
+    """end_date is REQUIRED by the library: monarchmoney raises
+    'You must specify both a startDate and endDate' when only one is given, which
+    would make every run a silent no-op. Default reaches a year ahead so Monarch's
+    future-dated manual rows stay in scope."""
+    if not end_date:
+        end_date = (dt.date.today() + dt.timedelta(days=365)).isoformat()
     out, offset = [], 0
     while True:
-        resp = await mm.get_transactions(limit=page, offset=offset, start_date=start_date)
+        resp = await mm.get_transactions(limit=page, offset=offset,
+                                         start_date=start_date, end_date=end_date)
         block = resp.get("allTransactions") or {}
         results = block.get("results") or []
         out.extend(results)
@@ -283,16 +357,15 @@ async def run_sync(db, uid: str, email: str, password: str, mfa_secret: str,
     acc_col = user_ref.collection("accounts")
     app_accounts = [{"id": d.id, **(d.to_dict() or {})} for d in acc_col.stream()]
 
-    matched, unmatched = {}, []
-    for ma in monarch_accounts:
-        name = ma.get("displayName") or ""
-        app = match_account(name, ma.get("mask"), app_accounts)
-        if app:
-            matched[str(ma.get("id"))] = (ma, app)
-        else:
-            unmatched.append(name or str(ma.get("id")))
+    matched, unmatched, ambiguous = resolve_matches(monarch_accounts, app_accounts)
+    if ambiguous:
+        log(f"AMBIGUOUS account matches (skipped, never guessed): {ambiguous}")
 
+    # Reach back far enough to catch anything still pending at the last run.
     start = cursor_start(meta.get("lastSyncDate"))
+    oldest_pending = meta.get("oldestPending")
+    if oldest_pending and str(oldest_pending)[:10] < start:
+        start = str(oldest_pending)[:10]
     log(f"fetching Monarch transactions since {start} "
         f"({len(matched)} matched / {len(unmatched)} unmatched accounts)")
     txns = await fetch_transactions(mm, start)
@@ -301,21 +374,37 @@ async def run_sync(db, uid: str, email: str, password: str, mfa_secret: str,
     tx_col = user_ref.collection("transactions")
     existing = {r.id for r in tx_col.list_documents(page_size=1000)}
 
-    added = updated = skipped = 0
+    added = updated = 0
+    skip_pending = skip_unmatched = skip_twin = skip_existing = 0
+    pending_dates = []
+    max_written_date = ""
     writes = []  # (doc_id, fields)
     # Occurrence counter mirrors the CSV importer: content-keyed on the same base
     # material, assigned in a deterministic order.
     occ = defaultdict(int)
     for t in sorted(txns, key=lambda x: (str(x.get("date") or ""), str(x.get("id")))):
         row = map_txn(t)
-        if row is None or row["pending"]:
-            skipped += 1
+        if row is None:
+            continue
+        if row["pending"]:
+            # Not written (it re-posts with a different id), but remember how far
+            # back to reach next run so a long hold can never fall out of range.
+            skip_pending += 1
+            pending_dates.append(row["date_key"])
             continue
         pair = matched.get(row["monarch_account_id"])
         if pair is None:
-            skipped += 1  # unmatched account — never guess
+            skip_unmatched += 1  # unmatched/ambiguous account — never guess
             continue
         ma, app = pair
+
+        doc_id = f"mm_{row['monarch_id']}"
+
+        # Our own row already exists: leave it alone. Re-writing would silently
+        # revert the owner's manual edits every single morning.
+        if doc_id in existing:
+            skip_existing += 1
+            continue
 
         # Cross-scheme overlap guard: skip rows the CSV import already owns.
         label = twin_label(app, row["monarch_account_name"])
@@ -324,7 +413,7 @@ async def run_sync(db, uid: str, email: str, password: str, mfa_secret: str,
         occ[base] += 1
         twin = import_key(row["date_key"], row["signed"], label, row["statement"], k)
         if twin in existing:
-            skipped += 1
+            skip_twin += 1
             continue
 
         y, m, d = (int(p) for p in row["date_key"].split("-"))
@@ -343,11 +432,9 @@ async def run_sync(db, uid: str, email: str, password: str, mfa_secret: str,
             if row[opt] is not None:
                 fields[opt] = row[opt]
 
-        doc_id = f"mm_{row['monarch_id']}"
-        if doc_id in existing:
-            updated += 1
-        else:
-            added += 1
+        added += 1
+        if row["date_key"] > max_written_date:
+            max_written_date = row["date_key"]
         writes.append((doc_id, fields))
         if dry_run:
             log(f"  would write {doc_id}: {row['date_key']} "
@@ -361,45 +448,75 @@ async def run_sync(db, uid: str, email: str, password: str, mfa_secret: str,
                 batch.set(tx_col.document(doc_id), fields, merge=True)
             batch.commit()
 
-    # Balance re-anchor: only when the Monarch balance moved since the last sync
-    # (avoids daily churn). openingBalance = current, openingDate = today — the
-    # same re-anchor the app itself performs on drift (src/lib/accounts.ts).
-    # ponytail: rows dated today double-count against a today-anchored balance
-    # until tomorrow; identical ceiling to the app's own drift re-anchor.
+    # Balance re-anchor — the most destructive write in this file, so it is
+    # guarded three ways: (1) first run only SEEDS lastBalances and anchors
+    # nothing, (2) an untrustworthy balance (manual/disabled/stale connection)
+    # never overwrites a good anchor, (3) it fires only when the balance moved.
+    #
+    # openingDate is TOMORROW, not today: deriveAccountBalance counts rows with
+    # day >= openingDate, and Monarch's currentBalance already contains today's
+    # rows — anchoring at today would count them twice.
     last_bal = meta.get("lastBalances") or {}
-    new_bal, reanchored = {}, []
+    first_run = not last_bal
+    anchor_date = (dt.date.fromisoformat(today) + dt.timedelta(days=1)).isoformat()
+    new_bal, reanchored, balance_skips = {}, [], []
     for mid, (ma, app) in matched.items():
         cur = ma.get("currentBalance")
         if cur is None:
             continue
         cur = float(cur)
+        ok, why = balance_is_trustworthy(ma)
+        if not ok:
+            balance_skips.append(f"{app.get('name')}: {why}")
+            continue
         new_bal[mid] = cur
+        if first_run:
+            continue  # seed only — never re-anchor everything on the first pass
         if mid in last_bal and float(last_bal[mid]) == cur:
             continue
         opening = opening_balance_for(app.get("type"), cur)
-        reanchored.append(f"{app.get('name')}: {opening} @ {today}")
+        reanchored.append(f"{app.get('name')}: {opening} @ {anchor_date}")
         if dry_run:
-            log(f"  would re-anchor {app.get('name')!r}: openingBalance={opening} openingDate={today}")
+            log(f"  would re-anchor {app.get('name')!r}: openingBalance={opening} openingDate={anchor_date}")
         else:
             acc_col.document(app["id"]).set(
-                {"openingBalance": opening, "openingDate": today,
+                {"openingBalance": opening, "openingDate": anchor_date,
                  "updatedAt": gcf.SERVER_TIMESTAMP},
                 merge=True)
+    if first_run:
+        log("first run: seeded balances, re-anchored nothing (changes act from the next run)")
+    if balance_skips:
+        log(f"balances NOT trusted (anchor left alone): {balance_skips}")
+
+    # Advance the cursor only as far as data we actually wrote (or, when nothing
+    # was new, to the fetch window's own start). Never to wall-clock today —
+    # that would silently skip the gap if a run returned nothing.
+    prev_cursor = str(meta.get("lastSyncDate") or "")[:10]
+    next_cursor = max(filter(None, [max_written_date, prev_cursor, start])) or today
 
     status = {
         "lastRun": now_iso(),
         "lastSuccess": now_iso(),
-        "lastSyncDate": today,
+        "lastSyncDate": next_cursor,
+        "oldestPending": min(pending_dates) if pending_dates else "",
+        "fetched": len(txns),
         "added": added,
-        "updated": updated,
-        "skipped": skipped,
-        "unmatchedAccounts": sorted(unmatched),
+        "skippedPending": skip_pending,
+        "skippedUnmatched": skip_unmatched,
+        "skippedCsvTwin": skip_twin,
+        "skippedAlreadySynced": skip_existing,
+        "unmatchedAccounts": sorted(set(unmatched)),
+        "ambiguousAccounts": ambiguous,
+        "untrustedBalances": balance_skips,
         "lastBalances": new_bal,
         "reanchored": reanchored,
         "error": "",
     }
     if not dry_run:
         meta_ref.set(status, merge=True)
-    log(f"sync done: +{added} added, {updated} updated, {skipped} skipped, "
-        f"{len(reanchored)} re-anchored, unmatched={sorted(unmatched)}")
+    log(f"sync done: fetched {len(txns)}, +{added} added, "
+        f"skipped(pending {skip_pending} / unmatched {skip_unmatched} / "
+        f"csv-twin {skip_twin} / already {skip_existing}), "
+        f"{len(reanchored)} re-anchored, cursor -> {next_cursor}, "
+        f"unmatched={sorted(set(unmatched))}")
     return status

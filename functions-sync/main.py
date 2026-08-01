@@ -1,6 +1,6 @@
 """Firebase 2nd-gen Python functions — codebase "sync" (marreddy-cashflow).
 
-monarch_sync      daily 07:30 America/New_York scheduled Monarch -> Firestore sync
+monarch_sync      daily 07:30 America/Chicago scheduled Monarch -> Firestore sync
 monarch_sync_now  manual trigger, guarded by the SYNC_TRIGGER_KEY shared secret
 """
 import asyncio
@@ -20,9 +20,10 @@ firebase_admin.initialize_app()
 MONARCH_SECRETS = ["MONARCH_EMAIL", "MONARCH_PASSWORD", "MONARCH_MFA_SECRET"]
 
 
-def _run(log=print) -> dict:
-    """One sync. Never raises — a failure is recorded on meta/monarchSync so the
-    schedule keeps its streak and the error is visible in the status doc."""
+def _run(log=print, reraise: bool = False) -> dict:
+    """One sync. Records any failure on meta/monarchSync, then (for the scheduled
+    caller) RE-RAISES so the invocation is marked failed and Cloud alerting fires.
+    Swallowing here once made a permanently-broken sync look like a green streak."""
     db = firestore.client()
     try:
         uid = auth.get_user_by_email(sync_core.OWNER_EMAIL).uid
@@ -40,18 +41,20 @@ def _run(log=print) -> dict:
             db.collection("meta").document("monarchSync").set(status, merge=True)
         except Exception:
             log("could not record error on meta/monarchSync")
+        if reraise:
+            raise
         return status
 
 
 @scheduler_fn.on_schedule(
     schedule="every day 07:30",
-    timezone=scheduler_fn.Timezone("America/New_York"),
+    timezone=scheduler_fn.Timezone("America/Chicago"),
     secrets=MONARCH_SECRETS,
     memory=options.MemoryOption.MB_512,
     timeout_sec=540,
 )
 def monarch_sync(event: scheduler_fn.ScheduledEvent) -> None:
-    _run()
+    _run(reraise=True)  # a failed sync must show as a FAILED invocation
 
 
 @https_fn.on_request(
@@ -62,7 +65,8 @@ def monarch_sync(event: scheduler_fn.ScheduledEvent) -> None:
 def monarch_sync_now(req: https_fn.Request) -> https_fn.Response:
     key = os.environ.get("SYNC_TRIGGER_KEY", "")
     given = req.headers.get("X-Sync-Key", "")
-    if not key or not hmac.compare_digest(given, key):
+    # compare bytes: compare_digest on str raises TypeError for a non-ASCII header
+    if not key or not hmac.compare_digest(given.encode("utf-8", "replace"), key.encode()):
         return https_fn.Response("forbidden", status=403)
     status = _run()
     return https_fn.Response(json.dumps(status, default=str, indent=2),

@@ -3,6 +3,7 @@
 Run:  python3 -m pytest functions-sync/test_sync.py
  or:  python3 -m unittest discover -s functions-sync
 """
+import datetime as dt
 import os
 import sys
 import unittest
@@ -120,14 +121,17 @@ class TxnMapping(unittest.TestCase):
 
 class CursorMath(unittest.TestCase):
     def test_first_run_uses_cutover(self):
-        self.assertEqual(sc.cursor_start(None), "2026-07-23")
-        self.assertEqual(sc.cursor_start(""), "2026-07-23")
+        self.assertEqual(sc.cursor_start(None), sc.CUTOVER)
+        self.assertEqual(sc.cursor_start(""), sc.CUTOVER)
 
     def test_overlap_window(self):
-        self.assertEqual(sc.cursor_start("2026-07-30"), "2026-07-25")
-        self.assertEqual(sc.cursor_start("2026-08-01"), "2026-07-27")
-        # month boundary
-        self.assertEqual(sc.cursor_start("2026-08-03"), "2026-07-29")
+        # Wide by design: writes are idempotent, but a narrow window PERMANENTLY
+        # loses a row that posts late.
+        back = dt.timedelta(days=sc.OVERLAP_DAYS)
+        self.assertGreaterEqual(sc.OVERLAP_DAYS, 30)
+        for d in ("2026-07-30", "2026-08-01", "2026-08-03"):  # incl. month boundary
+            expect = (dt.date.fromisoformat(d) - back).isoformat()
+            self.assertEqual(sc.cursor_start(d), expect)
 
 
 class BalanceSign(unittest.TestCase):
@@ -161,6 +165,83 @@ class AccountMatching(unittest.TestCase):
     def test_unmatched_is_none_never_guessed(self):
         self.assertIsNone(sc.match_account("Vanguard Brokerage", "9999", self.ACCOUNTS))
         self.assertIsNone(sc.match_account("", None, self.ACCOUNTS))
+
+
+class FetchWindow(unittest.TestCase):
+    """The library raises when only one of start/end is given — that made every
+    run a silent no-op while the schedule still reported success."""
+
+    def test_fetch_always_sends_both_bounds(self):
+        import asyncio
+
+        seen = {}
+
+        class FakeMM:
+            async def get_transactions(self, limit, offset, start_date, end_date=None):
+                seen["start"], seen["end"] = start_date, end_date
+                return {"allTransactions": {"totalCount": 0, "results": []}}
+
+        asyncio.run(sc.fetch_transactions(FakeMM(), "2026-07-18"))
+        self.assertEqual(seen["start"], "2026-07-18")
+        self.assertTrue(seen["end"], "end_date must be non-empty or monarchmoney raises")
+        self.assertGreater(seen["end"], sc.today_key(), "end bound must reach the future")
+
+    def test_rejects_single_bound_like_the_library_does(self):
+        import asyncio
+
+        class StrictMM:  # mirrors monarchmoney 0.1.15's guard
+            async def get_transactions(self, limit, offset, start_date, end_date=None):
+                if bool(start_date) != bool(end_date):
+                    raise Exception("You must specify both a startDate and endDate")
+                return {"allTransactions": {"totalCount": 0, "results": []}}
+
+        asyncio.run(sc.fetch_transactions(StrictMM(), "2026-07-18"))  # must not raise
+
+
+class AccountAmbiguity(unittest.TestCase):
+    APP = [{"id": "1", "name": "Chase Checking", "lastFourDigits": "7535", "type": "bank_account"}]
+
+    def test_two_monarch_accounts_claiming_one_app_account_are_refused(self):
+        monarch = [
+            {"id": "a", "displayName": "Chase Checking (...7535)", "mask": "7535"},
+            {"id": "b", "displayName": "Chase Checking Old (...7535)", "mask": "7535"},
+        ]
+        matched, unmatched, ambiguous = sc.resolve_matches(monarch, self.APP)
+        self.assertEqual(matched, {}, "an ambiguous claim must never be guessed")
+        self.assertEqual(len(ambiguous), 1)
+        self.assertEqual(len(unmatched), 2)
+
+    def test_closed_accounts_cannot_claim(self):
+        monarch = [
+            {"id": "a", "displayName": "Chase Checking (...7535)", "mask": "7535", "deactivatedAt": "2026-01-01"},
+            {"id": "b", "displayName": "Chase Checking (...7535)", "mask": "7535"},
+        ]
+        matched, _, ambiguous = sc.resolve_matches(monarch, self.APP)
+        self.assertEqual(ambiguous, [])
+        self.assertEqual(matched["b"][1]["id"], "1")
+
+
+class BalanceTrust(unittest.TestCase):
+    def test_manual_and_disabled_balances_are_not_trusted(self):
+        self.assertFalse(sc.balance_is_trustworthy({"isManual": True})[0])
+        self.assertFalse(sc.balance_is_trustworthy({"syncDisabled": True})[0])
+
+    def test_stale_balance_is_not_trusted(self):
+        now = dt.datetime(2026, 8, 1, 12, tzinfo=dt.timezone.utc)
+        fresh = {"displayLastUpdatedAt": "2026-08-01T06:00:00Z"}
+        stale = {"displayLastUpdatedAt": "2026-07-28T06:00:00Z"}
+        self.assertTrue(sc.balance_is_trustworthy(fresh, now)[0])
+        self.assertFalse(sc.balance_is_trustworthy(stale, now)[0])
+
+    def test_healthy_balance_is_trusted(self):
+        self.assertTrue(sc.balance_is_trustworthy({})[0])
+
+
+class Timezone(unittest.TestCase):
+    def test_matches_the_browser_importers_local_midnight(self):
+        # The CSV importer wrote `new Date(y, m-1, d)` on an America/Chicago
+        # machine; any other zone shifts the rendered calendar day.
+        self.assertEqual(str(sc.TZ), "America/Chicago")
 
 
 if __name__ == "__main__":
