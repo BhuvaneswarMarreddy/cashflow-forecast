@@ -52,6 +52,12 @@ export const MAX_COMBINATIONS = 5;
 export const REFUND_WINDOW_DAYS = 180;
 /** Posting-order inversion: the credit can land before the charge finishes settling. */
 export const POSTING_INVERSION_DAYS = 5;
+/**
+ * Unreachable by construction since FIN-REFUND-002: candidate selection now refuses
+ * a purchase on any account but the credited one, so `sameAccount` is always true
+ * here. Kept as defence in depth — if the filter is ever loosened, a cross-account
+ * match is still scored down rather than arriving at full confidence.
+ */
 export const DIFFERENT_ACCOUNT_PENALTY = 0.2;
 /** Two candidates this close are alternatives, not an answer (§4.4). */
 export const AMBIGUITY_BAND = 0.05;
@@ -382,6 +388,14 @@ export function generateRefundCandidates(
     for (let i = lowerBound(bucket, from); i < bucket.length; i++) {
       if (day(bucket[i].date) > to) break;
       if (bucket[i].id === credit.id) continue;
+      // Same card, always. A merchant refunds the account it charged, so a purchase
+      // on another card is not evidence — it is a coincidence of merchant and amount.
+      // A cross-account credit is not lost: it falls through to `unknown_card_credit`
+      // and stays visible in the review queue, unmatched rather than mis-matched.
+      // ponytail: this makes a legitimate refund-to-a-replacement-card unmatchable.
+      // Upgrade path is an explicit owner-confirmed account-succession link, not a
+      // looser default — the default must not guess across cards.
+      if (bucket[i].accountId !== credit.accountId) continue;
       // A purchase already fully covered by confirmed links is not available (§5.5).
       if (purchaseEconomics(bucket[i], links).netEconomicCostCents <= 0) continue;
       window.push(bucket[i]);
@@ -552,7 +566,10 @@ function refusals(rows: readonly Transaction[], credit: Transaction): boolean {
   if (rows.length < 2) return false;
   const earliest = rows.reduce((a, b) => (day(a.date) <= day(b.date) ? a : b));
   if (Math.abs(daysBetween(day(earliest.date), day(credit.date))) > REFUND_WINDOW_DAYS) return false;
-  if (new Set(rows.map((r) => r.accountId)).size > 2) return false;
+  // Every purchase in a combination must sit on the account being credited. The old
+  // rule allowed a combination to span two accounts, which let one card's refund be
+  // explained by another card's purchases.
+  if (rows.some((r) => r.accountId !== credit.accountId)) return false;
   return true;
 }
 
