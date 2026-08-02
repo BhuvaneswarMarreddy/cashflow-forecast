@@ -15,6 +15,10 @@ import { useAuth } from '@/context/AuthContext';
 import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import { buildFlowGraph, detectRecurring, projectNetWorth, day, FlowGraph } from '@/lib/flows';
+import {
+  MONEY_BACK_LANE_IDS, NODE_PADDING_PX, fitLabel, labelMaxChars, nodeDepths, sankeyHeightFor,
+} from '@/lib/flow-lanes';
+import { flowNetting } from '@/lib/flow-netting';
 import { FLOW_COLORS, FlowColorKey } from '@/lib/palette';
 import { formatMoneyCents } from '@/lib/money';
 import { CandidateStatus, ReviewCandidate, mergeCandidateRun } from '@/lib/candidates';
@@ -57,8 +61,16 @@ const KIND_CHIPS: Array<{ kind: FlowColorKey | null; label: string }> = [
   { kind: 'person', label: 'People' },
   { kind: 'category', label: 'Spending' },
   { kind: 'source', label: 'Income' },
+  // Its own chip because it is its own thing: money coming back is not money earned.
+  { kind: 'credit', label: 'Money back' },
   { kind: 'warning', label: '⚠ Gaps' },
 ];
+
+// The Sankey lives in a horizontally scrolling box with this minimum width; label
+// budgets are sized off the NARROWEST layout, so a wider screen only gives them room.
+const SANKEY_MIN_WIDTH = 900;
+const SANKEY_MARGIN = { top: 16, right: 230, bottom: 16, left: 16 };
+const SANKEY_NODE_WIDTH = 12;
 
 function periodFor(range: Range, todayISO: string, month: string): { start?: string; end?: string } {
   if (range === 'all') return {};
@@ -71,7 +83,7 @@ function periodFor(range: Range, todayISO: string, month: string): { start?: str
   return { start: `${range}-01-01`, end: `${range}-12-31` };
 }
 
-type NodePayload = { label?: string; kind?: FlowColorKey; value?: number };
+type NodePayload = { label?: string; kind?: FlowColorKey; value?: number; depth?: number };
 type ChartKind = 'sankey' | 'treemap' | 'waterfall';
 const CHART_KINDS: Array<{ key: ChartKind; label: string }> = [
   { key: 'sankey', label: 'Flow' },
@@ -155,6 +167,11 @@ export default function FlowPage() {
   const [hoverLabel, setHoverLabel] = useState<string | null>(null);
   const [pinLabel, setPinLabel] = useState<string | null>(null);
   const [focusKind, setFocusKind] = useState<FlowColorKey | null>(null);
+  // Declared here, above the graph memo that reads them. A confirmed refund NETS the
+  // category it reverses; `showGross` rebuilds the same graph with no links at all, so
+  // gross cash movement is always one click away and is never destroyed to show net.
+  const [links, setLinks] = useState<TransactionLink[]>([]);
+  const [showGross, setShowGross] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) router.push('/login');
@@ -220,9 +237,17 @@ export default function FlowPage() {
     return out;
   }, [minMonth, maxMonth]);
 
+  // The link-aware half of the lanes, resolved ONCE per (ledger, links) rather than per
+  // render — it runs matchTransfers() and the ten-kind ladder, neither of which belongs
+  // in a hover.
+  const netting = useMemo(
+    () => flowNetting(transactions, accounts, links, incomeContext),
+    [transactions, accounts, links, incomeContext]
+  );
   const graph: FlowGraph = useMemo(
-    () => buildFlowGraph(transactions, accounts, periodFor(range, todayISO, month)),
-    [transactions, accounts, range, todayISO, month]
+    () => buildFlowGraph(transactions, accounts, periodFor(range, todayISO, month),
+      showGross ? {} : { netting, income: incomeContext }),
+    [transactions, accounts, range, todayISO, month, showGross, netting, incomeContext]
   );
   const recurring = useMemo(
     () => detectRecurring(transactions, accounts, todayISO),
@@ -327,12 +352,42 @@ export default function FlowPage() {
 
   const anyFocus = hoverLabel !== null || effectivePin !== null || focusKind !== null;
 
+  /**
+   * Chart geometry, from the graph itself.
+   *
+   * `sankeyHeightFor` is the label-collision fix for the vertical case: recharts spaces a
+   * column by `nodePadding` on the way down and then SQUEEZES it back inside the height
+   * on the way up, so the moment a column needs more room than there is, labels start
+   * printing through each other. Give the busiest column the room it needs and they
+   * cannot. `maxDepth` is the horizontal half: it says which column draws its label
+   * leftwards, and how much gutter the rest have before the next column starts.
+   */
+  const { chartHeight, maxDepth } = useMemo(() => {
+    const depths = nodeDepths(graph.nodes, graph.links);
+    return {
+      chartHeight: sankeyHeightFor(graph.nodes, graph.links),
+      maxDepth: Math.max(0, ...depths.values()),
+    };
+  }, [graph]);
+
   // Colored block + always-visible label; hover traces, click pins.
   const renderNode = useCallback((props: { x: number; y: number; width: number; height: number; payload: NodePayload }) => {
     const { x, y, width, height, payload } = props;
     const kind = payload.kind ?? 'stub';
     const bright = isNodeBright(payload.label ?? '', kind);
-    const labelLeft = x > 560;
+    const depth = payload.depth;
+    const labelLeft = depth !== undefined && maxDepth > 0 ? depth >= maxDepth : x > 560;
+    const full = `${payload.label}${payload.value ? ` · ${money(Math.round(payload.value * 100))}` : ''}`;
+    // The label is drawn into the gutter beside the node, so a long one used to run
+    // straight through the next column's node AND its label. Cut it to what fits and
+    // keep the whole string in a <title> — nothing is lost, it is one hover away.
+    const shown = fitLabel(full, labelMaxChars({
+      depth: depth ?? 0,
+      maxDepth,
+      plotWidthPx: SANKEY_MIN_WIDTH - SANKEY_MARGIN.left - SANKEY_MARGIN.right,
+      rightMarginPx: SANKEY_MARGIN.right,
+      nodeWidthPx: SANKEY_NODE_WIDTH,
+    }));
     return (
       <g
         className="flow-node"
@@ -368,14 +423,20 @@ export default function FlowPage() {
           y={y + height / 2}
           textAnchor={labelLeft ? 'end' : 'start'}
           dominantBaseline="middle"
-          style={{ fontSize: 11 }}
+          // paintOrder halo: on a dense chart two labels can still come close, and a
+          // stroked outline keeps both readable instead of one erasing the other.
+          style={{ fontSize: 11, paintOrder: 'stroke' }}
+          stroke="var(--background-secondary)"
+          strokeWidth={3}
+          strokeLinejoin="round"
           className="fill-[var(--foreground-secondary)]"
         >
-          {payload.label}{payload.value ? ` · ${money(Math.round(payload.value * 100))}` : ''}
+          <title>{full}</title>
+          {shown}
         </text>
       </g>
     );
-  }, [isNodeBright, effectivePin]);
+  }, [isNodeBright, effectivePin, maxDepth]);
 
   // Ribbons colored by their source node; connected ones glow, the rest recede.
   const renderLink = useCallback((props: {
@@ -456,18 +517,24 @@ export default function FlowPage() {
     </div>
   );
 
-  // Plain-language headline for the selected period — computed from the same
-  // links the chart draws, so the story and the diagram can never disagree.
-  // A refund is NOT income: it nets against spending (owner's accounting rule).
+  /**
+   * Plain-language headline for the selected period — computed from the same links the
+   * chart draws, so the story and the diagram can never disagree.
+   *
+   * "Money came in" is EARNED money only. A refund is spending coming back, cashback is
+   * a rebate and a card charge is spending the issuer fronted; none of them is income,
+   * so none of them is in this figure. And an UNCONFIRMED refund is not netted out of
+   * spending either — you cannot net a match nobody has proved. It gets its own number.
+   */
   const story = (() => {
     const sum = (pred: (l: { source: string; target: string; cents: number }) => boolean) =>
       graph.links.filter(pred).reduce((s, l) => s + l.cents, 0);
-    const refunds = sum((l) => l.source === 'refunds');
-    const moneyIn = sum((l) =>
-      l.source.startsWith('inc:') || l.source === 'rewards' || l.source.startsWith('person-in:'));
-    const spending = sum((l) => l.target.startsWith('cat:')) - refunds;
+    const moneyIn = sum((l) => l.source.startsWith('inc:') || l.source.startsWith('person-in:'));
+    const moneyBack = sum((l) => MONEY_BACK_LANE_IDS.includes(l.source));
+    // `cat:` links already carry the CONFIRMED netting the graph applied.
+    const spending = sum((l) => l.target.startsWith('cat:'));
     const toPeople = sum((l) => l.target.startsWith('person-out:'));
-    return { moneyIn, spending, toPeople, refunds };
+    return { moneyIn, spending, toPeople, moneyBack, netted: graph.nettedRefundCents };
   })();
 
   // Sink buckets (nodes money ends at) — feed the treemap and the waterfall.
@@ -551,6 +618,25 @@ export default function FlowPage() {
     </div>
   );
 
+  /**
+   * GROSS IS NEVER DESTROYED TO SHOW NET. The chart nets what the owner has CONFIRMED;
+   * this puts the untouched cash movement one click away. It only appears once there is
+   * something to net — otherwise it is a switch between two identical pictures.
+   */
+  const hasConfirmedRefunds = links.some(
+    (l) => l.status === 'confirmed' && REFUND_SOURCE_TYPES.includes(l.linkType)
+  );
+  const grossToggle = hasConfirmedRefunds ? (
+    <button
+      onClick={() => setShowGross((g) => !g)}
+      aria-pressed={showGross}
+      className="px-2.5 py-1 rounded-full text-xs border border-[var(--border-color)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]"
+      title="Confirmed refunds reduce the category they reverse. Switch to gross to see every dollar exactly as it moved."
+    >
+      {showGross ? 'Showing gross' : 'Show gross'}
+    </button>
+  ) : null;
+
   const chartToggle = (
     <div role="group" aria-label="Chart type" className="flex gap-1 rounded-lg bg-[var(--background-tertiary)] p-1">
       {CHART_KINDS.map((c) => (
@@ -600,9 +686,9 @@ export default function FlowPage() {
           data={sankeyData}
           node={renderNode}
           link={renderLink}
-          nodePadding={18}
-          nodeWidth={12}
-          margin={{ top: 16, right: 230, bottom: 16, left: 16 }}
+          nodePadding={NODE_PADDING_PX}
+          nodeWidth={SANKEY_NODE_WIDTH}
+          margin={SANKEY_MARGIN}
         >
           <Tooltip content={<SankeyTooltip />} />
         </Sankey>
@@ -624,7 +710,6 @@ export default function FlowPage() {
   const [tab, setTab] = useState<string>(() =>
     typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('tab') || 'flow' : 'flow'
   );
-  const [links, setLinks] = useState<TransactionLink[]>([]);
   const [storedCandidates, setStoredCandidates] = useState<CandidateDoc[]>([]);
   const [recoveryLoaded, setRecoveryLoaded] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -1014,10 +1099,21 @@ export default function FlowPage() {
         </header>
 
         {/* The story in plain language — same links as the chart, to the cent */}
-        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
           {[
-            { label: 'Money came in', cents: story.moneyIn, sub: 'paychecks, rewards & money received — refunds not counted as income' },
-            { label: 'Spent on living', cents: story.spending, sub: `all categories, net of ${money(story.refunds)} refunded` },
+            { label: 'Money came in', cents: story.moneyIn, sub: 'paychecks & money received — refunds, rewards and card charges are not income' },
+            {
+              label: 'Spent on living',
+              cents: story.spending,
+              sub: story.netted > 0
+                ? `all categories, net of ${money(story.netted)} you confirmed as refunded`
+                : 'all categories, gross — nothing netted until you confirm a refund',
+            },
+            {
+              label: 'Money back (not income)',
+              cents: story.moneyBack,
+              sub: 'refunds, cashback and card credits waiting to be matched to a purchase',
+            },
             { label: 'Sent to people & family', cents: story.toPeople, sub: 'Zelle + Remitly to India' },
             { label: gapTotal > 0 ? '⚠ Not yet in the data' : 'Data complete', cents: gapTotal, sub: gapTotal > 0 ? 'export gaps — shown in the chart, being re-exported' : 'every dollar accounted for' },
           ].map((t) => (
@@ -1076,6 +1172,7 @@ export default function FlowPage() {
               <div className="flex items-center gap-2 flex-wrap">
                 {chartToggle}
                 {chart === 'sankey' && kindChips}
+                {chart === 'sankey' && grossToggle}
               </div>
               <button
                 onClick={() => setMaximized(true)}
@@ -1095,6 +1192,13 @@ export default function FlowPage() {
                   <p>Read left → right: money comes <strong>in</strong> on the left, flows through your accounts, and goes <strong>out</strong> on the right. Ribbon thickness = dollars.</p>
                   <p>Color = kind (the chips above are the key). Tap any box to trace that money end-to-end and see the transactions behind it.</p>
                   <p>Gray = money that stayed in your accounts, or moved between your own accounts.</p>
+                  <p>
+                    Orange = money coming <strong>back</strong> — refunds, cashback, card credits. Real money, but not
+                    income, so it never stands beside your paychecks. Once you confirm what a refund reverses, it stops
+                    being a lane of its own and reduces the category it came from instead; <em>Show gross</em> puts every
+                    dollar back exactly as it moved.
+                  </p>
+                  <p>“Borrowed on your cards” is card <strong>spending</strong> you have not paid off yet — the issuer fronted it, so it enters on the left.</p>
                 </div>
               </details>
             )}
@@ -1103,7 +1207,9 @@ export default function FlowPage() {
               role="img"
               aria-label={`${CHART_KINDS.find((c) => c.key === chart)?.label ?? 'Flow'} chart tracing ${money(totalSourcesCents)} across ${graph.nodes.length} sources, accounts and destinations. The full breakdown is in the "View the flow as a table" section below.`}
             >
-              <div style={{ minWidth: chart === 'sankey' ? 900 : 0 }}>{chartView(560)}</div>
+              <div style={{ minWidth: chart === 'sankey' ? SANKEY_MIN_WIDTH : 0 }}>
+                {chartView(chart === 'sankey' ? chartHeight : 560)}
+              </div>
             </div>
             <p className="text-xs text-[var(--foreground-muted)] mt-2">
               {chart === 'sankey' && 'Click or focus an income source (left side) and press Enter to follow that money to the end · hover for a quick peek · chips filter by kind · Esc clears'}
@@ -1230,11 +1336,16 @@ export default function FlowPage() {
                 </button>
               </div>
             </div>
-            <div className="mb-2 flex items-center gap-2 flex-wrap">{chartToggle}{chart === 'sankey' && kindChips}</div>
+            <div className="mb-2 flex items-center gap-2 flex-wrap">{chartToggle}{chart === 'sankey' && kindChips}{chart === 'sankey' && grossToggle}</div>
             <div className="flex-1 min-h-0 overflow-auto rounded-xl border border-[var(--border-color)] bg-[var(--background-secondary)] p-2">
               {/* minHeight keeps the chart usable on short/landscape screens — it scrolls in
                   the overflow-auto parent instead of being crushed to a few pixels. */}
-              <div style={{ minWidth: chart === 'sankey' ? 900 : 0, minHeight: 420 }} className="h-full">{chartView('100%')}</div>
+              {/* minHeight is the same collision guard as the inline chart: below it a
+                  busy column gets squeezed and its labels overlap. */}
+              <div
+                style={{ minWidth: chart === 'sankey' ? SANKEY_MIN_WIDTH : 0, minHeight: chart === 'sankey' ? chartHeight : 420 }}
+                className="h-full"
+              >{chartView('100%')}</div>
             </div>
           </div>
         )}

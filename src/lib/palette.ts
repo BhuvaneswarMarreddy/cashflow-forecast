@@ -7,14 +7,19 @@
 export const CAT_COLORS = ['#b08d3f', '#0d9488', '#b45309', '#7c3aed', '#4d7c0f', '#0369a1', '#be185d', '#0891b2'];
 
 export type FlowColorKey =
-  | 'source' | 'bank' | 'card' | 'loan' | 'person' | 'category' | 'hub' | 'stub' | 'warning';
+  | 'source' | 'credit' | 'bank' | 'card' | 'loan' | 'person' | 'category' | 'hub' | 'stub' | 'warning';
 
 // One hue per node KIND, assigned fixed — never cycled. Gold is the brand hero
 // (banks); every other identity hue is kept clearly off-gold so no two kinds
 // collide. hub/stub are a deliberate neutral (de-emphasis, not an identity slot);
 // 'warning' is the reserved status red — both always carry a visible text label.
+// 'credit' is money coming BACK (refunds, cashback, unexplained card credits). It is
+// deliberately as far from the income teal as the set allows — those two must never be
+// mistaken for each other — and reuses CAT_COLORS' already-validated burnt orange rather
+// than introducing an unvalidated hue.
 export const FLOW_COLORS: Record<FlowColorKey, string> = {
   source: '#0d9488',
+  credit: '#b45309',
   bank: '#b08d3f',
   card: '#be185d',
   loan: '#7c3aed',
