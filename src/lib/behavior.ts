@@ -9,7 +9,7 @@
  * detectRecurring, isRefund/isReward — nothing here re-derives what they already know.
  */
 import { PaymentAccount, Transaction, ForecastEvent, displayCategory } from '@/types';
-import { classifyTransaction, isRefund, isReward } from './classify';
+import { classifyTransaction, interpretTransaction, isRefund, isReward, IncomeContext } from './classify';
 import { matchTransfers } from './transfers';
 import { detectRecurring, normalizeMerchant, median, daysBetween, toCents, day, RecurringItem } from './flows';
 import { addDays, addMonths, format, parseISO } from 'date-fns';
@@ -21,7 +21,9 @@ export type BehaviorClass =
 export type IncomeCadence = 'weekly' | 'biweekly' | 'semimonthly' | 'monthly';
 
 export interface Assumptions {
-  /** Single paycheck line derived from sourceCategory==='Paychecks' rows; null when <3 paychecks. */
+  /** Single paycheck line derived from rows that matched an APPROVED income source
+   *  (FIN-INCOME-001); null when fewer than 3 such rows exist — which includes the
+   *  case of no approved sources at all, so unknown credits can never project. */
   income: {
     label: string;
     medianAmount: number; // dollars
@@ -181,15 +183,19 @@ export function classifyBehaviors(
 // buildAssumptions — the contract the whole feature rides on.
 // ------------------------------------------------------------------
 export function buildAssumptions(
-  transactions: Transaction[], accounts: PaymentAccount[], overrides: AssumptionOverrides = {}
+  transactions: Transaction[], accounts: PaymentAccount[], overrides: AssumptionOverrides = {},
+  incomeCtx?: IncomeContext
 ): Assumptions {
   const todayISO = new Date().toISOString();
   const ctx = buildContext(transactions, accounts, todayISO);
 
-  // Income: single paycheck line from the rows the source itself tagged as Paychecks.
+  // Income: a single paycheck line from the rows an APPROVED income source explains.
+  // Was `t.sourceCategory === 'Paychecks'` — an importer's label, which meant a bank
+  // feed that sends no category could never produce a paycheck line while a mislabelled
+  // credit could. FIN-INCOME-001 makes the owner's approved sources the authority.
   let income: Assumptions['income'] = null;
   const paychecks = transactions.filter(
-    (t) => ctx.classes.get(t.id) === 'income' && t.sourceCategory === 'Paychecks'
+    (t) => interpretTransaction(t, accounts, incomeCtx).financialMeaning === 'earned_income'
   );
   const payDates = [...new Set(paychecks.map((t) => day(t.date)))].sort();
   if (payDates.length >= 3) {

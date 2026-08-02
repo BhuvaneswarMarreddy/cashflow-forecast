@@ -10,6 +10,7 @@ rules_version = '2';
  * - users/{userId}/income/{incomeId} - Income sources
  * - users/{userId}/transactions/{transactionId} - Transactions
  * - users/{userId}/rules/{ruleId} - Category mapping rules
+ * - users/{userId}/reviews/{transactionId} - Inflow review state (FIN-INCOME-001)
  * 
  * Security Principles:
  * 1. Users can only access their own data
@@ -159,6 +160,32 @@ service cloud.firestore {
         allow update: if isOwner(userId);
 
         // Users can delete their rules
+        allow delete: if isOwner(userId);
+      }
+
+      // =========================================
+      // Inflow Reviews Subcollection (FIN-INCOME-001)
+      // =========================================
+      // "this credit is a gift, not my salary" — the owner's decision about one
+      // inflow. Doc id IS the transaction id, so there is at most one per row.
+      // Review state lives HERE and not on the transaction, so confirming a
+      // classification never rewrites provider data. See src/types/index.ts
+      // (InflowReview) and src/lib/classify.ts (selectInflowReviewQueue).
+
+      match /reviews/{transactionId} {
+        allow read: if isOwner(userId);
+
+        // Shape only. The allowed `meaning` values are FINANCIAL_MEANINGS in
+        // application code and are deliberately NOT copied here — a second list of
+        // meaning strings is a second source of truth for what counts as income,
+        // which is the exact defect this task removes. The client validates against
+        // the enum with isFinancialMeaning() before writing.
+        allow write: if isOwner(userId) &&
+          request.resource.data.state in
+            ['unreviewed', 'suggested', 'confirmed', 'dismissed', 'needs_attention'] &&
+          request.resource.data.transactionId == transactionId &&
+          request.resource.data.source in ['user', 'system'];
+
         allow delete: if isOwner(userId);
       }
 

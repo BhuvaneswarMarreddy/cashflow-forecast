@@ -8,20 +8,25 @@
 
 import * as XLSX from 'xlsx';
 import { withDerivedBalances } from '@/lib/forecast';
-import { PaymentAccount, Transaction, IncomeSource, SavingsGoal, DebtPayoffPlan, UserProfile } from '@/types';
+import { PaymentAccount, Transaction, IncomeSource, InflowReview, SavingsGoal, DebtPayoffPlan, UserProfile } from '@/types';
 import { currentOf } from '@/lib/accounts';
-import { interpretTransaction, isPositive, sumIncomeCents, sumExpenseCents } from '@/lib/classify';
+import { interpretTransaction, isPositive, sumIncomeCents, sumExpenseCents, IncomeContext } from '@/lib/classify';
 
 export interface ExportData {
   profile: Pick<UserProfile, 'name' | 'email' | 'monthlyBudget' | 'currency' | 'settings'>;
   accounts: PaymentAccount[];
   incomeSources: IncomeSource[];
+  /** `users/{uid}/reviews` — the owner's confirmed inflow classifications. */
+  inflowReviews?: Record<string, InflowReview>;
   transactions: Transaction[];
   savingsGoals?: SavingsGoal[];
   debtPlan?: DebtPayoffPlan;
 }
 
 export function buildExportWorkbook(data: ExportData): XLSX.WorkBook {
+  // The one earned-income context: approved sources + confirmed reviews. Built here
+  // from what the caller already passes, so the export cannot drift from the app.
+  const income: IncomeContext = { sources: data.incomeSources, reviews: data.inflowReviews };
   // Export the balances the app shows (derived from transactions), not the raw
   // opening figures — otherwise auto-created accounts export as $0.
   const accounts = withDerivedBalances(data.accounts, data.transactions);
@@ -48,8 +53,9 @@ export function buildExportWorkbook(data: ExportData): XLSX.WorkBook {
     ['Total Loan Balance', accounts.filter(a => a.type === 'personal_loan').reduce((sum, a) => sum + currentOf(a), 0)],
     [''],
     ['Income Summary'],
-    ['Total Income Sources', data.incomeSources.length],
-    ['Monthly Income Estimate', data.incomeSources.reduce((sum, i) => sum + getMonthlyAmount(i.amount, i.frequency), 0)],
+    ['Total Income Sources', data.incomeSources.filter(i => i.isActive).length],
+    // ACTIVE sources only — a paused source is kept so it can be resumed, not counted.
+    ['Monthly Income Estimate', data.incomeSources.filter(i => i.isActive).reduce((sum, i) => sum + getMonthlyAmount(i.amount, i.frequency), 0)],
     [''],
     ['Transaction Summary'],
     ['Total Transactions', data.transactions.length],
@@ -57,7 +63,7 @@ export function buildExportWorkbook(data: ExportData): XLSX.WorkBook {
     // a transfer, so it is neither income nor spending here — same as every screen.
     // PENDING: EXCLUDED from these totals (they are the posted accounting truth) but
     // still exported row-by-row below with a Pending column, so nothing is hidden.
-    ['Total Income', sumIncomeCents(data.transactions, accounts) / 100],
+    ['Total Income', sumIncomeCents(data.transactions, accounts, income) / 100],
     ['Total Expenses', sumExpenseCents(data.transactions, accounts) / 100],
     ['Pending (not in the totals above)', data.transactions.filter(t => t.pending).length],
   ];

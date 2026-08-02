@@ -137,22 +137,32 @@ observability must not quietly paper over them.
 
 ### Not covered: earned income
 
-The Accounts page also renders **Monthly Income** and **Monthly Budget**. These are
-outside the provenance summary, deliberately, and the reason is recorded in
-`limitations` rather than left implicit:
+The Accounts page also renders **Monthly Income** and **Monthly Budget**. They still have
+no per-metric provenance row, and the reason is recorded in `limitations` rather than
+left implicit. What has changed is *the rule they follow*.
 
-`monthlyAverages()` (`src/lib/forecast.ts:36`) prefers rows whose `sourceCategory` is the
-literal string `'Paychecks'` — or whose text matches `/payroll|paycheck/i` — and **falls
-back to summing every income-classified row** over the trailing 6 months. So today a
-refund, a shared-expense reimbursement, a Zelle transfer from a friend or a one-off
-deposit can all land in "Monthly Income".
+**Before FIN-INCOME-001** (recorded here for anyone reading an older trace):
+`monthlyAverages()` preferred rows whose `sourceCategory` was the literal string
+`'Paychecks'` — or whose text matched `/payroll|paycheck/i` — and **fell back to summing
+every income-classified row** over the trailing 6 months. A refund, a shared-expense
+reimbursement, a Zelle transfer from a friend or a one-off deposit could all land in
+"Monthly Income".
 
-That is what the code does now, and OBS-001 reports it truthfully. It is also precisely
-what **FIN-INCOME-001** replaces (configurable approved income sources, `unknown_inflow`
-as the default for unmatched positive transactions, reimbursements and repayments held
-separate from earned income). Earned-income provenance should be written *after* that
-model lands, against the new taxonomy — writing it now would document a rule that is
-about to be deleted.
+**Now:** `monthlyAverages()` (`src/lib/forecast.ts`) counts a row only when
+`interpretTransaction()` resolves its `financialMeaning` to `earned_income` — meaning it
+matched an **active approved source** in `users/{uid}/income`, or the owner confirmed it
+in `users/{uid}/reviews`. There is no provider-category branch left. Every other credit
+is an `unknown_inflow`: it moves the account balance (it is real money) and is excluded
+from every income total, forecast income event and recurring-income estimate. With no
+approved source configured, Monthly Income is **0** — the honest answer, with the
+unexplained credits listed by `selectInflowReviewQueue()` rather than silently counted.
+
+Earned-income provenance rows can now be written against that taxonomy
+(`FINANCIAL_MEANINGS`, `src/types/index.ts`); the work simply has not been done yet.
+
+`selectInflowReviewQueue()` emits `InflowReview.QueueBuilt` at `debug` — queue size,
+scanned count, approved-source count and per-reason counts. No amount, title or
+transaction id, matching the rule below.
 
 ## Sync metadata
 

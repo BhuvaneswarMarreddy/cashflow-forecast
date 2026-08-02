@@ -36,7 +36,7 @@ const TIME_PERIODS = [
 export default function ForecastPage() {
   const { isAuthenticated, isLoading: authLoading, user } = useAuth();
   const { transactions } = useTransactions();
-  const { profile, isLoading: profileLoading, isOnboarded, updateProfile } = useUserProfile();
+  const { profile, isLoading: profileLoading, isOnboarded, updateProfile, incomeContext } = useUserProfile();
   const router = useRouter();
   const [forecastDays, setForecastDays] = useState(90);
   const [selectedAccountId, setSelectedAccountId] = useState<string>('all'); // 'all' for combined view
@@ -124,8 +124,8 @@ export default function ForecastPage() {
 
   // What the forecast believes — regenerated whenever the user corrects an assumption.
   const assumptions = useMemo(
-    () => buildAssumptions(transactions, derivedAccounts, overrides),
-    [transactions, derivedAccounts, overrides]
+    () => buildAssumptions(transactions, derivedAccounts, overrides, incomeContext),
+    [transactions, derivedAccounts, overrides, incomeContext]
   );
 
   // Generate all account forecasts
@@ -160,9 +160,10 @@ export default function ForecastPage() {
       transactions,
       threshold,
       forecastDays,
-      overrides
+      overrides,
+      incomeContext
     );
-  }, [profile, derivedAccounts, transactions, forecastDays, overrides]);
+  }, [profile, derivedAccounts, transactions, forecastDays, overrides, incomeContext]);
 
   const handleOverridesChange = (o: AssumptionOverrides) => {
     setOverrides(o);

@@ -4,7 +4,19 @@
  * permutation, so do not reorder without a failing test.
  */
 
-import { PaymentAccount, PaymentMethod, Transaction, TransactionType } from '@/types';
+import {
+  FinancialMeaning,
+  FINANCIAL_MEANINGS,
+  IncomeSource,
+  InflowReview,
+  InflowReviewState,
+  PaymentAccount,
+  PaymentMethod,
+  Transaction,
+  TransactionType,
+} from '@/types';
+import { emit } from '@/lib/obs/events';
+import { newTraceId } from '@/lib/obs/trace';
 
 // A row only needs these fields to be classified, so partial/in-flight rows
 // (e.g. a CSV preview row that has no id yet) can use the same code path.
@@ -155,6 +167,130 @@ export function isPositive(t: Classifiable & { amount?: number }, accounts?: Pay
 }
 
 // ============================================================================
+// FIN-INCOME-001 — approved income sources and the unknown-inflow default
+//
+// THE PRODUCT RULE: money entering an account is EARNED INCOME only when it matches
+// an active approved source, or the owner explicitly confirmed it. Every other
+// positive row is an `unknown_inflow` — genuine cash that raises the balance and
+// counts for nothing in income analytics, forecasts or recurring estimates.
+//
+// A positive row must NEVER become income because it is large, recurring, called
+// "deposit", arrived by Zelle, came from the same person twice, landed near payday,
+// resembles a paycheck, or was tagged "Paychecks" by an importer. Provider
+// categories SUGGEST; `users/{uid}/income` is AUTHORITATIVE.
+// ============================================================================
+
+/** The one predicate that answers "does this add to income totals". */
+export const countsAsEarnedIncome = (m: FinancialMeaning): boolean => m === 'earned_income';
+
+const COST_MEANINGS: readonly FinancialMeaning[] = [
+  'personal_expense', 'shared_expense', 'reimbursable_expense', 'business_expense',
+  'subscription', 'recurring_bill', 'one_time_expense',
+];
+
+/**
+ * The one predicate that answers "does this reduce net worth as personal cost".
+ * 1 = a cost, -1 = a cost coming back (a refund nets against spending),
+ * 0 = money you already had, or money arriving. FIN-REVIEW-002 §3.1.3.
+ */
+export const personalCostSign = (m: FinancialMeaning): 1 | 0 | -1 =>
+  COST_MEANINGS.includes(m) ? 1 : m === 'refund' ? -1 : 0;
+
+/** What the app knows about the owner's income when it reads a row. */
+export interface IncomeContext {
+  /** `users/{uid}/income` — the approved sources. */
+  sources?: IncomeSource[];
+  /** `users/{uid}/reviews`, keyed by transaction id. */
+  reviews?: Record<string, InflowReview>;
+}
+
+/** Reason ids, sharing FIN-REVIEW-002 §2.4's vocabulary so there is one set. */
+export type InflowReviewReason =
+  | 'inflow_unknown_credit'
+  | 'inflow_unmatched_deposit'
+  | 'inflow_income_source_conflict';
+
+/** Lowercase, punctuation collapsed — "LARKSPUR STUDIO*PAYROLL" -> "larkspur studio payroll". */
+const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+// A 1-2 character alias matches nearly every statement line, which would turn one
+// sloppy source into "everything is my salary". Validation, not tidiness.
+const MIN_ALIAS = 3;
+
+const aliasesOf = (s: IncomeSource): string[] =>
+  [s.name, ...(s.matchAliases ?? [])].map(norm).filter((a) => a.length >= MIN_ALIAS);
+
+/** Active AND approved. `userApproved` absent = approved: the owner typed it in. */
+export const activeApprovedSources = (sources?: IncomeSource[]): IncomeSource[] =>
+  (sources ?? []).filter((s) => s.isActive && s.userApproved !== false);
+
+type Inflow = Classifiable &
+  Partial<Pick<Transaction, 'id' | 'amount' | 'merchant' | 'description' | 'sourceCategory'>>;
+
+/**
+ * Which approved sources explain this credit. Deterministic; all rules required:
+ *
+ *  1. NAME — the row's OWN text (title / merchant / description) contains one of the
+ *     source's aliases. `sourceCategory` is deliberately NOT in the haystack: an
+ *     importer's "Paychecks" label is a suggestion and must never decide.
+ *  2. ACCOUNT — when the source names deposit accounts, the row must sit on one.
+ *  3. AMOUNT — SUPPORTING ONLY. A configured tolerance can reject a name match; no
+ *     amount ever creates one. Size, cadence, sender and payday proximity are not
+ *     evidence at all, at any strength.
+ *
+ * Returning a LIST rather than a best guess is the point: two matches is a question
+ * for the owner, not a coin toss (see resolveInflow).
+ */
+export function matchApprovedSources(t: Inflow, sources?: IncomeSource[]): IncomeSource[] {
+  const hay = norm(`${t.title} ${t.merchant ?? ''} ${t.description ?? ''}`);
+  const cents = t.amount === undefined ? undefined : Math.round(t.amount * 100);
+  return activeApprovedSources(sources).filter((s) => {
+    if (!aliasesOf(s).some((a) => hay.includes(a))) return false;
+    if (s.depositAccountIds?.length && !(t.accountId && s.depositAccountIds.includes(t.accountId))) return false;
+    if (s.amountToleranceCents !== undefined && cents !== undefined) {
+      if (Math.abs(cents - Math.round(s.amount * 100)) > s.amountToleranceCents) return false;
+    }
+    return true;
+  });
+}
+
+export interface InflowResolution {
+  meaning: FinancialMeaning;
+  reasons: InflowReviewReason[];
+  /** The sources that matched: one when resolved, several when ambiguous. */
+  sourceIds: string[];
+  reason: string;
+  confidence: number;
+}
+
+/** Resolves FIN-LEDGER-001's `income_candidate` hand-off into a settled meaning. */
+export function resolveInflow(t: Inflow, income?: IncomeContext): InflowResolution {
+  const matched = matchApprovedSources(t, income?.sources);
+  if (matched.length === 1) {
+    return {
+      meaning: 'earned_income', reasons: [], sourceIds: [matched[0].id], confidence: 0.9,
+      reason: `matches your approved income source "${matched[0].name}"`,
+    };
+  }
+  if (matched.length > 1) {
+    return {
+      meaning: 'unknown_inflow',
+      reasons: ['inflow_income_source_conflict'],
+      sourceIds: matched.map((s) => s.id),
+      confidence: 0.2,
+      reason: `matches ${matched.length} approved income sources — yours to decide, not ours to guess`,
+    };
+  }
+  return {
+    meaning: 'unknown_inflow',
+    reasons: [DEPOSIT.test(t.title.toLowerCase()) ? 'inflow_unmatched_deposit' : 'inflow_unknown_credit'],
+    sourceIds: [],
+    confidence: 0.3,
+    reason: 'no approved income source explains this credit — real money, not counted as income',
+  };
+}
+
+// ============================================================================
 // The one shared interpretation (FIN-LEDGER-001 §E)
 //
 // Every surface that makes a financial claim reads THIS, never raw `t.type`.
@@ -189,6 +325,14 @@ export interface TransactionInterpretation {
   /** Which way the money moved for the account the row sits on. */
   direction: 'inflow' | 'outflow';
   meaning: LedgerMeaning;
+  /**
+   * FIN-INCOME-001's shared meaning — the settled answer `meaning` leaves open.
+   * `income_candidate` resolves here into `earned_income` or `unknown_inflow`.
+   * This, not `meaning`, is what FIN-REVIEW-002 and FIN-SETTLEMENT-003 read.
+   */
+  financialMeaning: FinancialMeaning;
+  /** The approved source that explains an earned-income row, when one does. */
+  incomeSourceId?: string;
   income: Treatment;
   expense: Treatment;
   transfer: 'none' | 'internal_leg' | 'card_settlement';
@@ -204,8 +348,9 @@ export interface TransactionInterpretation {
 }
 
 export function interpretTransaction(
-  t: Classifiable & Partial<Pick<Transaction, 'amount' | 'merchant' | 'sourceCategory'>>,
-  accounts?: PaymentAccount[]
+  t: Inflow,
+  accounts?: PaymentAccount[],
+  income?: IncomeContext
 ): TransactionInterpretation {
   const type = classifyTransaction(t, accounts);
   const title = t.title.toLowerCase();
@@ -254,19 +399,55 @@ export function interpretTransaction(
     reason = 'no transfer, card-payment or income signal — treated as spending';
   }
 
+  // --- FIN-INCOME-001: settle the question the ladder above left open --------
+  // A transfer is provider-sourced and is NEVER re-derived (see classifyTransaction),
+  // so a review record cannot turn one into income. Everything else the owner may
+  // decide for themselves — that is what "or the user explicitly confirms it" means,
+  // and it is why review state lives in its own document rather than in `category`.
+  const review = t.id ? income?.reviews?.[t.id] : undefined;
+  const confirmed =
+    type !== 'transfer' && review?.state === 'confirmed' && review.meaning ? review.meaning : undefined;
+
+  let financialMeaning: FinancialMeaning;
+  let incomeSourceId: string | undefined;
+  if (confirmed) {
+    financialMeaning = confirmed;
+    incomeSourceId = review?.incomeSourceId;
+    confidence = 1;
+    reason = 'you confirmed this classification';
+  } else if (meaning === 'income_candidate') {
+    const r = resolveInflow(t, income);
+    financialMeaning = r.meaning;
+    incomeSourceId = r.sourceIds.length === 1 ? r.sourceIds[0] : undefined;
+    confidence = r.confidence;
+    reason = r.reason;
+  } else {
+    financialMeaning =
+      meaning === 'card_payment' ? 'card_payment'
+      : meaning === 'internal_transfer' ? 'internal_transfer'
+      : meaning === 'refund' ? 'refund'
+      : meaning === 'reward' ? 'other_non_income_credit'
+      : 'personal_expense';
+  }
+
   // A hold is not settled history. Excluding it here is the ONE place that
   // decision lives; a consumer that forgets to ask still gets 'excluded'.
   const held = pending === 'pending';
   if (held) reason += '; pending hold, excluded from posted totals';
 
-  const income: Treatment = !held && type === 'income' ? 'counted' : 'excluded';
+  // The ONE earned-income gate. `type === 'income'` alone used to be enough, which is
+  // how refunds, reimbursements and one-off deposits became salary.
+  const incomeTreatment: Treatment =
+    !held && type === 'income' && countsAsEarnedIncome(financialMeaning) ? 'counted' : 'excluded';
   const expense: Treatment = !held && type === 'expense' ? 'counted' : 'excluded';
 
   return {
     type,
     direction: inflow ? 'inflow' : 'outflow',
     meaning,
-    income,
+    financialMeaning,
+    incomeSourceId,
+    income: incomeTreatment,
     expense,
     transfer: type !== 'transfer' ? 'none' : settlement ? 'card_settlement' : 'internal_leg',
     pending,
@@ -284,23 +465,114 @@ export const isPosted = (t: Pick<Transaction, 'pending'>) => t.pending !== true;
 export const postedOnly = <T extends Pick<Transaction, 'pending'>>(ts: T[]): T[] =>
   ts.filter(isPosted);
 
-type Summable = Classifiable & Pick<Transaction, 'amount'> &
-  Partial<Pick<Transaction, 'merchant' | 'sourceCategory'>>;
+type Summable = Inflow & Pick<Transaction, 'amount'>;
 
 const sumBy = (
   ts: Summable[],
   accounts: PaymentAccount[] | undefined,
-  key: 'income' | 'expense'
+  key: 'income' | 'expense',
+  income?: IncomeContext
 ) =>
   ts.reduce(
-    (s, t) => s + (interpretTransaction(t, accounts)[key] === 'counted' ? Math.round(t.amount * 100) : 0),
+    (s, t) => s + (interpretTransaction(t, accounts, income)[key] === 'counted' ? Math.round(t.amount * 100) : 0),
     0
   );
 
-/** Total money in, INTEGER CENTS, posted rows only. The one income total. */
-export const sumIncomeCents = (ts: Summable[], accounts?: PaymentAccount[]) =>
-  sumBy(ts, accounts, 'income');
+/**
+ * Total EARNED income, INTEGER CENTS, posted rows only. The one income total every
+ * screen reads. Without an `income` context there are no approved sources, so the
+ * honest answer is 0 — the app does not guess money into existence.
+ */
+export const sumIncomeCents = (ts: Summable[], accounts?: PaymentAccount[], income?: IncomeContext) =>
+  sumBy(ts, accounts, 'income', income);
 
 /** Total money out, INTEGER CENTS, posted rows only. The one spending total. */
 export const sumExpenseCents = (ts: Summable[], accounts?: PaymentAccount[]) =>
   sumBy(ts, accounts, 'expense');
+
+// ----------------------------------------------------------------------------
+// The unknown-inflow review queue (FIN-INCOME-001 §6)
+//
+// The deterministic SELECTOR only. FIN-REVIEW-002 owns the workspace, the AI
+// discussion and the confirmation UI, and imports this.
+// ----------------------------------------------------------------------------
+
+export interface InflowReviewItem {
+  transactionId: string;
+  date: string;
+  /** INTEGER CENTS. Dollars exist at the render layer. */
+  amountCents: number;
+  accountId?: string;
+  meaning: FinancialMeaning;
+  state: InflowReviewState;
+  reasons: InflowReviewReason[];
+  /** Populated when two or more approved sources matched — the ambiguity itself. */
+  candidateSourceIds: string[];
+  /** Plain language, for the reason line the workspace shows. */
+  reason: string;
+}
+
+type Queueable = Summable & Pick<Transaction, 'id' | 'date'>;
+
+/**
+ * Every credit the app cannot explain, newest first.
+ *
+ * In: `unknown_inflow` rows with no terminal review state — including ambiguous
+ * two-source matches, which are a question rather than a guess.
+ * Out: earned income, transfers, card payments, refunds, rewards, outflows, and
+ * anything the owner has already confirmed or dismissed. Pending rows are judged
+ * identically to posted ones (FIN-REVIEW-002 §2.5); the caller shows the badge.
+ */
+export function selectInflowReviewQueue(
+  ts: Queueable[],
+  accounts?: PaymentAccount[],
+  income?: IncomeContext
+): InflowReviewItem[] {
+  const items = ts.flatMap((t): InflowReviewItem[] => {
+    const state = income?.reviews?.[t.id]?.state ?? 'unreviewed';
+    if (state === 'confirmed' || state === 'dismissed') return [];
+    const i = interpretTransaction(t, accounts, income);
+    if (i.financialMeaning !== 'unknown_inflow') return [];
+    const r = resolveInflow(t, income);
+    return [{
+      transactionId: t.id,
+      date: t.date,
+      amountCents: Math.round(t.amount * 100),
+      accountId: t.accountId,
+      meaning: i.financialMeaning,
+      state,
+      reasons: r.reasons,
+      candidateSourceIds: r.sourceIds,
+      reason: i.reason,
+    }];
+  });
+
+  // Deterministic: newest first, ties broken by id, so the same ledger always
+  // produces the same queue and the tests above can assert on order.
+  items.sort((a, b) => b.date.localeCompare(a.date) || a.transactionId.localeCompare(b.transactionId));
+
+  // Counts and reason codes only — never an amount, a title or a transaction id.
+  emit({
+    eventName: 'InflowReview.QueueBuilt',
+    traceId: newTraceId(),
+    component: 'classify.selectInflowReviewQueue',
+    calculationName: 'selectInflowReviewQueue',
+    recordCount: items.length,
+    resultStatus: items.length ? 'ok' : 'empty',
+    severity: 'debug',
+    metadata: {
+      scannedCount: ts.length,
+      approvedSourceCount: activeApprovedSources(income?.sources).length,
+      reasonCounts: items.reduce<Record<string, number>>((acc, i) => {
+        for (const r of i.reasons) acc[r] = (acc[r] ?? 0) + 1;
+        return acc;
+      }, {}),
+    },
+  });
+
+  return items;
+}
+
+/** Re-exported so consumers import the taxonomy from the module that owns it. */
+export { FINANCIAL_MEANINGS };
+export type { FinancialMeaning, InflowReview, InflowReviewState };

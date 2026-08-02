@@ -199,7 +199,8 @@ describe('shared interpretation output', () => {
       accounts
     );
     expect(Object.keys(i).sort()).toEqual(
-      ['budget', 'confidence', 'direction', 'expense', 'forecast', 'income', 'meaning', 'pending', 'reason', 'transfer', 'type'].sort()
+      ['budget', 'confidence', 'direction', 'expense', 'financialMeaning', 'forecast', 'income',
+       'incomeSourceId', 'meaning', 'pending', 'reason', 'transfer', 'type'].sort()
     );
     expect(i.confidence).toBeGreaterThan(0);
     expect(i.confidence).toBeLessThanOrEqual(1);
@@ -230,10 +231,22 @@ describe('shared interpretation output', () => {
   });
 
   it('an ordinary deposit is an income candidate, not a settled earned-income claim', () => {
+    // The hand-off FIN-LEDGER-001 defined: the ledger layer refuses to call this
+    // spending and refuses to call it income. FIN-INCOME-001 settles it — and with
+    // no approved income source in the context, the settled answer is NOT income.
     const dep = txn({ id: 'd1', title: 'Direct Deposit - Larkspur Studio', amount: 3200, type: 'income', accountId: 'chk' });
     const i = interpretTransaction(dep, accounts);
     expect(i.meaning).toBe('income_candidate');
-    expect(i.income).toBe('counted');
     expect(i.direction).toBe('inflow');
+    expect(i.financialMeaning).toBe('unknown_inflow');
+    expect(i.income).toBe('excluded');
+
+    // With the owner's approved source supplied, the same row IS earned income.
+    const withSource = interpretTransaction(dep, accounts, {
+      sources: [{ id: 'src1', name: 'Larkspur Studio', amount: 3200, frequency: 'biweekly', isActive: true }],
+    });
+    expect(withSource.financialMeaning).toBe('earned_income');
+    expect(withSource.income).toBe('counted');
+    expect(withSource.incomeSourceId).toBe('src1');
   });
 });

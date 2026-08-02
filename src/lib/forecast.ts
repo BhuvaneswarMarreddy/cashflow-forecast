@@ -16,7 +16,7 @@ import {
   AccountForecast 
 } from '@/types';
 import { addDays, format, parseISO, startOfDay, isBefore, isAfter, isSameDay } from 'date-fns';
-import { isPositive, classifyTransaction, interpretTransaction, isPosted } from '@/lib/classify';
+import { isPositive, classifyTransaction, interpretTransaction, isPosted, IncomeContext } from '@/lib/classify';
 import { currentOf } from '@/lib/accounts';
 import { buildAssumptions, behaviorEvents, AssumptionOverrides } from '@/lib/behavior';
 import { normalizeMerchant } from '@/lib/flows';
@@ -28,38 +28,37 @@ const FORECAST_DAYS = 90;
  * Calculate current available cash from all accounts
  */
 /**
- * Average monthly income and spending derived from actual transactions over the last
- * `months` FULL calendar months (the current partial month is excluded). Transfers are
- * ignored (classifier). Lets the app show a real Monthly Income / suggested Budget
- * instead of $0 when the user hasn't hand-entered income sources or a budget.
+ * Average monthly EARNED income and spending over the last `months` FULL calendar
+ * months (the current partial month is excluded). Transfers are ignored (classifier).
+ *
+ * FIN-INCOME-001 replaced the old rule here. It preferred rows whose `sourceCategory`
+ * was the literal `'Paychecks'` (or whose text matched /payroll|paycheck/i) and
+ * otherwise summed EVERY income-classified row — so a refund, a Zelle from a friend
+ * or a one-off deposit inflated "Monthly Income". Now a row counts only when
+ * interpretTransaction() resolves it to `earned_income`, i.e. it matched an active
+ * approved source in `users/{uid}/income` or the owner confirmed it. No approved
+ * sources configured means an income of 0, which is the honest answer rather than a
+ * flattering one.
  */
 export function monthlyAverages(
-  transactions: Transaction[], accounts: PaymentAccount[], months = 6
+  transactions: Transaction[], accounts: PaymentAccount[], months = 6, income?: IncomeContext
 ): { income: number; spending: number } {
   const now = new Date();
   const window = new Set<string>();
   for (let i = 1; i <= months; i++) {
     window.add(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1)).toISOString().slice(0, 7));
   }
-  // Prefer PAYCHECKS as "income" — summing every income-classified row overcounts salary
-  // with refunds, money received from people, one-off deposits, etc. Fall back to all
-  // income only when the user has no paycheck-tagged rows.
-  let pay = 0, allInc = 0, sp = 0;
+  let inc = 0, sp = 0;
   for (const t of transactions) {
     if (!window.has(t.date.split('T')[0].slice(0, 7))) continue;
     // PENDING: excluded — this is the settled-history baseline the forecast
     // projects forward, and a hold is not settled history.
     if (!isPosted(t)) continue;
-    const c = classifyTransaction(t, accounts);
-    if (c === 'income') {
-      allInc += t.amount;
-      if (t.sourceCategory === 'Paychecks' || /payroll|paycheck/i.test(t.description ?? t.title)) pay += t.amount;
-    } else if (c === 'expense') {
-      sp += t.amount;
-    }
+    const i = interpretTransaction(t, accounts, income);
+    if (i.income === 'counted') inc += t.amount;
+    else if (i.expense === 'counted') sp += t.amount;
   }
-  const income = pay > 0 ? pay : allInc;
-  return { income: Math.round(income / months), spending: Math.round(sp / months) };
+  return { income: Math.round(inc / months), spending: Math.round(sp / months) };
 }
 
 export function calculateCurrentCash(accounts: PaymentAccount[]): number {
@@ -311,7 +310,8 @@ function transactionsToEvents(
   // Merchants the behavior engine already projects as fixed bills (normalized keys).
   // Their FUTURE recurring projections are suppressed here to avoid double-counting;
   // past real transactions keep flowing through unchanged.
-  suppressRecurringFor?: Set<string>
+  suppressRecurringFor?: Set<string>,
+  income?: IncomeContext
 ): ForecastEvent[] {
   const events: ForecastEvent[] = [];
   
@@ -333,7 +333,9 @@ function transactionsToEvents(
     // It already excludes a card-payment leg (either side) and any pending hold,
     // which is what the hand-rolled isCreditCardPayment test below used to approximate
     // for the card side only.
-    const i = interpretTransaction(t, accounts);
+    // FIN-INCOME-001: `i.income` is now the EARNED-income gate, so an unknown inflow
+    // dated in the future no longer becomes a projected income event.
+    const i = interpretTransaction(t, accounts, income);
     const isActualIncome = i.income === 'counted' && !t.isProjected;
     // This forecast tracks the CASH pool (calculateCurrentCash excludes credit cards),
     // so a transfer is only invisible to it when both legs sit inside that pool. A
@@ -479,20 +481,26 @@ export function generateForecast(
   transactions: Transaction[],
   safetyThreshold: number = DEFAULT_SAFETY_THRESHOLD,
   days: number = FORECAST_DAYS,
-  overrides?: AssumptionOverrides
+  overrides?: AssumptionOverrides,
+  income?: IncomeContext
 ): ForecastSummary {
   const today = startOfDay(new Date());
   const endDate = addDays(today, days);
 
-  // Gather all events
-  const assumptions = buildAssumptions(transactions, accounts, overrides);
+  // The forecast's income is APPROVED-SOURCE income, both ways round: the observed
+  // paycheck line is built only from rows that matched an approved source, and the
+  // fallback projects the approved sources themselves. An unmatched credit — however
+  // large, however regular — can reach neither.
+  const ctx: IncomeContext = { sources: incomeSources, ...income };
+  const assumptions = buildAssumptions(transactions, accounts, overrides, ctx);
   const billEvents = generateBillEvents(accounts, today, endDate);
-  // A paycheck assumption replaces the incomeSources income line — the ledger knows
-  // the real cadence and amount better than the onboarding form.
+  // An observed paycheck line replaces the configured income line — the ledger knows
+  // the real cadence and amount better than the onboarding form does.
   const incomeEvents = assumptions.income ? [] : generateIncomeEvents(incomeSources, today, endDate);
   const txnEvents = transactionsToEvents(
     transactions, accounts, today, endDate,
-    new Set(assumptions.fixedBills.map((b) => b.merchant))
+    new Set(assumptions.fixedBills.map((b) => b.merchant)),
+    ctx
   );
   const behaviorEvts = behaviorEvents(assumptions, accounts, format(today, 'yyyy-MM-dd'), days);
 
@@ -824,6 +832,8 @@ export function prepareFullContextForAI(context: AIUserContext): string {
     
     // Income Summary
     income: incomeSources && incomeSources.length > 0 ? {
+      // NOTE: callers must pass ACTIVE approved sources only — a paused source is
+      // retained in Firestore so it can be resumed and is not money being received.
       numberOfSources: incomeSources.length,
       estimatedMonthlyIncome: incomeSources.reduce((sum, i) => {
         if (i.frequency === 'monthly') return sum + i.amount;
@@ -876,8 +886,12 @@ export function generateAccountForecast(
   // 4. Loan payments if paid from this account
   
   if (account.type === 'bank_account' || account.type === 'debit_card') {
-    // Add income events
-    incomeSources.filter(inc => inc.isActive).forEach(income => {
+    // Add income events. A source that names its deposit accounts is only projected
+    // into those accounts — otherwise one salary appears in full on every bank card.
+    incomeSources
+      .filter(inc => inc.isActive)
+      .filter(inc => !inc.depositAccountIds?.length || inc.depositAccountIds.includes(account.id))
+      .forEach(income => {
       let currentDate = new Date(today);
       
       while (isBefore(currentDate, endDate)) {

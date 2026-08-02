@@ -63,7 +63,7 @@ export default function DashboardPage() {
     getPastTransactions,
     getFutureTransactions,
   } = useTransactions();
-  const { profile, isLoading: profileLoading, isOnboarded } = useUserProfile();
+  const { profile, isLoading: profileLoading, isOnboarded, incomeContext } = useUserProfile();
   const router = useRouter();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [filter, setFilter] = useState<'all' | 'past' | 'future'>('all');
@@ -147,7 +147,9 @@ export default function DashboardPage() {
     .filter((a) => a.type === 'personal_loan')
     .reduce((sum, a) => sum + (a.monthlyPayment || 0), 0);
 
-  const incomeFromSources = profile?.incomeSources?.reduce((sum, inc) => {
+  // ACTIVE sources only — a paused source is still stored (so it can be resumed) but
+  // must not be claimed as income.
+  const incomeFromSources = profile?.incomeSources?.filter((i) => i.isActive).reduce((sum, inc) => {
     const monthly = inc.frequency === 'yearly' ? inc.amount / 12 :
       inc.frequency === 'biweekly' ? inc.amount * 26 / 12 :
       inc.frequency === 'weekly' ? inc.amount * 52 / 12 : inc.amount;
@@ -155,7 +157,7 @@ export default function DashboardPage() {
   }, 0) || 0;
   // Fall back to a figure DERIVED from the last 6 months of transactions when the user
   // hasn't hand-entered income sources / a budget — so these never show a bare $0.
-  const derivedMonthly = monthlyAverages(transactions, derivedAccounts);
+  const derivedMonthly = monthlyAverages(transactions, derivedAccounts, 6, incomeContext);
   const monthlyIncome = incomeFromSources > 0 ? incomeFromSources : derivedMonthly.income;
   const effectiveBudget = (profile?.monthlyBudget || 0) > 0 ? profile!.monthlyBudget! : derivedMonthly.spending;
   const budgetIsDerived = !((profile?.monthlyBudget || 0) > 0) && effectiveBudget > 0;
