@@ -11,7 +11,10 @@ rules_version = '2';
  * - users/{userId}/transactions/{transactionId} - Transactions
  * - users/{userId}/rules/{ruleId} - Category mapping rules
  * - users/{userId}/reviews/{transactionId} - Inflow review state (FIN-INCOME-001)
- * 
+ * - users/{userId}/links/{linkId} - Transaction links, integer cents (FIN-RELATION-001)
+ * - users/{userId}/reviewCandidates/{identityKey} - Review candidates (FIN-RELATION-001)
+ * - users/{userId}/serviceFamilies/{familyId} - Owner's service identities (FIN-DUPLICATE-001)
+ *
  * Security Principles:
  * 1. Users can only access their own data
  * 2. All writes require authentication
@@ -190,9 +193,121 @@ service cloud.firestore {
       }
 
       // =========================================
+      // Transaction Links Subcollection (FIN-RELATION-001)
+      // =========================================
+      // An auditable statement that one transaction acts on another: a refund against a
+      // purchase, a bank debit against a card statement, a duplicate against its twin.
+      // Amounts are INTEGER CENTS. Doc id is `linkType~source~target`, so re-proposing
+      // the same relation is an upsert and there is nothing to dedupe.
+      // See src/lib/relations.ts — the same predicate runs in the client validator.
+      //
+      // These rules validate SHAPE and OWNERSHIP. They do not re-implement the
+      // allocation sums (V4/V5): cross-document totals are not expressible here without
+      // reads that cost money on every write. The pure validator and the store own
+      // those, and relations.test.ts R11/R12 prove them.
+
+      match /links/{linkId} {
+        allow read: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+          request.resource.data.keys().hasAll([
+            'linkType', 'sourceTransactionId', 'targetTransactionId',
+            'allocatedAmountCents', 'status', 'algorithmVersion', 'createdAt', 'updatedAt'
+          ]) &&
+          request.resource.data.linkType in [
+            'refund_of', 'partial_refund_of', 'reversal_of', 'chargeback_for',
+            'card_payment_pair', 'reimbursement_for', 'repayment_of',
+            'duplicate_candidate', 'subscription_overlap'
+          ] &&
+          request.resource.data.status in
+            ['suggested', 'confirmed', 'rejected', 'superseded', 'provisional'] &&
+          isValidString(request.resource.data.sourceTransactionId, 1, 128) &&
+          isValidString(request.resource.data.targetTransactionId, 1, 128) &&
+          // No self-link. The cheapest correctness rule in the file.
+          request.resource.data.sourceTransactionId != request.resource.data.targetTransactionId &&
+          // Integer cents, strictly positive. A float allocation is how a ledger drifts.
+          request.resource.data.allocatedAmountCents is int &&
+          request.resource.data.allocatedAmountCents > 0;
+
+        // Update re-asserts every create-time invariant: an update path that only checks
+        // ownership is a validator with a hole in it.
+        allow update: if isOwner(userId) &&
+          request.resource.data.linkType == resource.data.linkType &&
+          request.resource.data.sourceTransactionId == resource.data.sourceTransactionId &&
+          request.resource.data.targetTransactionId == resource.data.targetTransactionId &&
+          request.resource.data.status in
+            ['suggested', 'confirmed', 'rejected', 'superseded', 'provisional'] &&
+          request.resource.data.allocatedAmountCents is int &&
+          request.resource.data.allocatedAmountCents > 0;
+
+        // A rejected link is the suppression record. Deleting it makes the suggestion
+        // return — and with no delete path, "duplicate detection never deletes a
+        // transaction" is mechanically true rather than a promise.
+        allow delete: if false;
+      }
+
+      // =========================================
+      // Review Candidates Subcollection (FIN-RELATION-001)
+      // =========================================
+      // An UNAPPLIED proposal. Doc id is the identityKey — candidate type + sorted
+      // transaction ids, deliberately WITHOUT the algorithm version, so a dismissal
+      // survives a version bump. The version lives in the `candidateId` field for audit.
+      // The document carries no merchant string, title, description or account name.
+      // See src/lib/candidates.ts.
+
+      match /reviewCandidates/{candidateId} {
+        allow read: if isOwner(userId);
+
+        allow create, update: if isOwner(userId) &&
+          request.resource.data.keys().hasAll([
+            'candidateId', 'candidateType', 'algorithmVersion',
+            'transactionIds', 'status', 'score', 'generatedAt'
+          ]) &&
+          request.resource.data.candidateType in [
+            'refund_match', 'combined_refund_match', 'partial_refund_match',
+            'unknown_card_credit', 'immediate_duplicate_charge', 'duplicate_subscription',
+            'subscription_overlap', 'continued_charge_after_cancellation'
+          ] &&
+          request.resource.data.status in [
+            'unreviewed', 'suggested', 'confirmed', 'dismissed',
+            'intentional', 'needs_more_information'
+          ] &&
+          request.resource.data.transactionIds is list &&
+          request.resource.data.transactionIds.size() >= 2 &&
+          request.resource.data.transactionIds.size() <= 13;
+
+        // A decision is a record.
+        allow delete: if false;
+      }
+
+      // =========================================
+      // Service Families Subcollection (FIN-DUPLICATE-001)
+      // =========================================
+      // The owner's own service identities, seeded from their data — never a shipped
+      // vendor list. `aliases` carry normalized merchant strings, which is why they live
+      // uid-scoped here and never in telemetry or a candidate document.
+      //
+      // Added in FIN-RELATION-001's single rules pass on purpose: firestore.rules is
+      // owned by one task for this programme so the other three never contend on it
+      // (FIN-DUPLICATE-001 §12.1 precondition 8). The engine is FIN-DUPLICATE-001's.
+
+      match /serviceFamilies/{familyId} {
+        allow read: if isOwner(userId);
+
+        allow create, update: if isOwner(userId) &&
+          request.resource.data.keys().hasAll(['label', 'aliases', 'createdAt', 'updatedAt']) &&
+          isValidString(request.resource.data.label, 1, 100) &&
+          request.resource.data.aliases is list &&
+          request.resource.data.aliases.size() <= 50;
+
+        // The owner may retire a family they created; nothing automatic deletes one.
+        allow delete: if isOwner(userId);
+      }
+
+      // =========================================
       // Budgets Subcollection (Future Feature)
       // =========================================
-      
+
       match /budgets/{budgetId} {
         allow read, write: if isOwner(userId);
       }
