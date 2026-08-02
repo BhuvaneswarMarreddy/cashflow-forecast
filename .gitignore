@@ -53,3 +53,11 @@ scripts/backups/
 /playwright-report/
 /playwright/.cache/
 /diagnostic-bundles/
+
+# python: virtualenv and bytecode are build output, never source.
+# The venv alone was 7,124 tracked files (97% of the repo) and dirtied the tree
+# on every test run; its bundled playwright driver (113MB) also exceeds GitHub's
+# 100MB blob limit, which blocked `git push`.
+functions-sync/venv/
+**/__pycache__/
+*.py[cod]
