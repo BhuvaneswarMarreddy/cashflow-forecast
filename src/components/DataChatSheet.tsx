@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Send, Sparkles } from 'lucide-react';
 import Sheet from '@/components/Sheet';
 import { aiChat, callableErrorMessage } from '@/lib/callables';
-import { parseChatAction, buildChatContext } from '@/lib/chat-actions';
+import { parseChatAction, buildChatContext, explanationOf } from '@/lib/chat-actions';
 import { describeRule, rulePreview, MappingRule, NewMappingRule } from '@/lib/mapping-rules';
 import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
@@ -73,9 +73,13 @@ export default function DataChatSheet({ open, onClose }: { open: boolean; onClos
       // returns null for anything it can't vouch for (never a half-valid rule).
       const data = await aiChat({ message, history, context });
       const reply = parseChatAction(data?.result);
+      // The recovery actions (FIN-RELATION-001 §7.3) carry `reason`, not `explanation`,
+      // and have no card here yet — FIN-RECOVERY-UI-001 owns that surface. Until then
+      // they fall through to the same "couldn't turn that into a change" line.
+      const explanation = explanationOf(reply);
       setMessages((prev) => [...prev, reply?.action === 'create_rule'
         ? mk('assistant', reply.explanation, { rule: reply.rule, status: 'pending' })
-        : mk('assistant', reply?.explanation || "I couldn't turn that into a change. Try rephrasing it."),
+        : mk('assistant', explanation || "I couldn't turn that into a change. Try rephrasing it."),
       ]);
     } catch (e) {
       setMessages((prev) => [...prev, mk('assistant', callableErrorMessage(e))]);

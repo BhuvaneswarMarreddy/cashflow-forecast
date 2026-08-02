@@ -1,4 +1,4 @@
-import { buildChatContext, parseChatAction } from '@/lib/chat-actions';
+import { buildChatContext, explanationOf, parseChatAction } from '@/lib/chat-actions';
 import { applyMappingRules, MappingRule } from '@/lib/mapping-rules';
 import { PaymentAccount, Transaction } from '@/types';
 
@@ -61,12 +61,12 @@ describe('parseChatAction — good payloads', () => {
 
   it('falls back to describeRule when the model gives no explanation', () => {
     const parsed = parseChatAction({ ...goodRule, explanation: '   ' });
-    expect(parsed?.explanation).toBe('title contains "INSTACART" → category Food & Dining, label "Groceries"');
+    expect(explanationOf(parsed)).toBe('title contains "INSTACART" → category Food & Dining, label "Groceries"');
   });
 
   it('trims and caps an overlong explanation instead of rendering a wall of text', () => {
     const parsed = parseChatAction({ action: 'answer', explanation: `  ${'z'.repeat(9000)}  ` });
-    expect(parsed?.explanation.length).toBe(500);
+    expect(explanationOf(parsed)?.length).toBe(500);
   });
 
   it('accepts every legal field/op/type combination', () => {

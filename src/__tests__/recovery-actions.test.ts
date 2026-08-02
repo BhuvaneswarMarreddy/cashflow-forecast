@@ -263,7 +263,13 @@ describe('P13 every valid action parses, and nothing is written', () => {
 
   it('writes nothing — the store spy stays at zero calls', () => {
     for (const payload of valid) parseChatAction(payload, CTX);
-    for (const [name, fn] of Object.entries(store)) {
+    const spies = Object.entries(store).filter(([, fn]) => typeof fn === 'function');
+    // Every write path the store exposes is covered by this assertion.
+    expect(spies.map(([name]) => name).sort()).toEqual([
+      'confirmCandidate', 'getLinks', 'getReviewCandidates',
+      'recordCandidateDecision', 'saveLink', 'saveReviewCandidate',
+    ]);
+    for (const [name, fn] of spies) {
       expect([name, (fn as jest.Mock).mock.calls.length]).toEqual([name, 0]);
     }
   });
