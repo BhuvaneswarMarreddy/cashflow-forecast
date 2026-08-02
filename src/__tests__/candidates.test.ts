@@ -170,7 +170,7 @@ describe('C7 the transaction-id cap keeps the doc id inside Firestore limits', (
   it('accepts exactly 13 and the resulting id is well under 1500 bytes', () => {
     expect(MAX_CANDIDATE_TRANSACTIONS).toBe(13);
     const key = buildIdentityKey('combined_refund_match', ids(13));
-    expect(new TextEncoder().encode(key).length).toBeLessThan(1500);
+    expect(Buffer.byteLength(key, 'utf8')).toBeLessThan(1500);
   });
 
   it('rejects 14', () => {
