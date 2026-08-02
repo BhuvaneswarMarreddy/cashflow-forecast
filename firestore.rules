@@ -9,6 +9,7 @@ rules_version = '2';
  * - users/{userId}/accounts/{accountId} - Payment accounts
  * - users/{userId}/income/{incomeId} - Income sources
  * - users/{userId}/transactions/{transactionId} - Transactions
+ * - users/{userId}/rules/{ruleId} - Category mapping rules
  * 
  * Security Principles:
  * 1. Users can only access their own data
@@ -133,6 +134,33 @@ service cloud.firestore {
         allow delete: if isOwner(userId);
       }
       
+      // =========================================
+      // Mapping Rules Subcollection
+      // =========================================
+      // "anything from Instacart is Groceries" — the owner's durable recategorization
+      // rules. Own subcollection, never profile.settings (which is rebuilt from a
+      // whitelist on sync and would drop them). See src/lib/mapping-rules.ts.
+
+      match /rules/{ruleId} {
+        // Users can read their own rules
+        allow read: if isOwner(userId);
+
+        // Users can create rules with a well-formed matcher
+        allow create: if isOwner(userId) &&
+          request.resource.data.keys().hasAll(['match', 'set', 'createdAt', 'enabled']) &&
+          request.resource.data.match.field in ['merchant', 'title', 'description'] &&
+          request.resource.data.match.op in ['contains', 'equals'] &&
+          // Non-empty: an empty needle would match and rewrite every row the user owns.
+          isValidString(request.resource.data.match.value, 1, 200) &&
+          request.resource.data.enabled is bool;
+
+        // Users can update their rules (enable/disable)
+        allow update: if isOwner(userId);
+
+        // Users can delete their rules
+        allow delete: if isOwner(userId);
+      }
+
       // =========================================
       // Budgets Subcollection (Future Feature)
       // =========================================

@@ -101,3 +101,34 @@ def simplefin_sync(event: scheduler_fn.ScheduledEvent) -> None:
     _run_simplefin(reraise=True)  # a failed sync must show as a FAILED invocation
 
 
+@https_fn.on_call(
+    secrets=["SIMPLEFIN_ACCESS_URL"],
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=300,
+)
+def sync_now(req: https_fn.CallableRequest) -> dict:
+    """On-demand refresh from the app's own Refresh button.
+
+    A CALLABLE, not the shared-key HTTP endpoint: the browser is already signed
+    in, so Firebase verifies the ID token for us and no secret has to live in
+    client code. Only the owner's uid may run it — this writes their ledger.
+    Never raises: the button shows the returned error string instead of a
+    console stack the user can't see.
+    """
+    if not req.auth:
+        raise https_fn.HttpsError(https_fn.FunctionsErrorCode.UNAUTHENTICATED,
+                                  "Sign in to refresh.")
+    try:
+        owner_uid = auth.get_user_by_email(sync_core.OWNER_EMAIL).uid
+    except Exception:
+        owner_uid = None
+    if owner_uid and req.auth.uid != owner_uid:
+        raise https_fn.HttpsError(https_fn.FunctionsErrorCode.PERMISSION_DENIED,
+                                  "Not your data.")
+    status = _run_simplefin()
+    # Only what the button needs to render; never echo the access URL.
+    return {k: status.get(k) for k in
+            ("added", "enriched", "pendingLive", "pendingCleared", "reanchored",
+             "unmatchedAccounts", "lastSuccess", "error")}
+
+

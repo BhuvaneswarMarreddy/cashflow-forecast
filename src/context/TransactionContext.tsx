@@ -1,15 +1,22 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useMemo, useRef } from 'react';
 import { Transaction, PaymentMethod, ExpenseCategory } from '@/types';
 import { useAuth } from './AuthContext';
 import * as firestoreService from '@/lib/firestore';
+import { db, collection, doc, getDocs, setDoc, updateDoc, deleteDoc } from '@/lib/firebase';
+import { applyMappingRules, definedSet, MappingRule, NewMappingRule } from '@/lib/mapping-rules';
 import { generateSampleData } from '@/lib/storage';
 
 interface TransactionContextType {
   transactions: Transaction[];
   isLoading: boolean;
   error: string | null;
+  // User-defined mapping rules (users/{uid}/rules). Newest first = highest precedence.
+  rules: MappingRule[];
+  addRule: (rule: NewMappingRule) => Promise<MappingRule | undefined>;
+  deleteRule: (id: string) => Promise<void>;
+  toggleRule: (id: string, enabled: boolean) => Promise<void>;
   addTransaction: (transaction: Omit<Transaction, 'id'>) => Promise<void>;
   addBulkTransactions: (
     transactions: (Omit<Transaction, 'id'> & { id?: string })[]
@@ -34,7 +41,10 @@ const LOCAL_STORAGE_KEY = 'cashflow_transactions_';
 
 export function TransactionProvider({ children }: { children: ReactNode }) {
   const { user, isAuthenticated } = useAuth();
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  // Raw = exactly what was stored. `transactions` below is this with the owner's
+  // mapping rules applied, and is what every consumer sees.
+  const [rawTransactions, setRawTransactions] = useState<Transaction[]>([]);
+  const [rules, setRules] = useState<MappingRule[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isFirestoreOnline, setIsFirestoreOnline] = useState(true);
@@ -83,7 +93,7 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
       const merged = [...unsynced, ...userTransactions];
 
       setIsFirestoreOnline(true);
-      setTransactions(merged);
+      setRawTransactions(merged);
       saveLocalTransactions(userId, merged);
       setError(null);
     } catch (err) {
@@ -97,26 +107,104 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
   // Handle auth state changes - FAST path with localStorage first
   useEffect(() => {
     if (!isAuthenticated || !user?.id) {
-      setTransactions([]);
+      setRawTransactions([]);
       setIsLoading(false);
       lastUserId.current = null;
       return;
     }
 
     // Skip if same user already loaded
-    if (lastUserId.current === user.id && transactions.length > 0) {
+    if (lastUserId.current === user.id && rawTransactions.length > 0) {
       return;
     }
     lastUserId.current = user.id;
 
     // FAST: Load from localStorage immediately
     const localTransactions = loadLocalTransactions(user.id);
-    setTransactions(localTransactions);
+    setRawTransactions(localTransactions);
     setIsLoading(false);
 
     // Sync from Firestore in background (don't await)
     syncFromFirestore(user.id);
-  }, [isAuthenticated, user?.id, loadLocalTransactions, syncFromFirestore, transactions.length]);
+  }, [isAuthenticated, user?.id, loadLocalTransactions, syncFromFirestore, rawTransactions.length]);
+
+  // Mapping rules live in their OWN subcollection, never in profile.settings —
+  // syncFromFirestore() there rebuilds settings from a hardcoded whitelist and would
+  // silently drop them. Loaded once per user, newest first (= highest precedence).
+  useEffect(() => {
+    if (!isAuthenticated || !user?.id) {
+      setRules([]);
+      return;
+    }
+    let cancelled = false;
+    getDocs(collection(db, 'users', user.id, 'rules'))
+      .then((snap) => {
+        if (cancelled) return;
+        const loaded = snap.docs.map((d) => ({ ...(d.data() as Omit<MappingRule, 'id'>), id: d.id }));
+        setRules(loaded.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')));
+      })
+      .catch((err) => console.warn('Mapping rules load failed:', err));
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, user?.id]);
+
+  // The single place rules are applied. Every screen reads `transactions` from this
+  // context, so one rule corrects history and every future sync with no per-screen change.
+  const transactions = useMemo(
+    () => (rules.length ? rawTransactions.map((t) => applyMappingRules(t, rules)) : rawTransactions),
+    [rawTransactions, rules]
+  );
+
+  // Writes are optimistic, like every other write in this file: with offline persistence
+  // enabled, awaiting the server ack hangs until the network comes back.
+  const addRule = useCallback(
+    async (rule: NewMappingRule): Promise<MappingRule | undefined> => {
+      if (!user?.id) return;
+      const ref = rule.id
+        ? doc(db, 'users', user.id, 'rules', rule.id)
+        : doc(collection(db, 'users', user.id, 'rules'));
+      const saved: MappingRule = {
+        ...rule,
+        set: definedSet(rule.set),
+        id: ref.id,
+        createdAt: rule.createdAt || new Date().toISOString(),
+      };
+
+      setRules((prev) => [saved, ...prev.filter((r) => r.id !== saved.id)]);
+      setDoc(ref, {
+        match: saved.match,
+        set: saved.set,
+        createdAt: saved.createdAt,
+        enabled: saved.enabled,
+      }).catch((err) => console.warn('Mapping rule write failed:', err));
+
+      return saved;
+    },
+    [user?.id]
+  );
+
+  const deleteRule = useCallback(
+    async (id: string) => {
+      if (!user?.id) return;
+      setRules((prev) => prev.filter((r) => r.id !== id));
+      deleteDoc(doc(db, 'users', user.id, 'rules', id)).catch((err) =>
+        console.warn('Mapping rule delete failed:', err)
+      );
+    },
+    [user?.id]
+  );
+
+  const toggleRule = useCallback(
+    async (id: string, enabled: boolean) => {
+      if (!user?.id) return;
+      setRules((prev) => prev.map((r) => (r.id === id ? { ...r, enabled } : r)));
+      updateDoc(doc(db, 'users', user.id, 'rules', id), { enabled }).catch((err) =>
+        console.warn('Mapping rule toggle failed:', err)
+      );
+    },
+    [user?.id]
+  );
 
   const addTransaction = async (transaction: Omit<Transaction, 'id'>) => {
     console.log('📝 [TransactionContext] addTransaction called:', transaction);
@@ -135,7 +223,7 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
     console.log('📝 [TransactionContext] Created transaction with temp ID:', tempId);
 
     // Update local state immediately
-    setTransactions((prev) => {
+    setRawTransactions((prev) => {
       const updated = [newTransaction, ...prev];
       saveLocalTransactions(user.id, updated);
       return updated;
@@ -149,7 +237,7 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
         console.log('✅ [TransactionContext] Firestore returned ID:', firestoreId);
         
         // Update the ID with the Firestore ID
-        setTransactions((prev) => {
+        setRawTransactions((prev) => {
           const updated = prev.map((t) => 
             t.id === tempId ? { ...t, id: firestoreId } : t
           );
@@ -195,7 +283,7 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
       id: `local_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 9)}`,
     }));
 
-    setTransactions((prev) => {
+    setRawTransactions((prev) => {
       const updated = [...transactionsWithIds, ...prev];
       saveLocalTransactions(user.id, updated);
       return updated;
@@ -208,7 +296,7 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
     if (!user?.id) return;
 
     // Update local state immediately
-    setTransactions((prev) => {
+    setRawTransactions((prev) => {
       const updated = prev.map((t) => (t.id === id ? { ...t, ...updates } : t));
       saveLocalTransactions(user.id, updated);
       return updated;
@@ -228,7 +316,7 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
     if (!user?.id) return;
 
     // Update local state immediately
-    setTransactions((prev) => {
+    setRawTransactions((prev) => {
       const updated = prev.filter((t) => t.id !== id);
       saveLocalTransactions(user.id, updated);
       return updated;
@@ -356,7 +444,7 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
         await syncFromFirestore(user.id);
       } else {
         // Offline mode - just use localStorage
-        setTransactions(sampleData);
+        setRawTransactions(sampleData);
         saveLocalTransactions(user.id, sampleData);
       }
     } catch (err) {
@@ -373,6 +461,10 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
         transactions,
         isLoading,
         error,
+        rules,
+        addRule,
+        deleteRule,
+        toggleRule,
         addTransaction,
         addBulkTransactions,
         updateTransaction,
