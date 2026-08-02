@@ -8,6 +8,8 @@
 import { Transaction, PaymentAccount, CategoryBudget, CategoryBudgetStatus, ExpenseCategory, EXPENSE_CATEGORIES } from '@/types';
 import { startOfMonth, endOfMonth, format, parseISO, differenceInDays, isWithinInterval } from 'date-fns';
 import { interpretTransaction } from '@/lib/classify';
+import { netCategorySpendingCents } from '@/lib/refunds';
+import { TransactionLink } from '@/lib/relations';
 
 /**
  * Does this row count against a category budget?
@@ -29,26 +31,42 @@ const countsAgainstBudget = (t: Transaction, accounts?: PaymentAccount[]) =>
   interpretTransaction(t, accounts).budget === 'counted';
 
 /**
+ * A confirmed refund reduces consumed budget. FIN-REFUND-001 exposed
+ * `netCategorySpendingCents()` but could not wire it — `budgets.ts` was not its file to
+ * edit — so a returned $1,100.00 purchase still ate a Shopping budget it no longer costs.
+ * FIN-RECOVERY-UI-001 owns this file and closes that gap.
+ *
+ * `links` is OPTIONAL and the gross path is untouched when it is absent or empty, so
+ * every existing caller keeps its exact previous arithmetic. Only a caller that hands
+ * over confirmed links sees net — and only CONFIRMED links move a number: a `suggested`
+ * or `provisional` link is invisible to `purchaseEconomics()` by construction, which is
+ * the mechanical form of "nothing applies before confirmation".
+ *
+ * Gross is never destroyed to show net: the row keeps its full amount in History, and
+ * `getAllCategorySpending(txns, month, accounts)` still answers gross for anyone who asks.
+ */
+const inMonth = (transactions: Transaction[], month: Date, accounts?: PaymentAccount[]) => {
+  const monthStart = startOfMonth(month);
+  const monthEnd = endOfMonth(month);
+  return transactions.filter(t =>
+    countsAgainstBudget(t, accounts) && isWithinInterval(parseISO(t.date), { start: monthStart, end: monthEnd })
+  );
+};
+
+/**
  * Get spending for a specific category in the current month
  */
 export function getCategorySpending(
   transactions: Transaction[],
   categoryId: ExpenseCategory,
   month: Date = new Date(),
-  accounts?: PaymentAccount[]
+  accounts?: PaymentAccount[],
+  links?: readonly TransactionLink[]
 ): number {
-  const monthStart = startOfMonth(month);
-  const monthEnd = endOfMonth(month);
+  if (links?.length) return getAllCategorySpending(transactions, month, accounts, links)[categoryId] ?? 0;
 
-  return transactions
-    .filter(t => {
-      const txnDate = parseISO(t.date);
-      return (
-        countsAgainstBudget(t, accounts) &&
-        t.category === categoryId &&
-        isWithinInterval(txnDate, { start: monthStart, end: monthEnd })
-      );
-    })
+  return inMonth(transactions, month, accounts)
+    .filter(t => t.category === categoryId)
     .reduce((sum, t) => sum + t.amount, 0);
 }
 
@@ -58,31 +76,27 @@ export function getCategorySpending(
 export function getAllCategorySpending(
   transactions: Transaction[],
   month: Date = new Date(),
-  accounts?: PaymentAccount[]
+  accounts?: PaymentAccount[],
+  links?: readonly TransactionLink[]
 ): Record<ExpenseCategory, number> {
-  const monthStart = startOfMonth(month);
-  const monthEnd = endOfMonth(month);
-  
+  const rows = inMonth(transactions, month, accounts);
+
+  // Net path: integer cents throughout, then one division at the boundary.
+  if (links?.length) {
+    const cents = netCategorySpendingCents(rows, links, accounts);
+    return Object.fromEntries(
+      EXPENSE_CATEGORIES.map(cat => [cat.value, (cents[cat.value] ?? 0) / 100])
+    ) as Record<ExpenseCategory, number>;
+  }
+
   const spending: Record<string, number> = {};
-  
-  // Initialize all categories to 0
   EXPENSE_CATEGORIES.forEach(cat => {
     spending[cat.value] = 0;
   });
-  
-  // Sum up spending
-  transactions
-    .filter(t => {
-      const txnDate = parseISO(t.date);
-      return (
-        countsAgainstBudget(t, accounts) &&
-        isWithinInterval(txnDate, { start: monthStart, end: monthEnd })
-      );
-    })
-    .forEach(t => {
-      spending[t.category] = (spending[t.category] || 0) + t.amount;
-    });
-  
+  rows.forEach(t => {
+    spending[t.category] = (spending[t.category] || 0) + t.amount;
+  });
+
   return spending as Record<ExpenseCategory, number>;
 }
 
@@ -116,9 +130,10 @@ export function calculateBudgetStatuses(
   budgets: CategoryBudget[],
   transactions: Transaction[],
   month: Date = new Date(),
-  accounts?: PaymentAccount[]
+  accounts?: PaymentAccount[],
+  links?: readonly TransactionLink[]
 ): CategoryBudgetStatus[] {
-  const spending = getAllCategorySpending(transactions, month, accounts);
+  const spending = getAllCategorySpending(transactions, month, accounts, links);
   
   return budgets
     .filter(b => b.isEnabled && b.monthlyLimit > 0)
