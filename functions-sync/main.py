@@ -3,7 +3,6 @@
 monarch_sync      daily 07:30 America/Chicago scheduled Monarch -> Firestore sync
 monarch_sync_now  manual trigger, guarded by the SYNC_TRIGGER_KEY shared secret
 simplefin_sync    daily 07:30 America/Chicago scheduled SimpleFIN -> Firestore sync
-simplefin_claim   one-time setup-token claim, same SYNC_TRIGGER_KEY guard
 """
 import asyncio
 import hmac
@@ -102,33 +101,3 @@ def simplefin_sync(event: scheduler_fn.ScheduledEvent) -> None:
     _run_simplefin(reraise=True)  # a failed sync must show as a FAILED invocation
 
 
-@https_fn.on_request(
-    secrets=["SIMPLEFIN_SETUP_TOKEN", "SYNC_TRIGGER_KEY"],
-    memory=options.MemoryOption.MB_256,
-    timeout_sec=120,
-)
-def simplefin_claim(req: https_fn.Request) -> https_fn.Response:
-    """One-time: turn the setup token into the long-lived access URL and store it on
-    meta/simplefinSync.accessUrl. The token is SINGLE USE — claiming twice burns it
-    and returns 403 — so an already-claimed doc is refused rather than destroyed."""
-    if not _authorized(req):
-        return https_fn.Response("forbidden", status=403)
-    token = os.environ.get("SIMPLEFIN_SETUP_TOKEN", "").strip()
-    if not token:
-        return https_fn.Response("SIMPLEFIN_SETUP_TOKEN is not set", status=400)
-
-    ref = firestore.client().collection("meta").document("simplefinSync")
-    snap = ref.get()
-    if snap.exists and (snap.to_dict() or {}).get("accessUrl"):
-        return https_fn.Response("already claimed", status=409)
-    try:
-        access_url = simplefin.claim_setup_token(token)
-    except Exception as e:
-        print(traceback.format_exc())
-        return https_fn.Response(f"claim failed: {type(e).__name__}: {e}", status=502)
-
-    ref.set({"accessUrl": access_url, "claimedAt": sync_core.now_iso()}, merge=True)
-    # The access URL carries HTTP Basic credentials — only its host goes in the reply.
-    return https_fn.Response(
-        json.dumps({"claimed": True, "host": urlsplit(access_url).hostname}),
-        mimetype="application/json")
