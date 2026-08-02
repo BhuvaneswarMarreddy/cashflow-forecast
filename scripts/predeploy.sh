@@ -4,14 +4,28 @@
 # block; crashes do.
 set -e
 
-echo "gate 1/4: tsc"
+echo "gate 1/6: tsc"
 npx tsc --noEmit
 
-echo "gate 2/4: jest (incl. CSV audit replay)"
+echo "gate 2/6: jest (incl. CSV audit replay)"
 npm test > /tmp/predeploy_jest.log 2>&1 || { tail -25 /tmp/predeploy_jest.log; echo "BLOCKED: tests failed"; exit 1; }
 grep -E "Tests:" /tmp/predeploy_jest.log
 
-echo "gate 3/4: react-hooks crash rules"
+# OPS-CI-001: the Functions and Python suites used to sit outside the deploy gate.
+echo "gate 3/6: jest (firebase functions)"
+npm test --prefix functions > /tmp/predeploy_fnjest.log 2>&1 || { tail -25 /tmp/predeploy_fnjest.log; echo "BLOCKED: functions tests failed"; exit 1; }
+grep -E "Tests:" /tmp/predeploy_fnjest.log
+
+echo "gate 4/6: python sync tests (functions-sync)"
+# Prefer pytest when it is installed; fall back to the stdlib runner so the gate
+# never demands a pip install. Either way a failing test exits non-zero (set -e).
+if python3 -c 'import pytest' 2>/dev/null; then
+  python3 -m pytest functions-sync -q
+else
+  python3 -m unittest discover -s functions-sync
+fi
+
+echo "gate 5/6: react-hooks crash rules"
 # Use JSON (not --format compact, which omits ruleId — that blind spot shipped a
 # conditional-hook #310 crash to prod). Count any react-hooks/* message.
 npx eslint src --format json > /tmp/predeploy_eslint.json 2>/dev/null || true
@@ -29,7 +43,10 @@ if [ "$HOOKS" != "0" ]; then
   exit 1
 fi
 
-echo "gate 4/4: local boot smoke (real backend)"
+# NOTE: this gate boots the app against the REAL Firebase backend (production is also
+# the development project). That is why the CI workflow does NOT run this script — see
+# docs/ci/VALIDATION-PIPELINE.md. Keep this gate local-only.
+echo "gate 6/6: local boot smoke (real backend)"
 npm run build > /tmp/predeploy_build.log 2>&1 || { tail -25 /tmp/predeploy_build.log; echo "BLOCKED: build failed"; exit 1; }
 npm run start > /tmp/predeploy_server.log 2>&1 &
 SRV=$!
