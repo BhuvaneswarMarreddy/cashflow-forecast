@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { UserProfile, Transaction, SavingsGoal, DebtPayoffPlan } from '@/types';
+import { UserProfile, Transaction, SavingsGoal, DebtPayoffPlan, InflowReview } from '@/types';
 import { Download, FileSpreadsheet, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { buildExportWorkbook, workbookToBlob } from '@/lib/export-xlsx';
 
@@ -10,6 +10,9 @@ interface ExportButtonProps {
   transactions: Transaction[];
   savingsGoals?: SavingsGoal[];
   debtPlan?: DebtPayoffPlan;
+  /** `incomeContext.reviews` from UserProfileContext, so the export's Total Income
+   *  is the same earned-income total every screen shows. */
+  inflowReviews?: Record<string, InflowReview>;
 }
 
 export default function ExportButton({
@@ -17,6 +20,7 @@ export default function ExportButton({
   transactions,
   savingsGoals,
   debtPlan,
+  inflowReviews,
 }: ExportButtonProps) {
   const [isExporting, setIsExporting] = useState(false);
   const [exportStatus, setExportStatus] = useState<'idle' | 'success' | 'error'>('idle');
@@ -39,6 +43,9 @@ export default function ExportButton({
         },
         accounts: profile.paymentAccounts,
         incomeSources: profile.incomeSources,
+        // The same earned-income context every screen uses, so the export's
+        // "Total Income" cannot disagree with the Calendar's.
+        inflowReviews,
         transactions,
         savingsGoals,
         debtPlan,

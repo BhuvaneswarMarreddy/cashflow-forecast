@@ -60,6 +60,7 @@ export default function AccountsPage() {
     updateIncomeSource,
     deleteIncomeSource,
     updateProfile,
+    incomeContext,
   } = useUserProfile();
   const { transactions, isLoading: transactionsLoading, error: transactionsError } = useTransactions();
   const router = useRouter();
@@ -377,13 +378,15 @@ export default function AccountsPage() {
 
   // Income & budget: use hand-entered income sources / budget when present, else DERIVE
   // from the last 6 months of transactions (so these never read a bare $0).
-  const incomeFromSources = profile?.incomeSources?.reduce((sum, inc) => {
+  // ACTIVE sources only: getIncomeSources() now returns paused sources too (so they
+  // can be resumed), and a paused source is not money arriving.
+  const incomeFromSources = profile?.incomeSources?.filter((i) => i.isActive).reduce((sum, inc) => {
     const monthly = inc.frequency === 'yearly' ? inc.amount / 12 :
       inc.frequency === 'biweekly' ? inc.amount * 26 / 12 :
       inc.frequency === 'weekly' ? inc.amount * 52 / 12 : inc.amount;
     return sum + monthly;
   }, 0) || 0;
-  const derivedMonthly = monthlyAverages(transactions, derivedAccounts);
+  const derivedMonthly = monthlyAverages(transactions, derivedAccounts, 6, incomeContext);
   const monthlyIncome = incomeFromSources > 0 ? incomeFromSources : derivedMonthly.income;
   const incomeIsDerived = incomeFromSources === 0 && derivedMonthly.income > 0;
   const effectiveBudget = (profile?.monthlyBudget || 0) > 0 ? profile!.monthlyBudget! : derivedMonthly.spending;

@@ -333,7 +333,9 @@ export default function HistoryPage() {
     (categoryFilter !== 'all' ? 1 : 0);
 
   const currentCash = calculateCurrentCash(withDerivedBalances(profile?.paymentAccounts || [], transactions));
-  const monthlyIncome = profile?.incomeSources?.reduce((sum, inc) => {
+  // ACTIVE sources only: getIncomeSources() now returns paused sources too (so they
+  // can be resumed), and a paused source is not money arriving.
+  const monthlyIncome = profile?.incomeSources?.filter((i) => i.isActive).reduce((sum, inc) => {
     const monthly = inc.frequency === 'yearly' ? inc.amount / 12 :
       inc.frequency === 'biweekly' ? inc.amount * 26 / 12 :
       inc.frequency === 'weekly' ? inc.amount * 52 / 12 : inc.amount;

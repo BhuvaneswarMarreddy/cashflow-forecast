@@ -37,7 +37,7 @@ export function financialContext(profile: UserProfile | null, transactions: Tran
   const spentThisMonth = transactions
     .filter((t) => t.date.slice(0, 7) === month && classifyTransaction(t, accounts) === 'expense')
     .reduce((s, t) => s + t.amount, 0);
-  const derived = monthlyAverages(transactions, accounts);
+  const derived = monthlyAverages(transactions, accounts, 6, { sources: profile.incomeSources });
   const budget = profile.monthlyBudget > 0 ? profile.monthlyBudget : derived.spending;
   const budgetContext = budget > 0 ? {
     monthlyBudget: budget,

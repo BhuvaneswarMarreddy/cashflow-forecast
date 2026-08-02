@@ -37,7 +37,7 @@ import {
 export default function CalendarPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const { transactions, isLoading: txnLoading, deleteTransaction, getTransactionsByDate } = useTransactions();
-  const { profile } = useUserProfile();
+  const { profile, incomeContext } = useUserProfile();
   const router = useRouter();
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
@@ -85,7 +85,7 @@ export default function CalendarPage() {
   const getDayTotal = (date: Date): { income: number; expense: number } => {
     const dayTxns = getDayTransactions(date);
     return {
-      income: sumIncomeCents(dayTxns, accountsForClassify) / 100,
+      income: sumIncomeCents(dayTxns, accountsForClassify, incomeContext) / 100,
       expense: sumExpenseCents(dayTxns, accountsForClassify) / 100,
     };
   };
@@ -111,7 +111,8 @@ export default function CalendarPage() {
     return isSameMonth(txnDate, currentMonth);
   });
 
-  const monthlyIncome = sumIncomeCents(monthlyTransactions, accountsForClassify) / 100;
+  // EARNED income: an unmatched credit raises the balance but is not income here.
+  const monthlyIncome = sumIncomeCents(monthlyTransactions, accountsForClassify, incomeContext) / 100;
   const monthlyExpenses = sumExpenseCents(monthlyTransactions, accountsForClassify) / 100;
 
   return (
