@@ -10,7 +10,10 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "deploy": "sh scripts/predeploy.sh && firebase deploy --only hosting"
+    "deploy": "sh scripts/predeploy.sh && firebase deploy --only hosting",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "diag:export": "node scripts/diagnostics/export-trace.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -28,6 +31,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.1",

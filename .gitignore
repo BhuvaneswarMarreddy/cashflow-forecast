@@ -47,3 +47,9 @@ yarn-error.log*
 next-env.d.ts
 transactionsbyaccount/
 scripts/backups/
+
+# playwright (OBS-001) — artifacts may contain a rendered Accounts page; never commit
+/test-results/
+/playwright-report/
+/playwright/.cache/
+/diagnostic-bundles/

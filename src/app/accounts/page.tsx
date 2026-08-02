@@ -7,6 +7,7 @@ import { useUserProfile } from '@/context/UserProfileContext';
 import { useTransactions } from '@/context/TransactionContext';
 import Navbar from '@/components/Navbar';
 import AccountsList from '@/components/AccountsList';
+import AccountsDiagnostics from '@/components/AccountsDiagnostics';
 import AccountDetailModal from '@/components/AccountDetailModal';
 import ReconcileSheet from '@/components/ReconcileSheet';
 import AccountTransactions from '@/components/AccountTransactions';
@@ -19,6 +20,8 @@ import { deriveAccountBalance, withDerivedBalances, monthlyAverages } from '@/li
 import { matchTransfers } from '@/lib/transfers';
 import { currentOf } from '@/lib/accounts';
 import { syncNow, describeSync } from '@/lib/sync-client';
+import { useAccountsObservability } from '@/lib/obs/useAccountsObservability';
+import { safeSyncResult } from '@/lib/obs/sync-metadata';
 import {
   TrendingUp,
   CreditCard,
@@ -43,7 +46,7 @@ import {
 } from 'lucide-react';
 
 export default function AccountsPage() {
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const { 
     profile, 
     isLoading: profileLoading, 
@@ -57,7 +60,7 @@ export default function AccountsPage() {
     deleteIncomeSource,
     updateProfile,
   } = useUserProfile();
-  const { transactions } = useTransactions();
+  const { transactions, isLoading: transactionsLoading, error: transactionsError } = useTransactions();
   const router = useRouter();
   
   const [activeTab, setActiveTab] = useState<'accounts' | 'subscriptions' | 'spending' | 'transfers' | 'income' | 'budget' | 'budgets' | 'debt'>('accounts');
@@ -89,6 +92,15 @@ export default function AccountsPage() {
   }, [transfers, profile?.paymentAccounts]);
   const unmatchedOutTotal = transfers.unmatchedOut.reduce((s, t) => s + t.amount, 0);
   const unmatchedInTotal = transfers.unmatchedIn.reduce((s, t) => s + t.amount, 0);
+  // OBS-001: page-view / load lifecycle events, spans, and the sanitized provenance for
+  // the summary cards below. Must stay above the early return (React error #310).
+  const obs = useAccountsObservability({
+    userId: user?.id,
+    isLoading: authLoading || profileLoading || transactionsLoading,
+    accounts: derivedAccounts,
+    transactions,
+    error: transactionsError,
+  });
   const [showAccountModal, setShowAccountModal] = useState(false);
   const [showIncomeModal, setShowIncomeModal] = useState(false);
   const [editingAccount, setEditingAccount] = useState<PaymentAccount | null>(null);
@@ -170,14 +182,19 @@ export default function AccountsPage() {
   // on the page reflects the new rows and re-anchored balances.
   const handleRefresh = async () => {
     setSyncing(true); setSyncErr(false); setSyncMsg('Contacting your banks…');
+    obs.trackRefreshClicked();
     try {
       const r = await syncNow();
       setSyncErr(Boolean(r.error));
       setSyncMsg(describeSync(r));
+      // Counters only — safeSyncResult() strips everything the callable did not
+      // already whitelist, and would strip an access URL if one ever appeared.
+      obs.trackRefreshResult({ ok: !r.error, counts: safeSyncResult(r as Record<string, unknown>).counters });
       if (!r.error) setTimeout(() => window.location.reload(), 1200);
     } catch (e) {
       setSyncErr(true);
       setSyncMsg(e instanceof Error ? e.message : 'Refresh failed — try again.');
+      obs.trackRefreshResult({ ok: false, error: e });
     } finally {
       setSyncing(false);
     }
@@ -403,6 +420,9 @@ export default function AccountsPage() {
             )}
           </div>
         </div>
+
+        {/* OBS-001: developer-only provenance for the cards below. Renders null in production. */}
+        <AccountsDiagnostics traceId={obs.traceId} provenance={obs.provenance} onOpen={obs.trackDiagnosticOpened} />
 
         {/* Summary Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">

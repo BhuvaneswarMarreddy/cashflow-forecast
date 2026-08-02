@@ -16,7 +16,7 @@ import {
 } from '@/lib/firebase';
 import * as firestoreService from '@/lib/firestore';
 
-interface AuthContextType {
+export interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
@@ -28,7 +28,9 @@ interface AuthContextType {
   updateUserProfile: (name: string) => Promise<{ success: boolean; error?: string }>;
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+// Exported so a development-only fixture route can supply sanitized values without
+// touching authentication itself (see src/app/dev/accounts-fixture/).
+export const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // Helper to convert Firebase User to our User type
 const firebaseUserToUser = (firebaseUser: FirebaseUser): User => ({
