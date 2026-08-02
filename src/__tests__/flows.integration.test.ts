@@ -58,7 +58,11 @@ function load(): { transactions: Transaction[]; accounts: PaymentAccount[] } {
 }
 
 maybe('audit replay over the real CSVs', () => {
-  const { transactions, accounts } = load();
+  // describe.skip still EXECUTES this body, so load() must not run without the
+  // (gitignored) CSV folder — otherwise a fresh worktree/CI fails to even collect.
+  const { transactions, accounts } = fs.existsSync(DIR)
+    ? load()
+    : { transactions: [] as Transaction[], accounts: [] as PaymentAccount[] };
   const g = buildFlowGraph(transactions, accounts);
   const recon = (name: string) => g.reconciliation.find((r) => r.name === name)!;
 
