@@ -7,10 +7,16 @@ import * as XLSX from 'xlsx';
 import { format as formatDate } from 'date-fns';
 import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
-import { TransactionType, TransferDirection, ExpenseCategory, PaymentMethod, AccountType, EXPENSE_CATEGORIES, PaymentAccount, getMerchantColor } from '@/types';
+import { findTwin, fingerprintOfRow, mergeFields } from '@/lib/fingerprint';
+import { Transaction, TransactionType, TransferDirection, ExpenseCategory, PaymentMethod, AccountType, EXPENSE_CATEGORIES, PaymentAccount, getMerchantColor } from '@/types';
 
 // Sentinel account-map value meaning "create a new account for this CSV label".
 const CREATE_ACCOUNT = '__create__';
+
+// The spec's enrichment source. Every file that comes through this modal is the manual
+// CSV path regardless of which bank exported it — the distinction that matters
+// downstream is "carries categories" vs "raw bank feed", not the issuer.
+const CSV_SOURCE = 'monarch';
 
 /**
  * Builds a PaymentAccount from a CSV "Account" label like
@@ -165,6 +171,8 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
   const [createTypes, setCreateTypes] = useState<Record<string, AccountType>>({});
   const [skippedCount, setSkippedCount] = useState(0);
   const [importedCount, setImportedCount] = useState(0);
+  const [enrichedCount, setEnrichedCount] = useState(0);
+  const [unchangedCount, setUnchangedCount] = useState(0);
   const [savedToCloud, setSavedToCloud] = useState(true);
 
   // Distinct account names present in the file (empty for single-account exports).
@@ -643,10 +651,18 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
         return profile?.paymentAccounts?.find(a => a.id === id);
       };
 
-      const transactionsToAdd = fresh.map(t => {
+      // 2. Enrich-or-insert. A row whose importKey already exists was skipped above, so
+      //    its stored doc is pre-claimed here: otherwise a genuinely NEW same-amount row
+      //    (the second $5.00 coffee that day) would absorb it and one real expense would
+      //    vanish. See findTwin's one-to-one contract.
+      const claimed = new Set(validTransactions.map(t => t.id).filter(id => alreadyImported.has(id)));
+      const inserts: (Omit<Transaction, 'id'> & { id?: string })[] = [];
+      const enrichments: (Omit<Transaction, 'id'> & { id?: string })[] = [];
+      let unchanged = 0;
+
+      for (const t of fresh) {
         const account = resolve(t.csvAccount);
-        return {
-          id: t.id,
+        const row = {
           title: t.title,
           amount: t.amount,
           type: t.type,
@@ -661,11 +677,28 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
           merchant: t.merchant,
           accountId: account?.id,
         };
-      });
 
-      const result = await addBulkTransactions(transactionsToAdd);
+        const twin = findTwin(row, transactions, 3, claimed);
+        if (!twin) {
+          inserts.push({ ...row, id: t.id, fingerprint: fingerprintOfRow(row), sources: [CSV_SOURCE] });
+          continue;
+        }
+        const patch = mergeFields(twin, row, CSV_SOURCE);
+        if (Object.keys(patch).length === 0) {
+          unchanged++;
+          continue;
+        }
+        // Rides the same merging bulk write as the inserts — one round trip for the
+        // whole file instead of a per-row update for a few thousand enriched rows.
+        enrichments.push({ ...twin, ...patch });
+      }
+
+      const toWrite = [...inserts, ...enrichments];
+      const result = toWrite.length > 0 ? await addBulkTransactions(toWrite) : { persisted: true };
       setSkippedCount(validTransactions.length - fresh.length);
-      setImportedCount(fresh.length);
+      setImportedCount(inserts.length);
+      setEnrichedCount(enrichments.length);
+      setUnchangedCount(unchanged);
       // Never claim a clean import when the rows only reached this browser.
       setSavedToCloud(result?.persisted ?? false);
       setImportSuccess(true);
@@ -786,9 +819,15 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
             <p className="text-xl font-semibold text-[var(--foreground)]">
               Successfully imported {importedCount} transactions
             </p>
-            {skippedCount > 0 && (
+            {/* Enriched rows are the ones this file recognised as already-known charges
+                and improved (category, merchant) instead of inserting a second time. */}
+            {(enrichedCount > 0 || unchangedCount > 0 || skippedCount > 0) && (
               <p className="text-sm text-[var(--foreground-muted)] mt-2">
-                {skippedCount} were already imported and were left untouched.
+                {[
+                  enrichedCount > 0 && `${enrichedCount} enriched`,
+                  unchangedCount > 0 && `${unchangedCount} already up to date`,
+                  skippedCount > 0 && `${skippedCount} already imported`,
+                ].filter(Boolean).join(' · ')}
               </p>
             )}
             {!savedToCloud && (

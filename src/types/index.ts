@@ -312,6 +312,12 @@ export interface Transaction {
   recurringEndDate?: string; // When recurring payments end (ISO date)
   recurringCount?: number; // Number of remaining payments (e.g., 39 months left)
   isProjected?: boolean; // For future/projected expenses
+  // Dual-source ingest (src/lib/fingerprint.ts). The same charge arrives from the bank
+  // feed and from a Monarch CSV under different ids; these three make the second
+  // sighting enrich the first instead of double-counting it.
+  fingerprint?: string; // `${accountId}|${signedCents}|${yyyy-MM-dd}`
+  sources?: string[]; // every ingest path that has written this row
+  userEdited?: Record<string, boolean>; // fields the owner set by hand — no source may overwrite
 }
 
 export interface User {

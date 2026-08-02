@@ -1,4 +1,4 @@
-# functions-sync — daily Monarch Money → Firestore sync
+# functions-sync — daily bank → Firestore sync
 
 Python 3.12 Firebase Cloud Functions (2nd gen), codebase `sync` — separate from the
 Node `api` codebase in `functions/`. Runs every day at **07:30 America/Chicago**,
@@ -8,10 +8,13 @@ CSV-imported rows via the `importKey` twin id).
 
 Files:
 
-- `main.py` — `monarch_sync` (schedule) + `monarch_sync_now` (manual HTTPS trigger)
-- `sync_core.py` — all sync/mapping logic
-- `dryrun.py` — run the same logic locally, dry-run or apply
-- `test_sync.py` — pure-logic unit tests
+- `main.py` — `monarch_sync` (schedule) + `monarch_sync_now` (manual HTTPS trigger),
+  `simplefin_sync` (schedule) + `simplefin_claim` (one-time HTTPS setup)
+- `sync_core.py` — all Monarch sync/mapping logic, plus the account matching and
+  balance-trust rules both sources share
+- `simplefin.py` — the SimpleFIN Bridge client and its sync (see §5)
+- `dryrun.py` — run the Monarch logic locally, dry-run or apply
+- `test_sync.py` / `test_simplefin.py` — pure-logic unit tests
 
 ## 1. One-time setup (owner)
 
@@ -89,3 +92,84 @@ unmatchedAccounts, reanchored, error).
 - **Balances** — when a Monarch balance changes vs the last sync, the account is
   re-anchored: `openingBalance = current` (debt as positive owed), `openingDate = today`.
 - **Never crashes the schedule** — errors are recorded in `meta/monarchSync.error`.
+
+---
+
+## 5. SimpleFIN — the daily direct-from-the-bank feed
+
+The second ingest source (spec: `docs/superpowers/specs/2026-08-02-dual-source-ingest.md`).
+SimpleFIN gives fresh transactions and **true bank balances** every morning but **no
+categories**; the Monarch CSV path stays for enrichment (and is the only way Apple Card
+data ever arrives). The two never double-count: every row is matched on
+`accountId | signed cents | yyyy-MM-dd` with a ±3-day window, and a match **enriches**
+the existing row instead of inserting a twin.
+
+### 5.1 Owner setup (one time)
+
+1. Create an account at <https://bridge.simplefin.org> (~$15/yr) and **connect your
+   banks** there. Confirm all five institutions are supported *before* paying —
+   coverage is the one thing this design cannot work around.
+2. In the Bridge UI, generate a **setup token** — a long base64 string. It is
+   **single use**: claiming it returns the long-lived access URL and burns the token.
+3. Store the token and the trigger key as secrets:
+
+```sh
+cd /Users/bhuvaneswarmarreddy/Desktop/Projects/cashflow-forecast
+firebase functions:secrets:set SIMPLEFIN_SETUP_TOKEN   # paste the base64 setup token
+firebase functions:secrets:set SYNC_TRIGGER_KEY        # already set if Monarch sync is live
+firebase deploy --only functions:sync
+```
+
+4. Claim it **once**. This POSTs the decoded claim URL and stores the resulting access
+   URL on `meta/simplefinSync.accessUrl`:
+
+```sh
+curl -X POST \
+  -H "X-Sync-Key: <your SYNC_TRIGGER_KEY value>" \
+  https://us-central1-marreddy-cashflow.cloudfunctions.net/simplefin_claim
+```
+
+Replies `{"claimed": true, "host": "bridge.simplefin.org"}` — the access URL itself is
+never returned, since it carries HTTP Basic credentials. A second call replies
+`409 already claimed` rather than burning a fresh token; wrong/missing key → 403.
+
+5. *(optional)* Pin the access URL as a secret so the sync does not depend on the
+   Firestore doc. Read it from `meta/simplefinSync.accessUrl`, then:
+
+```sh
+firebase functions:secrets:set SIMPLEFIN_ACCESS_URL    # takes precedence when set
+firebase deploy --only functions:sync
+```
+
+### 5.2 Daily schedule
+
+`simplefin_sync` runs **every day at 07:30 America/Chicago** — one
+`GET /accounts?start-date=&end-date=` (the bridge allows ≤24 requests/day). Status,
+counters and any error land on `meta/simplefinSync`:
+
+```
+fetched · added · enriched · skippedPending · skippedUnmatched · skippedAlreadySynced
+unmatchedAccounts · ambiguousAccounts · untrustedBalances · reanchored · lastSyncDate
+```
+
+### 5.3 How it behaves
+
+- **Window** — `lastSyncDate − 45 days`, clamped to SimpleFIN's hard **90-day** history
+  limit; the end bound is *tomorrow* so today's rows are always in range. Writes are
+  idempotent, so a wide overlap only costs reads while a narrow one permanently loses
+  late-posting rows.
+- **Enrich-or-insert** — a matching existing row gets `sources: [… , 'simplefin']`, a
+  fingerprint if it had none, and *blank* fields filled in. Monarch's cleaned merchant,
+  title and category always win; `description` keeps the raw statement text (it feeds
+  Zelle person-attribution); anything with `userEdited.<field>` is never touched.
+  New rows are written as `sf_<simplefin txn id>` with `sources: ['simplefin']`.
+- **Never guesses an account** — SimpleFIN accounts are matched by last-4 then
+  name-contains, and two accounts claiming one app account demotes *both* to unmatched
+  (`ambiguousAccounts`). Their transactions are skipped, never assigned.
+- **Balances** — re-anchored to `openingDate = tomorrow` only when the balance moved;
+  first run seeds and anchors nothing; a `balance-date` older than 36h is treated as a
+  broken connection and left alone.
+- **Pending rows are skipped** — they re-post later with a different id.
+- **A bank needing re-auth fails the run loudly.** SimpleFIN reports it in `errors[]`
+  and the whole pass raises rather than syncing a partial day, which would otherwise
+  look like a normal quiet day. Fix the connection in the Bridge UI and re-run.
