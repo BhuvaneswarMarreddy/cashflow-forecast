@@ -9,12 +9,27 @@ import {
 import { Maximize2, Minimize2 } from 'lucide-react';
 import Navbar from '@/components/Navbar';
 import ReconcileSheet from '@/components/ReconcileSheet';
+import RecoveryReviewPanel from '@/components/RecoveryReviewPanel';
+import { RelationBadgeRow } from '@/components/TransactionRelationBadge';
 import { useAuth } from '@/context/AuthContext';
 import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import { buildFlowGraph, detectRecurring, projectNetWorth, day, FlowGraph } from '@/lib/flows';
 import { FLOW_COLORS, FlowColorKey } from '@/lib/palette';
 import { formatMoneyCents } from '@/lib/money';
+import { CandidateStatus, ReviewCandidate, mergeCandidateRun } from '@/lib/candidates';
+import { CARD_CREDIT_TO_INFLOW_MEANING, CardCreditKind } from '@/lib/card-credit';
+import { selectInflowReviewQueue } from '@/lib/classify';
+import { DuplicateCostEstimate, SubscriptionCancellation, emitDuplicateDecision, generateDuplicateCandidates } from '@/lib/duplicates';
+import { emitRefundDecision, generateRefundCandidates } from '@/lib/refunds';
+import { LinkDraft, REFUND_SOURCE_TYPES, TransactionLink, buildLink, toTxRef } from '@/lib/relations';
+import { getLinks, getReviewCandidates, recordCandidateDecision, saveLink, saveReviewCandidate } from '@/lib/relations-store';
+import { buildAliasIndex, resolveServiceIdentity } from '@/lib/service-identity';
+import { useRecoveryObservability } from '@/lib/obs/useRecoveryObservability';
+import {
+  QueueContext, RecoveryDecision, REVIEW_SECTIONS, ReviewQueueItem, SectionId,
+  buildReviewQueue, queueBadgeLabel, queueCounts, relationBadges, rowLabel, supersededLinks,
+} from '@/lib/review-queue';
 
 const money = (cents: number) => formatMoneyCents(cents);
 
@@ -107,10 +122,29 @@ function SankeyTooltip({ active, payload }: { active?: boolean; payload?: Array<
   );
 }
 
+/**
+ * The cancellation effective date has no home in `ReviewCandidate` and
+ * `recordCandidateDecision` has no field for it (FIN-DUPLICATE-001 limitation 1), while
+ * `relations-store.ts`, `candidates.ts` and `firestore.rules` are all closed to this task.
+ * It therefore rides on the candidate DOCUMENT as one extra field — the rules validate
+ * with `keys().hasAll([...])`, so an additional key is legal — and is read back here into
+ * `DuplicateOptions.cancellations`, which is what finally arms
+ * `continued_charge_after_cancellation`.
+ */
+type CandidateDoc = ReviewCandidate & { cancelledEffectiveDate?: string };
+
+interface UndoRecord {
+  candidate: ReviewCandidate;
+  previousStatus: CandidateStatus;
+  links: TransactionLink[];
+  label: string;
+  eventName: string;
+}
+
 export default function FlowPage() {
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, user } = useAuth();
   const { transactions } = useTransactions();
-  const { profile, reconcileAccount } = useUserProfile();
+  const { profile, reconcileAccount, incomeContext, setInflowReview } = useUserProfile();
 
   const [reconcileFor, setReconcileFor] = useState<{ accountId: string; name: string; derived: number } | null>(null);
   const router = useRouter();
@@ -576,6 +610,390 @@ export default function FlowPage() {
     );
   };
 
+  // =========================================================================
+  // FIN-RECOVERY-UI-001 — the review surface.
+  //
+  // EVERY hook below is above the early return on purpose. `/flow` shipped React
+  // error #310 once by adding a hook after it; the note two blocks down is the scar.
+  // =========================================================================
+
+  // `?tab=review` per the accepted IA. Read in the initializer, like /history does, so
+  // there is no set-state-in-effect and no useSearchParams prerender bailout. Anything
+  // that is not `review` — absent, unknown, `transactions`, `insights` — renders today's
+  // Flow content unchanged. The wider consolidation is UX-NAV-002's, not this task's.
+  const [tab, setTab] = useState<string>(() =>
+    typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('tab') || 'flow' : 'flow'
+  );
+  const [links, setLinks] = useState<TransactionLink[]>([]);
+  const [storedCandidates, setStoredCandidates] = useState<CandidateDoc[]>([]);
+  const [recoveryLoaded, setRecoveryLoaded] = useState(false);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [sectionFilter, setSectionFilter] = useState<SectionId | null>(null);
+  const [announcement, setAnnouncement] = useState('');
+  const [undoRecord, setUndoRecord] = useState<UndoRecord | null>(null);
+  // Desktop gets a persistent side panel; mobile gets the existing `Sheet`. Read once in
+  // the initializer and updated only from the media-query event, so no effect sets state.
+  const [isDesktop, setIsDesktop] = useState(() =>
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia('(min-width: 1024px)').matches
+      : false
+  );
+
+  const obs = useRecoveryObservability({ userId: user?.id });
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const onChange = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  // Browser back/forward and deep links both work because `?tab=` is in the URL.
+  useEffect(() => {
+    const onPop = () => setTab(new URLSearchParams(window.location.search).get('tab') || 'flow');
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  // The two recovery collections, read ONCE per signed-in session. Nothing here writes a
+  // transaction document — a relationship is stored beside a row, never inside it.
+  useEffect(() => {
+    if (!isAuthenticated || !user?.id) return;
+    let cancelled = false;
+    Promise.all([getLinks(user.id), getReviewCandidates(user.id)])
+      .then(([l, c]) => {
+        if (cancelled) return;
+        setLinks(l);
+        setStoredCandidates(c as CandidateDoc[]);
+        setRecoveryLoaded(true);
+      })
+      .catch(() => { if (!cancelled) setRecoveryLoaded(true); });
+    return () => { cancelled = true; };
+  }, [isAuthenticated, user?.id]);
+
+  // The owner's "I cancelled it on ⟨date⟩" answers, read back off the candidate documents
+  // and resolved to a service family from the LOCAL ledger (a candidate carries no
+  // merchant text by design).
+  const cancellations: SubscriptionCancellation[] = useMemo(() => {
+    const index = new Map(transactions.map((t) => [t.id, t]));
+    const aliasIndex = buildAliasIndex([]);
+    return storedCandidates.flatMap((c) => {
+      if (!c.cancelledEffectiveDate) return [];
+      const row = c.transactionIds.map((id) => index.get(id)).find(Boolean);
+      if (!row) return [];
+      return [{
+        serviceFamilyId: resolveServiceIdentity(row, aliasIndex).serviceFamilyId,
+        effectiveDate: c.cancelledEffectiveDate,
+      }];
+    });
+  }, [storedCandidates, transactions]);
+
+  // DETECTION IS NEVER PER RENDER. Both generators are pure functions of their inputs and
+  // are memoized on exactly those inputs, so they run when the data changes and at no
+  // other time — not on a hover, not on a filter change, not on a re-render.
+  const refundRun = useMemo(
+    () => (recoveryLoaded ? generateRefundCandidates(transactions, accounts, links, { income: incomeContext }) : null),
+    [recoveryLoaded, transactions, accounts, links, incomeContext]
+  );
+  const duplicateRun = useMemo(
+    () => (recoveryLoaded ? generateDuplicateCandidates(transactions, accounts, { todayISO, cancellations, income: incomeContext }) : null),
+    [recoveryLoaded, transactions, accounts, todayISO, cancellations, incomeContext]
+  );
+
+  // A terminal decision suppresses its candidate forever, across an algorithm-version
+  // bump included — that is `mergeCandidateRun`'s whole job.
+  const candidates: ReviewCandidate[] = useMemo(() => {
+    const generated = [...(refundRun?.candidates ?? []), ...(duplicateRun?.candidates ?? [])];
+    const run = mergeCandidateRun(generated, storedCandidates);
+    return [...run.writes, ...run.unchanged];
+  }, [refundRun, duplicateRun, storedCandidates]);
+
+  const estimates: DuplicateCostEstimate[] = useMemo(() => duplicateRun?.estimates ?? [], [duplicateRun]);
+
+  // FIN-REVIEW-002's unknown-inflow items, composed as ONE MORE SOURCE in this queue —
+  // never a second queue, never a second state machine.
+  const inflowItems = useMemo(
+    () => (recoveryLoaded ? selectInflowReviewQueue(transactions, accounts, incomeContext) : []),
+    [recoveryLoaded, transactions, accounts, incomeContext]
+  );
+
+  const queueCtx: QueueContext = useMemo(
+    () => ({ transactions, accounts, links, candidates, inflowItems, estimates }),
+    [transactions, accounts, links, candidates, inflowItems, estimates]
+  );
+  const queue = useMemo(() => buildReviewQueue(queueCtx), [queueCtx]);
+  const counts = useMemo(() => queueCounts(queue), [queue]);
+  const badgeCtx = useMemo(() => ({ links, transactions, accounts, candidates }), [links, transactions, accounts, candidates]);
+
+  /** Confirmed refund pairs, for the flow-as-a-table text alternative. */
+  const confirmedPairs = useMemo(() => {
+    const index = new Map(transactions.map((t) => [t.id, t]));
+    const label = (id: string) => {
+      const t = index.get(id);
+      return t ? `${rowLabel(t)}, ${day(t.date)}` : id;
+    };
+    return links
+      .filter((l) => l.status === 'confirmed' && REFUND_SOURCE_TYPES.includes(l.linkType))
+      .map((l) => ({ id: l.id, from: label(l.sourceTransactionId), to: label(l.targetTransactionId), cents: l.allocatedAmountCents }));
+  }, [links, transactions]);
+
+  const reviewOpen = tab === 'review';
+  const queueOpenedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!reviewOpen || !recoveryLoaded) return;
+    const signature = `${queue.length}`;
+    if (queueOpenedFor.current === signature) return;
+    queueOpenedFor.current = signature;
+    obs.trackQueueOpened({ total: queue.length, countsByType: counts.bySection });
+  }, [reviewOpen, recoveryLoaded, queue.length, counts.bySection, obs]);
+
+  const setTabInUrl = useCallback((next: string) => {
+    setTab(next);
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    if (next === 'flow') url.searchParams.delete('tab');
+    else url.searchParams.set('tab', next);
+    window.history.pushState({}, '', url);
+  }, []);
+
+  const openReview = useCallback((section: SectionId | null) => {
+    setSectionFilter(section);
+    setTabInUrl('review');
+  }, [setTabInUrl]);
+
+  const closeReview = useCallback(() => {
+    setSelectedKey(null);
+    setUndoRecord(null); // a stale undo is worse than none
+    setAnnouncement('');
+    setTabInUrl('flow');
+  }, [setTabInUrl]);
+
+  const selectItem = useCallback((key: string | null) => {
+    setSelectedKey(key);
+    setUndoRecord(null);
+    const item = queue.find((i) => i.key === key);
+    if (!item) return;
+    obs.trackTransactionSelected({
+      candidateType: item.candidate?.candidateType ?? 'unknown_inflow',
+      queuePosition: queue.indexOf(item),
+      state: item.state,
+    });
+    // The existing trace machinery, unchanged: pin the node these rows already sit
+    // behind, so the linked pair lights up and the drill-down lists them — without
+    // adding a single node or edge to the graph.
+    const nodeId = Object.keys(graph.nodeTxnIds).find((id) =>
+      (graph.nodeTxnIds[id] ?? []).some((tid) => item.transactionIds.includes(tid))
+    );
+    const label = graph.nodes.find((n) => n.id === nodeId)?.label;
+    if (label) setPinLabel(label);
+  }, [queue, obs, graph]);
+
+  const txRefs = useMemo(() => transactions.map(toTxRef), [transactions]);
+
+  /**
+   * THE ONE PATH FROM A PROPOSAL TO A STORED FACT, and it is reachable only from a button
+   * press. Persist, recompute, update counts, drop the item, announce, offer undo — in
+   * that order, with no page reload, no router re-fetch, and no in-place mutation of any
+   * transaction, link or candidate object.
+   */
+  const onDecide = useCallback(
+    (item: ReviewQueueItem, decision: RecoveryDecision, override?: ReviewCandidate) => {
+      const uid = user?.id;
+      const startedAt = Date.now();
+      const candidate = override ?? item.candidate;
+
+      // A card credit the owner explains: the answer is a review record on that ROW, and
+      // no card credit maps to earned income by any path (CARD_CREDIT_TO_INFLOW_MEANING).
+      if (decision.cardCreditKind) {
+        const kind = decision.cardCreditKind as CardCreditKind;
+        const transactionId = candidate
+          ? candidate.transactionIds.find((id) => transactions.find((t) => t.id === id)?.type === 'income') ?? item.transactionIds[0]
+          : item.transactionIds[0];
+        void setInflowReview({
+          transactionId,
+          state: 'confirmed',
+          meaning: CARD_CREDIT_TO_INFLOW_MEANING[kind],
+          source: 'user',
+          updatedAt: new Date().toISOString(),
+        }).catch(() => setAnnouncement('That answer could not be saved. Please try again.'));
+        obs.trackClassificationConfirmed({ candidateType: item.candidate?.candidateType ?? 'unknown_inflow', decisionStatus: decision.status });
+      }
+
+      // A chargeback is real but NOT final: a provisional link, which reduces no spending.
+      if (decision.chargebackTargetId && candidate && uid) {
+        const draft: LinkDraft = {
+          linkType: 'chargeback_for',
+          sourceTransactionId: candidate.transactionIds.find((id) => id !== decision.chargebackTargetId) ?? candidate.transactionIds[0],
+          targetTransactionId: decision.chargebackTargetId,
+          allocatedAmountCents: candidate.proposedLinks[0]?.allocatedAmountCents ?? 0,
+          status: 'provisional',
+          confirmedAt: new Date().toISOString(),
+          algorithmVersion: candidate.algorithmVersion,
+          candidateId: candidate.candidateId,
+        };
+        const built = buildLink(draft, { transactions: txRefs, links });
+        if (built.ok) {
+          setLinks((prev) => [...prev, built.link]);
+          void saveLink(uid, draft, { transactions: txRefs, links }).catch(() => {});
+        }
+      }
+
+      const writtenLinks: TransactionLink[] = [];
+      if (candidate && decision.status === 'confirmed' && decision.allocations?.length) {
+        const confirmedAt = new Date().toISOString();
+        const accumulated = [...links];
+        for (const allocation of decision.allocations) {
+          const draft: LinkDraft = {
+            linkType: candidate.candidateType === 'partial_refund_match' ? 'partial_refund_of' : 'refund_of',
+            sourceTransactionId: candidate.proposedLinks[0]?.sourceTransactionId ?? candidate.transactionIds[0],
+            targetTransactionId: allocation.targetTransactionId,
+            allocatedAmountCents: allocation.allocatedAmountCents,
+            status: 'confirmed',
+            confirmedAt,
+            confirmedBy: 'user',
+            algorithmVersion: candidate.algorithmVersion,
+            candidateId: candidate.candidateId,
+          };
+          const built = buildLink(draft, { transactions: txRefs, links: accumulated });
+          if (!built.ok) {
+            setAnnouncement(`That allocation was refused (rule ${built.ruleId}). Nothing was saved.`);
+            return;
+          }
+          accumulated.push(built.link);
+          writtenLinks.push(built.link);
+          if (uid) void saveLink(uid, draft, { transactions: txRefs, links: accumulated }).catch(() => {});
+        }
+        // §7.2 — re-allocating a credit SUPERSEDES the allocation it replaces; it never
+        // deletes it. The link id is derived from the pair, so a changed amount on the
+        // same pair is an upsert; only a changed TARGET produces a second document, and
+        // that is exactly the case that needs an audit trail.
+        const creditId = candidate.proposedLinks[0]?.sourceTransactionId ?? candidate.transactionIds[0];
+        const superseded = supersededLinks(
+          links,
+          creditId,
+          new Set(writtenLinks.map((l) => l.targetTransactionId)),
+          writtenLinks[0].id,
+          confirmedAt
+        );
+        for (const l of superseded) {
+          if (uid) {
+            void saveLink(
+              uid,
+              { id: l.id, linkType: l.linkType, sourceTransactionId: l.sourceTransactionId, targetTransactionId: l.targetTransactionId, allocatedAmountCents: l.allocatedAmountCents, status: 'superseded', supersededByLinkId: l.supersededByLinkId, algorithmVersion: l.algorithmVersion },
+              { transactions: txRefs, links: accumulated }
+            ).catch(() => {});
+          }
+        }
+
+        // New arrays, new objects — no `t.category = …` anywhere in this feature.
+        setLinks((prev) => [...prev.map((l) => superseded.find((s) => s.id === l.id) ?? l), ...writtenLinks]);
+        obs.trackLinkConfirmed({
+          candidateType: candidate.candidateType,
+          allocationCount: writtenLinks.length,
+          algorithmVersion: candidate.algorithmVersion,
+          durationMs: Date.now() - startedAt,
+        });
+        emitRefundDecision({
+          event: 'Refund.MatchConfirmed',
+          candidateType: candidate.candidateType,
+          allocationCount: writtenLinks.length,
+          sameAccount: candidate.evidence.sameAccount,
+          dayGap: candidate.evidence.dayGaps[0] ?? 0,
+        });
+      } else if (candidate && decision.status === 'dismissed' && !decision.cardCreditKind) {
+        emitRefundDecision({
+          event: 'Refund.MatchRejected',
+          candidateType: candidate.candidateType,
+          rejectionReasonCode: decision.reasonCode ?? 'rejected',
+        });
+      }
+
+      if (candidate) {
+        const previousStatus = candidate.status;
+        const doc: CandidateDoc = {
+          ...candidate,
+          status: decision.status,
+          reviewedBy: 'user',
+          reviewedAt: new Date().toISOString(),
+          ...(writtenLinks.length ? { linkIds: writtenLinks.map((l) => l.id) } : {}),
+          ...(decision.effectiveDate ? { cancelledEffectiveDate: decision.effectiveDate } : {}),
+        };
+        setStoredCandidates((prev) => [...prev.filter((c) => c.id !== doc.id), doc]);
+        if (uid) {
+          void saveReviewCandidate(uid, doc)
+            .then(() => recordCandidateDecision(uid, doc.id, decision.status, { linkIds: doc.linkIds }))
+            .catch(() => setAnnouncement('That decision could not be saved. Please try again.'));
+        }
+        emitDuplicateDecision(candidate.candidateType, decision.status, decision.reasonCode);
+        setUndoRecord({
+          candidate,
+          previousStatus,
+          links: writtenLinks,
+          label: 'Undo',
+          eventName: decision.status === 'confirmed' ? 'MoneyReview.LinkConfirmed' : 'MoneyReview.ClassificationConfirmed',
+        });
+      }
+
+      setAnnouncement(
+        decision.status === 'confirmed' && writtenLinks.length
+          ? `Confirmed — ${money(writtenLinks.reduce((s, l) => s + l.allocatedAmountCents, 0))} marked as returned.`
+          : decision.status === 'intentional'
+            ? 'Saved — we will stop asking about this one. Both transactions stay counted.'
+            : 'Saved. Nothing else changed.'
+      );
+      setSelectedKey(null);
+    },
+    [user?.id, transactions, txRefs, links, setInflowReview, obs]
+  );
+
+  /** One step, panel-scoped. Undo never DELETES a link — FIN-RELATION-001 §6 denies it. */
+  const onUndo = useCallback(() => {
+    if (!undoRecord) return;
+    const uid = user?.id;
+    const startedAt = Date.now();
+    const undoneIds = new Set(undoRecord.links.map((l) => l.id));
+    setLinks((prev) => prev.map((l) => (undoneIds.has(l.id) ? { ...l, status: 'rejected' as const } : l)));
+    setStoredCandidates((prev) => [
+      ...prev.filter((c) => c.id !== undoRecord.candidate.id),
+      { ...undoRecord.candidate, status: undoRecord.previousStatus },
+    ]);
+    if (uid) {
+      for (const link of undoRecord.links) {
+        void saveLink(
+          uid,
+          {
+            id: link.id, linkType: link.linkType,
+            sourceTransactionId: link.sourceTransactionId, targetTransactionId: link.targetTransactionId,
+            allocatedAmountCents: link.allocatedAmountCents, status: 'rejected',
+            algorithmVersion: link.algorithmVersion, candidateId: link.candidateId,
+          },
+          { transactions: txRefs, links }
+        ).catch(() => {});
+      }
+      void recordCandidateDecision(uid, undoRecord.candidate.id, undoRecord.previousStatus).catch(() => {});
+    }
+    obs.trackUndoCompleted({ undoneEventName: undoRecord.eventName, durationMs: Date.now() - startedAt, resultStatus: 'ok' });
+    setAnnouncement('Undone. Nothing was deleted — the links are recorded as rejected.');
+    setUndoRecord(null);
+  }, [undoRecord, user?.id, txRefs, links, obs]);
+
+  const reviewPanelProps = {
+    items: queue,
+    ctx: queueCtx,
+    estimates,
+    selectedKey,
+    sectionFilter,
+    announcement,
+    undoLabel: undoRecord ? undoRecord.label : null,
+    onSelect: selectItem,
+    onSectionFilter: setSectionFilter,
+    onDecide,
+    onUndo,
+    onAllocationEdited: obs.trackAllocationEdited,
+    onClose: closeReview,
+  };
+
   // AFTER all hooks — an early return above any hook crashes React with
   // "rendered more hooks than during the previous render" (shipped once; never again).
   if (authLoading || !isAuthenticated) return null;
@@ -613,6 +1031,41 @@ export default function FlowPage() {
           ))}
         </section>
 
+        {/* The review entry point, in the tile voice. Zero-count chips are hidden; when
+            everything is reviewed one calm line replaces the strip. The total is
+            ANNOUNCED, not merely painted. */}
+        {recoveryLoaded && (
+          <section aria-label="Review shortcuts" className="flex flex-wrap items-center gap-2">
+            <span className="sr-only" aria-live="polite">{queueBadgeLabel(counts.total)}</span>
+            {counts.total === 0 ? (
+              <p className="text-sm text-[var(--foreground-muted)]">Nothing to review.</p>
+            ) : (
+              <>
+                <button
+                  onClick={() => openReview(null)}
+                  aria-label={queueBadgeLabel(counts.total)}
+                  className="min-h-[44px] px-3 py-2 rounded-full text-sm bg-[var(--accent-primary)] text-[#16181c]"
+                >
+                  Needs Review · {counts.total}
+                </button>
+                {REVIEW_SECTIONS.map((s) =>
+                  counts.bySection[s.id] ? (
+                    <button
+                      key={s.id}
+                      onClick={() => openReview(s.id)}
+                      className="min-h-[44px] px-3 py-2 rounded-full text-sm border border-[var(--border-color)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]"
+                    >
+                      {s.chipLabel} · {counts.bySection[s.id]}
+                    </button>
+                  ) : null
+                )}
+              </>
+            )}
+          </section>
+        )}
+
+        <div className="lg:flex lg:items-start lg:gap-4">
+        <div className="flex-1 min-w-0 space-y-10">
         {sankeyData.links.length === 0 ? (
           <div className="rounded-xl border border-[var(--border-color)] p-10 text-center text-[var(--foreground-muted)]">
             No transactions in this period.
@@ -671,6 +1124,7 @@ export default function FlowPage() {
                         <th scope="col" className="px-3 py-1.5 font-normal">Date</th>
                         <th scope="col" className="px-3 py-1.5 font-normal">Merchant</th>
                         <th scope="col" className="px-3 py-1.5 font-normal text-right">Amount</th>
+                        <th scope="col" className="px-3 py-1.5 font-normal">Status</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -679,6 +1133,8 @@ export default function FlowPage() {
                           <td className="px-3 py-1.5 whitespace-nowrap">{t.date}</td>
                           <td className="px-3 py-1.5">{t.merchant || t.title}</td>
                           <td className="px-3 py-1.5 text-right tabular-nums">{money(Math.round(t.amount * 100))}</td>
+                          {/* Gross stays on the row. The badge says what happened to it. */}
+                          <td className="px-3 py-1.5"><RelationBadgeRow badges={relationBadges(t, badgeCtx)} /></td>
                         </tr>
                       ))}
                     </tbody>
@@ -713,9 +1169,43 @@ export default function FlowPage() {
                   </tbody>
                 </table>
               </div>
+
+              {/* Any relationship the diagram highlights must also be READABLE. The Sankey
+                  gains no node and no edge for a confirmed refund — it renders as a linked
+                  pair — so the pairs are listed here, where a screen reader can reach them. */}
+              {confirmedPairs.length > 0 && (
+                <div className="overflow-x-auto rounded-xl border border-[var(--border-color)] mt-2">
+                  <table className="w-full text-sm">
+                    <caption className="sr-only">Linked transactions: which credit reverses which purchase.</caption>
+                    <thead className="bg-[var(--background-tertiary)] text-left">
+                      <tr>
+                        <th scope="col" className="px-3 py-2">Credit</th>
+                        <th scope="col" className="px-3 py-2">Reverses</th>
+                        <th scope="col" className="px-3 py-2 text-right">Allocated</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {confirmedPairs.map((p) => (
+                        <tr key={p.id} className="border-t border-[var(--border-color)]">
+                          <td className="px-3 py-2">{p.from}</td>
+                          <td className="px-3 py-2">{p.to}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{money(p.cents)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </details>
           </section>
         )}
+        </div>
+
+        {/* Desktop: a persistent landmark beside the diagram, so the Sankey stays visible
+            while the owner moves through items. Mobile gets the `Sheet` instead — the
+            desktop sidebar is never ported down. */}
+        {reviewOpen && isDesktop && <RecoveryReviewPanel {...reviewPanelProps} variant="panel" />}
+        </div>
 
         {/* Maximized overlay */}
         {maximized && (
@@ -886,6 +1376,8 @@ export default function FlowPage() {
             </ResponsiveContainer>
           </div>
         </section>
+
+        {reviewOpen && !isDesktop && <RecoveryReviewPanel {...reviewPanelProps} variant="sheet" />}
 
         {reconcileFor && (
           <ReconcileSheet
