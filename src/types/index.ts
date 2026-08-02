@@ -191,6 +191,20 @@ export interface PaymentAccount {
   loanStartDate?: string; // When the loan started
 }
 
+/** What KIND of income a source is. Display/grouping only — it never affects matching. */
+export type IncomeSourceKind =
+  | 'employment' | 'secondary' | 'contract' | 'business'
+  | 'rental' | 'pension_or_benefit' | 'other';
+
+/**
+ * An APPROVED income source (`users/{uid}/income/{incomeId}`).
+ *
+ * FIN-INCOME-001: this is the one authoritative answer to "is money entering my
+ * account earned income". Everything below the divider is OPTIONAL and additive on
+ * purpose — a document written before this task has none of it and keeps working
+ * unchanged, so there is no production migration. `name` doubles as a match alias
+ * for exactly that reason.
+ */
 export interface IncomeSource {
   id: string;
   name: string;
@@ -201,6 +215,125 @@ export interface IncomeSource {
   isActive: boolean;
   endDate?: string; // When this income ends (ISO date) - e.g., contract ending
   remainingPayments?: number; // Number of remaining payments - e.g., 12 months left
+
+  // --- FIN-INCOME-001, all optional, no migration ---------------------------
+  /** Employer/payer text that identifies a deposit as this source. `name` is always
+   *  tried as well, so a legacy document still matches its own deposits. */
+  matchAliases?: string[];
+  /** Accounts this source pays into. Absent/empty = any account of the owner's. */
+  depositAccountIds?: string[];
+  /** INTEGER CENTS. Absent = amount plays no part at all. Present = a match whose
+   *  amount is further than this from `amount` is REJECTED. Amount can only ever
+   *  narrow a match, never create one. */
+  amountToleranceCents?: number;
+  /** How many ledger rows have matched. Diagnostics — never evidence. */
+  historicalMatchCount?: number;
+  /** The owner approved this source. Absent = true: a hand-entered source IS approval. */
+  userApproved?: boolean;
+  /** ISO timestamp of the most recent matched row. */
+  lastMatchedAt?: string;
+  kind?: IncomeSourceKind;
+}
+
+/**
+ * The shared financial meaning of a transaction — owned by FIN-INCOME-001, imported
+ * by FIN-REVIEW-002 (§3) and FIN-SETTLEMENT-003. Orthogonal to `TransactionType`
+ * (expense|income|transfer) and to `ExpenseCategory` (13 spending buckets).
+ *
+ * These strings are PERSISTED. Never rename one without a data migration.
+ *
+ * `unknown_inflow` is FIN-REVIEW-002's `unknown`, named for what it actually is: the
+ * default for an unmatched credit. It is NOT income and never becomes income by
+ * resemblance — only an approved source or the owner can do that.
+ */
+export const FINANCIAL_MEANINGS = [
+  // outflows
+  'personal_expense',
+  'shared_expense',
+  'reimbursable_expense',
+  'business_expense',
+  'subscription',
+  'recurring_bill',
+  'one_time_expense',
+  // neither direction — money you already had
+  'internal_transfer',
+  'card_payment',
+  'refund',
+  // inflows
+  'earned_income',
+  'shared_expense_reimbursement',
+  'receivable_repayment',
+  'sale_proceeds',
+  'gift_or_personal_transfer',
+  'other_non_income_credit',
+  'unknown_inflow',
+] as const;
+
+export type FinancialMeaning = (typeof FINANCIAL_MEANINGS)[number];
+
+/** The closed membership check for every trust boundary (AI replies, Firestore reads). */
+export function isFinancialMeaning(v: unknown): v is FinancialMeaning {
+  return typeof v === 'string' && (FINANCIAL_MEANINGS as readonly string[]).includes(v);
+}
+
+/** FIN-REVIEW-002 §2.2. `unreviewed` is the absence of a record, not a stored value. */
+export type InflowReviewState = 'unreviewed' | 'suggested' | 'confirmed' | 'dismissed' | 'needs_attention';
+
+/**
+ * `users/{uid}/reviews/{transactionId}` — review state stored INDEPENDENTLY of
+ * category, so a classification the owner confirmed never returns to the queue and
+ * a category the owner happens to have left as `other` is not treated as a question.
+ *
+ * Provider fields (description, provider category, amount, provider id, posted date)
+ * are never written from here. FIN-REVIEW-002 extends this record; the fields it adds
+ * (rule scope, links, owner share) are all optional additions to this same document.
+ */
+export interface InflowReview {
+  transactionId: string;
+  state: InflowReviewState;
+  /** The meaning the owner confirmed. Only read when `state === 'confirmed'`. */
+  meaning?: FinancialMeaning;
+  /** The approved source the owner attributed it to, when they named one. */
+  incomeSourceId?: string;
+  /** Reason ids as at the time of writing — audit, recomputed for display. */
+  reasons?: string[];
+  /** `Transaction.fingerprint` so a re-imported row under a new id can re-attach. */
+  fingerprint?: string;
+  /** The owner's own words, <= 500 chars. */
+  explanation?: string;
+  confirmedAt?: string; // ISO
+  updatedAt: string; // ISO
+  source: 'user' | 'system';
+}
+
+/**
+ * INTERFACE ONLY — the engine belongs to FIN-SETTLEMENT-003.
+ *
+ * Declared here so FIN-REVIEW-002 has a stable shape to record "these two rows are
+ * related" against (its §8.1), and so the meanings above have a matching link type.
+ * FIN-INCOME-001 implements NONE of it: no allocation engine, no counterparties, no
+ * shared-expense groups, no receivable lifecycle, no netting order, no Firestore
+ * collection. FIN-SETTLEMENT-003 owns all of that and may change this shape.
+ *
+ * Two invariants it must keep, because they are money invariants:
+ *  - `allocatedAmountCents` is INTEGER CENTS, never dollars, never a float;
+ *  - Σ allocations against one target may never exceed that target's cents.
+ */
+export interface TransactionLink {
+  linkType:
+    | 'refund_of'             // credit <- original purchase
+    | 'reimbursement_of'      // inbound share <- shared/reimbursable expense
+    | 'repayment_of'          // inbound <- money previously lent
+    | 'internal_transfer_leg' // the other leg of an own-account move
+    | 'card_payment_of';      // bank outflow <- card statement
+  sourceTransactionId: string;
+  targetTransactionId: string;
+  expenseGroupId?: string;
+  counterpartyId?: string;
+  allocatedAmountCents: number;
+  status: 'proposed' | 'confirmed' | 'rejected';
+  /** A link affects no displayed number until this is true. */
+  userConfirmed: boolean;
 }
 
 export interface UserProfile {
