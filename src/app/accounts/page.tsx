@@ -135,6 +135,10 @@ export default function AccountsPage() {
     amount: '',
     frequency: 'monthly' as 'weekly' | 'biweekly' | 'monthly' | 'yearly',
     payDate: '',
+    // Comma-separated text that must appear on the bank line for a deposit to count
+    // as THIS income. Without it the source name is the only alias, and a source
+    // called "Canton Group" never matches a row that reads "CANTON PAYROLL PPD".
+    matchAliases: '',
   });
 
   const [budgetAmount, setBudgetAmount] = useState('');
@@ -229,6 +233,7 @@ export default function AccountsPage() {
       amount: income.amount.toString(),
       frequency: income.frequency,
       payDate: income.payDate?.toString() || '',
+      matchAliases: (income.matchAliases ?? []).join(', '),
     });
     setShowIncomeModal(true);
   };
@@ -274,6 +279,13 @@ export default function AccountsPage() {
       amount: parseFloat(incomeForm.amount) || 0,
       frequency: incomeForm.frequency,
       payDate: incomeForm.payDate ? parseInt(incomeForm.payDate) : undefined,
+      // Split, trim, drop blanks and 1-2 char fragments (matchApprovedSources rejects
+      // those anyway — a 2-char alias would match half the ledger). Empty => undefined,
+      // so the source falls back to matching on its own name.
+      matchAliases: incomeForm.matchAliases
+        .split(',').map((a) => a.trim()).filter((a) => a.length >= 3).length
+        ? incomeForm.matchAliases.split(',').map((a) => a.trim()).filter((a) => a.length >= 3)
+        : undefined,
       isActive: true,
     };
 
@@ -316,6 +328,7 @@ export default function AccountsPage() {
       amount: '',
       frequency: 'monthly',
       payDate: '',
+      matchAliases: '',
     });
     setEditingIncome(null);
     setShowIncomeModal(false);
@@ -1281,6 +1294,25 @@ export default function AccountsPage() {
                   placeholder="e.g., Salary, Freelance"
                   className="input-field"
                 />
+              </div>
+
+              <div>
+                <label htmlFor="income-aliases" className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">
+                  Bank description contains
+                </label>
+                <input
+                  id="income-aliases"
+                  type="text"
+                  value={incomeForm.matchAliases}
+                  onChange={(e) => setIncomeForm({ ...incomeForm, matchAliases: e.target.value })}
+                  placeholder="e.g., CANTON PAYROLL, CANTON DEPOSIT"
+                  className="input-field"
+                  aria-describedby="income-aliases-help"
+                />
+                <p id="income-aliases-help" className="text-xs text-[var(--foreground-muted)] mt-1.5">
+                  Text that appears on the bank line for this income, comma-separated. A deposit only
+                  counts as earned income when it matches. Leave blank to match on the name above.
+                </p>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
