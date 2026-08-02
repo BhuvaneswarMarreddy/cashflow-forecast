@@ -307,34 +307,13 @@ export interface InflowReview {
 }
 
 /**
- * INTERFACE ONLY — the engine belongs to FIN-SETTLEMENT-003.
- *
- * Declared here so FIN-REVIEW-002 has a stable shape to record "these two rows are
- * related" against (its §8.1), and so the meanings above have a matching link type.
- * FIN-INCOME-001 implements NONE of it: no allocation engine, no counterparties, no
- * shared-expense groups, no receivable lifecycle, no netting order, no Firestore
- * collection. FIN-SETTLEMENT-003 owns all of that and may change this shape.
- *
- * Two invariants it must keep, because they are money invariants:
- *  - `allocatedAmountCents` is INTEGER CENTS, never dollars, never a float;
- *  - Σ allocations against one target may never exceed that target's cents.
+ * `TransactionLink` used to be declared here as an unreferenced FIN-INCOME-001 stub.
+ * FIN-RELATION-001 shipped the real one — `src/lib/relations.ts`, with the validator,
+ * the closed status set, the derived doc id and the Firestore rules that back it — and
+ * two shapes named `TransactionLink` is exactly how a ledger grows two answers to
+ * "is this refund confirmed?". The stub is deleted; import the real type from
+ * `@/lib/relations`.
  */
-export interface TransactionLink {
-  linkType:
-    | 'refund_of'             // credit <- original purchase
-    | 'reimbursement_of'      // inbound share <- shared/reimbursable expense
-    | 'repayment_of'          // inbound <- money previously lent
-    | 'internal_transfer_leg' // the other leg of an own-account move
-    | 'card_payment_of';      // bank outflow <- card statement
-  sourceTransactionId: string;
-  targetTransactionId: string;
-  expenseGroupId?: string;
-  counterpartyId?: string;
-  allocatedAmountCents: number;
-  status: 'proposed' | 'confirmed' | 'rejected';
-  /** A link affects no displayed number until this is true. */
-  userConfirmed: boolean;
-}
 
 export interface UserProfile {
   id: string;
