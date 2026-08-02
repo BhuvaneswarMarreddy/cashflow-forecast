@@ -20,8 +20,8 @@ commit; the three implementation commits are `6370abe`, `4f7ad3e`, `3203f05`.
 
 | File | New? | What |
 |---|---|---|
-| `src/lib/service-identity.ts` | new, 200 lines | `ServiceFamily`, the four-rule resolution ladder, the generic-token stoplist, alias index, `confirmAlias` |
-| `src/lib/duplicates.ts` | new, 700 lines | `detectRecurringByAccount()`, the immediate-duplicate sweep, cross-account pairing, price-drift segmentation, the avoidable-cost estimate, the run span and events |
+| `src/lib/service-identity.ts` | new, 186 lines | `ServiceFamily`, the four-rule resolution ladder, the generic-token stoplist, alias index, `confirmAlias` |
+| `src/lib/duplicates.ts` | new, 993 lines | `detectRecurringByAccount()`, the immediate-duplicate sweep, cross-account pairing, price-drift segmentation, the avoidable-cost estimate, the run span and events |
 | `src/__tests__/duplicates.test.ts` | new | U1–U12 |
 | `src/__tests__/duplicate-subscriptions.test.ts` | new | S1–S16 + the rule-drift pin |
 | `src/__tests__/duplicate-decisions.test.ts` | new | A1–A9 |
