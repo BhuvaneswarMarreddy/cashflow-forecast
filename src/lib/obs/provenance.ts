@@ -196,6 +196,9 @@ export function accountsSummaryProvenance(
       'Inactive accounts never reach this calculation: firestore.getAccounts() filters isActive == true at the repository, so "excludedAccountCount" counts type exclusions only.',
       `Last-sync is derived (${sync.source}); the authoritative meta/monarchSync.lastSuccess is not readable by the browser under the current Firestore rules.`,
       'AvailableCredit excludes cards with no creditLimit set rather than treating a missing limit as zero — matching the page, which sums only the limits it has.',
+      // Faithful description of current execution, not an endorsement of it. FIN-INCOME-001
+      // replaces this rule with approved income sources + an unknown-inflow queue.
+      'NOT COVERED: the "Monthly Income" and "Monthly Budget" cards. Monthly Income comes from monthlyAverages() (src/lib/forecast.ts), which today prefers rows whose sourceCategory is the literal "Paychecks" (or whose text matches /payroll|paycheck/i) and otherwise sums EVERY income-classified row over the last 6 months — so refunds, reimbursements and one-off deposits currently count as income. Provenance for earned income needs the approved-income-source model first.',
     ],
   };
 }
