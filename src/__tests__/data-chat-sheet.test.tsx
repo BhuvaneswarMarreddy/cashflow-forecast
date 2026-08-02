@@ -2,6 +2,7 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import DataChatSheet from '@/components/DataChatSheet';
+import { applyMappingRules, rulePreview, MappingRule } from '@/lib/mapping-rules';
 import { Transaction } from '@/types';
 
 /**
@@ -51,12 +52,12 @@ const RULE_REPLY = {
   result: {
     action: 'create_rule',
     explanation: 'Got it — Instacart is Groceries.',
-    rule: { match: { field: 'merchant', op: 'contains', value: 'Instacart' }, set: { category: 'groceries' } },
+    rule: { match: { field: 'merchant', op: 'contains', value: 'Instacart' }, set: { category: 'food', sourceCategory: 'Groceries' } },
   },
 };
 
 const send = (text: string) => {
-  fireEvent.change(screen.getByLabelText('Ask about your data'), { target: { value: text } });
+  fireEvent.change(screen.getByLabelText('Message'), { target: { value: text } });
   fireEvent.click(screen.getByLabelText('Send'));
 };
 
@@ -66,14 +67,14 @@ describe('DataChatSheet', () => {
     addRule.mockResolvedValue({
       id: 'r1', createdAt: '2026-08-01T00:00:00.000Z', enabled: true,
       match: { field: 'merchant', op: 'contains', value: 'Instacart' },
-      set: { category: 'groceries' },
+      set: { category: 'food', sourceCategory: 'Groceries' },
     });
 
     render(<DataChatSheet open onClose={() => {}} />);
     send('anything from Instacart is Groceries');
 
     // Preview: the rule in English + only the rows it would CHANGE (Shell is untouched).
-    expect(await screen.findByText('merchant contains "Instacart" → category Groceries')).toBeInTheDocument();
+    expect(await screen.findByText('merchant contains "Instacart" → category Food & Dining, label "Groceries"')).toBeInTheDocument();
     expect(screen.getByText(/Matches 2 existing transactions/)).toBeInTheDocument();
     expect(screen.getByText('INSTACART*ORDER')).toBeInTheDocument();
     expect(screen.queryByText('SHELL OIL')).not.toBeInTheDocument();
@@ -84,7 +85,7 @@ describe('DataChatSheet', () => {
     await waitFor(() => expect(addRule).toHaveBeenCalledTimes(1));
     expect(addRule).toHaveBeenCalledWith({
       match: { field: 'merchant', op: 'contains', value: 'Instacart' },
-      set: { category: 'groceries' },
+      set: { category: 'food', sourceCategory: 'Groceries' },
       enabled: true,
     });
     expect(await screen.findByText(/^Saved —/)).toBeInTheDocument();
@@ -128,5 +129,29 @@ describe('DataChatSheet', () => {
     render(<DataChatSheet open onClose={() => {}} />);
     send('hello');
     expect(await screen.findByText('AI request failed. Please try again.')).toBeInTheDocument();
+  });
+});
+
+/**
+ * Settings shows how many rows each SAVED rule matches. It can't use rulePreview() —
+ * that counts rows a rule would CHANGE, and `transactions` already has every enabled
+ * rule folded in, so an active rule scores 0. Locks the probe settings/page.tsx uses.
+ */
+describe('saved-rule match count (settings/page.tsx probe)', () => {
+  const rule: MappingRule = {
+    id: 'r', createdAt: '', enabled: true,
+    match: { field: 'merchant', op: 'contains', value: 'Instacart' },
+    set: { category: 'food' },
+  };
+  const applied = TRANSACTIONS.map((t) =>
+    t.merchant === 'Instacart' ? { ...t, category: 'food' as const } : t);
+
+  it('rulePreview reports 0 once the rule is already applied — hence the probe', () => {
+    expect(rulePreview(rule, applied).matches).toBe(0);
+  });
+
+  it('a sentinel-set probe still counts every matching row', () => {
+    const probe = [{ ...rule, set: { merchant: ' ' } }];
+    expect(applied.filter((t) => applyMappingRules(t, probe) !== t)).toHaveLength(2);
   });
 });

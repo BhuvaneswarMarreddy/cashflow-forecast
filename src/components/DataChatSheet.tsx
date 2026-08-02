@@ -46,10 +46,8 @@ export default function DataChatSheet({ open, onClose }: { open: boolean; onClos
   const endRef = useRef<HTMLDivElement>(null);
   const seq = useRef(0);
 
-  // Compact context — never the whole ledger: what the model needs to name a category,
-  // recognise a merchant, and answer a "how much did I spend on X" question.
-  // One builder, shared with the validator — it owns the size caps, so the prompt
-  // can never quietly grow into the whole ledger.
+  // Compact context — never the whole ledger. buildChatContext owns the size caps,
+  // so the prompt can't quietly grow into every row the owner has ever had.
   const context = useMemo(
     () => buildChatContext(transactions, profile?.paymentAccounts ?? []),
     [transactions, profile?.paymentAccounts]
@@ -108,7 +106,9 @@ export default function DataChatSheet({ open, onClose }: { open: boolean; onClos
     setMessages((prev) => prev.map((x) => (x.id === id ? { ...x, rule: undefined, status: undefined } : x)));
 
   return (
-    <Sheet open={open} onClose={onClose} ariaLabel="Ask about your data" maxWidth="42rem" className="flex flex-col h-full max-h-[80vh] p-4 sm:p-6 gap-3">
+    // max-h + min-h-0 on the list is what makes the input row stay pinned while
+    // only the transcript scrolls (the dialog itself is height:auto).
+    <Sheet open={open} onClose={onClose} ariaLabel="Ask about your data" maxWidth="42rem" className="flex flex-col max-h-[75vh] min-h-[22rem] p-4 sm:p-6 gap-3">
       <div className="flex items-center gap-3 shrink-0">
         <Sparkles className="w-5 h-5 text-[var(--accent-primary)]" aria-hidden="true" />
         <div>
@@ -117,7 +117,7 @@ export default function DataChatSheet({ open, onClose }: { open: boolean; onClos
         </div>
       </div>
 
-      <div role="log" aria-live="polite" aria-label="Conversation" className="flex-1 overflow-y-auto space-y-3 pr-1">
+      <div role="log" aria-live="polite" aria-label="Conversation" className="flex-1 min-h-0 overflow-y-auto space-y-3 pr-1">
         {messages.length === 0 && (
           <div className="pt-4">
             <p className="text-sm text-[var(--foreground-muted)] mb-2">Try:</p>
