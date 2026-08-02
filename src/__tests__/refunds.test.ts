@@ -27,6 +27,7 @@ import {
   netCategorySpendingCents,
   refundConfidence,
 } from '@/lib/refunds';
+import { classifyCardCredit, CARD_CREDIT_TO_INFLOW_MEANING } from '@/lib/card-credit';
 import { clearEvents, recentEvents } from '@/lib/obs/events';
 
 const accounts: PaymentAccount[] = [
@@ -349,7 +350,7 @@ describe('M12 — a pending credit is not a finalized refund', () => {
   });
 });
 
-describe('M13 — a different-account refund gets lower confidence', () => {
+describe('M13 — a refund is matched only within the account it credited', () => {
   const purchase = tx({
     id: 'demo-p-cross', title: 'Demo Fernvale Outfitters', merchant: 'DEMO FERNVALE',
     amount: 200, category: 'shopping', accountId: 'demo-card-9021', date: '2026-07-10',
@@ -363,24 +364,36 @@ describe('M13 — a different-account refund gets lower confidence', () => {
     amount: 200, type: 'income', accountId: 'demo-card-7714', date: '2026-07-18',
   });
 
-  const scoreOf = (credit: Transaction) => {
-    const run = generateRefundCandidates([purchase, credit], accounts, []);
-    return run.candidates.find((c) => c.candidateType === 'refund_match')!;
-  };
+  const run = (credit: Transaction) => generateRefundCandidates([purchase, credit], accounts, []);
 
-  it('applies exactly the −0.2 penalty on identical evidence', () => {
-    expect(DIFFERENT_ACCOUNT_PENALTY).toBe(0.2);
-    const same = scoreOf(sameAccountCredit);
-    const other = scoreOf(otherAccountCredit);
-    expect(same.evidence.sameAccount).toBe(true);
-    expect(other.evidence.sameAccount).toBe(false);
-    expect(other.score).toBeCloseTo(same.score - 0.2, 10);
-    expect(other.evidence.reasonCodes).toContain('different_account');
+  it('matches the credit that landed on the charged card', () => {
+    const c = run(sameAccountCredit).candidates.find((x) => x.candidateType === 'refund_match');
+    expect(c).toBeDefined();
+    expect(c!.evidence.sameAccount).toBe(true);
   });
 
-  it('still requires confirmation', () => {
-    expect(scoreOf(otherAccountCredit).status).toBe('unreviewed');
-    expect(scoreOf(sameAccountCredit).status).toBe('unreviewed');
+  it('proposes NOTHING for an identical credit on a different card', () => {
+    // Same merchant, same amount, same day, same everything but the account. That is a
+    // coincidence, not evidence: a merchant refunds the card it charged.
+    expect(run(otherAccountCredit).candidates).toHaveLength(0);
+  });
+
+  it('leaves the cross-account credit visible rather than silently dropping it', () => {
+    // It must not vanish. Unmatched is the correct outcome, so the owner still sees it
+    // in the queue as a card credit needing an answer.
+    const { kind } = classifyCardCredit(otherAccountCredit, { accounts, links: [] });
+    expect(kind).toBe('unknown_card_credit');
+    expect(CARD_CREDIT_TO_INFLOW_MEANING[kind]).not.toBe('earned_income');
+  });
+
+  it('never emits a candidate whose evidence says sameAccount:false', () => {
+    const ledger = [purchase, sameAccountCredit, otherAccountCredit];
+    const all = generateRefundCandidates(ledger, accounts, []).candidates;
+    expect(all.every((c) => c.evidence.sameAccount)).toBe(true);
+  });
+
+  it('keeps the penalty as defence in depth even though it is now unreachable', () => {
+    expect(DIFFERENT_ACCOUNT_PENALTY).toBe(0.2);
   });
 });
 
