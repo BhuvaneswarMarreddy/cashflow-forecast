@@ -25,7 +25,7 @@ export type NewMappingRule = Omit<MappingRule, 'id' | 'createdAt'> &
   Partial<Pick<MappingRule, 'id' | 'createdAt'>>;
 
 /** The `set` minus undefined keys — Firestore rejects undefined, and so does a clean merge. */
-export function definedSet(set: MappingRule['set']): Partial<Transaction> {
+export function definedSet(set: MappingRule['set']): MappingRule['set'] {
   return Object.fromEntries(Object.entries(set).filter(([, v]) => v !== undefined));
 }
 

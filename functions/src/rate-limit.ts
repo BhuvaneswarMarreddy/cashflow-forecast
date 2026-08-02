@@ -12,6 +12,7 @@ import { HttpsError } from 'firebase-functions/v2/https';
 export const LIMITS = {
   aiDecision: 50,
   parseReceipt: 60,
+  aiChat: 100,
 } as const;
 
 export interface RateLimitDoc {

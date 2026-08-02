@@ -1,5 +1,6 @@
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { app } from '@/lib/firebase';
+import type { ChatContext } from '@/lib/chat-actions';
 
 // 2nd-gen callables, codebase "api", region us-central1
 const functions = getFunctions(app, 'us-central1');

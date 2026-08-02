@@ -18,6 +18,7 @@ import { PAYMENT_METHODS, ACCOUNT_TYPES, PaymentAccount, IncomeSource, AccountTy
 import { deriveAccountBalance, withDerivedBalances, monthlyAverages } from '@/lib/forecast';
 import { matchTransfers } from '@/lib/transfers';
 import { currentOf } from '@/lib/accounts';
+import { syncNow, describeSync } from '@/lib/sync-client';
 import {
   TrendingUp,
   CreditCard,
@@ -38,6 +39,7 @@ import {
   BarChart3,
   ArrowLeftRight,
   AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 
 export default function AccountsPage() {
@@ -92,6 +94,9 @@ export default function AccountsPage() {
   const [editingAccount, setEditingAccount] = useState<PaymentAccount | null>(null);
   const [graphAccount, setGraphAccount] = useState<PaymentAccount | null>(null);
   const [reconcileTarget, setReconcileTarget] = useState<PaymentAccount | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const [syncErr, setSyncErr] = useState(false);
   const [editingIncome, setEditingIncome] = useState<IncomeSource | null>(null);
   
   const [accountForm, setAccountForm] = useState({
@@ -160,6 +165,23 @@ export default function AccountsPage() {
   };
 
   const handleReconcile = (account: PaymentAccount) => setReconcileTarget(account);
+
+  // Pulls straight from the banks (10-20s), then reloads so every derived number
+  // on the page reflects the new rows and re-anchored balances.
+  const handleRefresh = async () => {
+    setSyncing(true); setSyncErr(false); setSyncMsg('Contacting your banks…');
+    try {
+      const r = await syncNow();
+      setSyncErr(Boolean(r.error));
+      setSyncMsg(describeSync(r));
+      if (!r.error) setTimeout(() => window.location.reload(), 1200);
+    } catch (e) {
+      setSyncErr(true);
+      setSyncMsg(e instanceof Error ? e.message : 'Refresh failed — try again.');
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const openEditAccount = (account: PaymentAccount) => {
     setEditingAccount(account);
@@ -356,11 +378,30 @@ export default function AccountsPage() {
       
       <main className="pt-24 pb-12 px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto relative z-10">
         {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-[var(--foreground)]">Account Settings</h1>
-          <p className="text-[var(--foreground-secondary)] mt-1">
-            Manage your payment accounts, income sources, and budget
-          </p>
+        <div className="mb-8 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+          <div>
+            <h1 className="text-3xl font-bold text-[var(--foreground)]">Account Settings</h1>
+            <p className="text-[var(--foreground-secondary)] mt-1">
+              Manage your payment accounts, income sources, and budget
+            </p>
+          </div>
+          <div className="sm:text-right">
+            <button
+              onClick={handleRefresh}
+              disabled={syncing}
+              aria-label="Refresh balances and transactions from your banks"
+              className="btn-secondary inline-flex items-center gap-2 min-h-[44px] disabled:opacity-60"
+            >
+              <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} aria-hidden="true" />
+              {syncing ? 'Refreshing…' : 'Refresh from banks'}
+            </button>
+            {syncMsg && (
+              <p role="status" aria-live="polite"
+                 className={`text-xs mt-1.5 ${syncErr ? 'text-[var(--accent-danger)]' : 'text-[var(--foreground-muted)]'}`}>
+                {syncMsg}
+              </p>
+            )}
+          </div>
         </div>
 
         {/* Summary Cards */}
