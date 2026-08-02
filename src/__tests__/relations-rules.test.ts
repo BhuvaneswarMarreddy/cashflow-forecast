@@ -31,12 +31,17 @@ import { LINK_STATUSES, LINK_TYPES, validateLink } from '@/lib/relations';
 
 const RULES = readFileSync(join(process.cwd(), 'firestore.rules'), 'utf8');
 
-/** The body of `match /<name>/{...} { … }`, brace-matched so nested blocks come along. */
+/**
+ * The body of `match /<name>/{...} { … }`, brace-matched so nested blocks come along.
+ * The body opener is the LAST brace on the header line — the first one belongs to the
+ * `{linkId}` path placeholder.
+ */
 function block(name: string): string {
   const start = RULES.indexOf(`match /${name}/{`);
   if (start < 0) throw new Error(`no match block for ${name} in firestore.rules`);
+  const header = RULES.slice(start, RULES.indexOf('\n', start));
   let depth = 0;
-  for (let i = RULES.indexOf('{', start); i < RULES.length; i++) {
+  for (let i = start + header.lastIndexOf('{'); i < RULES.length; i++) {
     if (RULES[i] === '{') depth++;
     else if (RULES[i] === '}' && --depth === 0) return RULES.slice(start, i + 1);
   }
