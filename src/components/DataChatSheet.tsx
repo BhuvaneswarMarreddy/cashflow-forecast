@@ -4,12 +4,12 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Send, Sparkles } from 'lucide-react';
 import Sheet from '@/components/Sheet';
 import { aiChat, callableErrorMessage } from '@/lib/callables';
-import { parseChatAction } from '@/lib/chat-actions';
-import { describeRule, rulePreview, MappingRule } from '@/lib/mapping-rules';
+import { parseChatAction, buildChatContext } from '@/lib/chat-actions';
+import { describeRule, rulePreview, MappingRule, NewMappingRule } from '@/lib/mapping-rules';
 import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import { formatMoney } from '@/lib/money';
-import { EXPENSE_CATEGORIES, displayCategory } from '@/types';
+import { displayCategory } from '@/types';
 
 /**
  * "Ask about your data" — the owner types plain English ("anything from Instacart is
@@ -24,33 +24,16 @@ const EXAMPLES = [
   'What did I spend on food in July?',
 ];
 
-/**
- * The slice of '@/lib/chat-actions' this UI reads. The full validated union lives there;
- * we only need "did it propose a rule?" and "what do I show the user?".
- * ponytail: structural probe so a `create_rule` action works whether the rule arrives
- * nested (`{rule}`) or flat (`{match, set}`). Collapse to the real union type once
- * chat-actions.ts lands.
- */
-type ChatReply = {
-  explanation?: string;
-  rule?: Partial<MappingRule>;
-  match?: MappingRule['match'];
-  set?: MappingRule['set'];
-};
-
-/** A proposed (unsaved) rule from a reply, normalised to a full MappingRule, or null. */
-function proposedRule(reply: ChatReply | null): MappingRule | null {
-  const r = reply?.rule ?? (reply?.match && reply?.set ? reply : null);
-  if (!r?.match?.field || !r.match.value || !r.set) return null;
-  return { id: 'draft', createdAt: '', enabled: true, match: r.match, set: r.set };
-}
+/** A proposal is previewed, not saved — rulePreview() wants a whole MappingRule. */
+const asDraft = (rule: NewMappingRule): MappingRule =>
+  ({ id: 'draft', createdAt: '', ...rule });
 
 interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   text: string;
   /** Set when the assistant proposed a rule — renders the preview card. */
-  rule?: MappingRule;
+  rule?: NewMappingRule;
   status?: 'pending' | 'applied';
 }
 
@@ -65,14 +48,12 @@ export default function DataChatSheet({ open, onClose }: { open: boolean; onClos
 
   // Compact context — never the whole ledger: what the model needs to name a category,
   // recognise a merchant, and answer a "how much did I spend on X" question.
-  const context = useMemo(() => ({
-    categories: EXPENSE_CATEGORIES.map((c) => ({ value: c.value, label: c.label })),
-    merchants: Array.from(new Set(transactions.map((t) => t.merchant).filter(Boolean))).slice(0, 40),
-    recent: transactions.slice(0, 20).map((t) => ({
-      date: t.date, title: t.title, merchant: t.merchant,
-      amount: t.amount, category: t.category, sourceCategory: t.sourceCategory,
-    })),
-  }), [transactions]);
+  // One builder, shared with the validator — it owns the size caps, so the prompt
+  // can never quietly grow into the whole ledger.
+  const context = useMemo(
+    () => buildChatContext(transactions, profile?.paymentAccounts ?? []),
+    [transactions, profile?.paymentAccounts]
+  );
 
   useEffect(() => {
     endRef.current?.scrollIntoView?.({ block: 'end' });
@@ -90,10 +71,12 @@ export default function DataChatSheet({ open, onClose }: { open: boolean; onClos
     setMessages((prev) => [...prev, mk('user', message)]);
     setBusy(true);
     try {
-      const reply = parseChatAction(await aiChat({ message, history, context })) as ChatReply | null;
-      const rule = proposedRule(reply);
-      setMessages((prev) => [...prev, rule
-        ? mk('assistant', reply?.explanation || 'Here is the rule I understood:', { rule, status: 'pending' })
+      // `result` is raw model output — parseChatAction is the trust boundary, and
+      // returns null for anything it can't vouch for (never a half-valid rule).
+      const data = await aiChat({ message, history, context });
+      const reply = parseChatAction(data?.result);
+      setMessages((prev) => [...prev, reply?.action === 'create_rule'
+        ? mk('assistant', reply.explanation, { rule: reply.rule, status: 'pending' })
         : mk('assistant', reply?.explanation || "I couldn't turn that into a change. Try rephrasing it."),
       ]);
     } catch (e) {
@@ -107,7 +90,7 @@ export default function DataChatSheet({ open, onClose }: { open: boolean; onClos
     if (!m.rule || busy) return;
     setBusy(true);
     try {
-      const saved = await addRule({ match: m.rule.match, set: m.rule.set, enabled: true });
+      const saved = await addRule(m.rule);
       setMessages((prev) => [
         ...prev.map((x) => (x.id === m.id ? { ...x, status: 'applied' as const } : x)),
         mk('assistant', saved
@@ -175,7 +158,7 @@ export default function DataChatSheet({ open, onClose }: { open: boolean; onClos
       </div>
 
       <div className="flex items-end gap-2 shrink-0">
-        <label htmlFor="data-chat-input" className="sr-only">Ask about your data</label>
+        <label htmlFor="data-chat-input" className="sr-only">Message</label>
         <textarea
           id="data-chat-input"
           rows={1}
@@ -204,7 +187,7 @@ export default function DataChatSheet({ open, onClose }: { open: boolean; onClos
 
 /** The confirm gate: what the rule does, how many rows it changes, and up to 5 of them. */
 function RulePreviewCard({ rule, pending, busy, money, onApply, onCancel }: {
-  rule: MappingRule;
+  rule: NewMappingRule;
   pending: boolean;
   busy: boolean;
   money: (n: number) => string;
@@ -212,11 +195,12 @@ function RulePreviewCard({ rule, pending, busy, money, onApply, onCancel }: {
   onCancel: () => void;
 }) {
   const { transactions } = useTransactions();
-  const { matches, sample } = useMemo(() => rulePreview(rule, transactions), [rule, transactions]);
+  const draft = useMemo(() => asDraft(rule), [rule]);
+  const { matches, sample } = useMemo(() => rulePreview(draft, transactions), [draft, transactions]);
 
   return (
     <div className="mt-3 rounded-xl border border-[var(--border-color)] bg-[var(--background)] p-3">
-      <p className="font-medium text-[var(--foreground)]">{describeRule(rule)}</p>
+      <p className="font-medium text-[var(--foreground)]">{describeRule(draft)}</p>
       {/* Counts are the "what would this do?" preview — meaningless once applied,
           because `transactions` already has the rule folded in. */}
       {pending && (

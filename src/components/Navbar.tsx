@@ -17,8 +17,10 @@ import {
   Settings,
   User,
   ChevronDown,
+  Sparkles,
 } from 'lucide-react';
 import { NAV_ITEMS } from '@/lib/nav';
+import DataChatSheet from '@/components/DataChatSheet';
 
 export default function Navbar() {
   const { user, logout } = useAuth();
@@ -28,6 +30,7 @@ export default function Navbar() {
   const router = useRouter();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(false);
 
   // Single source of truth (src/lib/nav.ts) — BottomNav consumes the same list.
   const navItems = NAV_ITEMS;
@@ -93,6 +96,14 @@ export default function Navbar() {
 
           {/* Right Side - User Menu */}
           <div className="hidden md:flex items-center gap-4">
+            <button
+              onClick={() => setIsChatOpen(true)}
+              aria-label="Ask about your data"
+              className="w-11 h-11 flex items-center justify-center rounded-lg text-[var(--foreground-secondary)] hover:text-[var(--accent-primary)] hover:bg-[var(--background-tertiary)] transition-colors"
+            >
+              <Sparkles className="w-5 h-5" aria-hidden="true" />
+            </button>
+
             {/* Balance Display */}
             {profile?.paymentAccounts && profile.paymentAccounts.length > 0 && (
               <div className="text-right px-4 py-2 rounded-lg bg-[var(--background-tertiary)]">
@@ -171,13 +182,24 @@ export default function Navbar() {
             </div>
           </div>
 
-          {/* Mobile Menu Button */}
-          <button
-            className="md:hidden p-2 rounded-lg text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]"
-            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-          >
-            {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-          </button>
+          {/* Mobile: chat + menu */}
+          <div className="md:hidden flex items-center gap-1">
+            <button
+              onClick={() => setIsChatOpen(true)}
+              aria-label="Ask about your data"
+              className="w-11 h-11 flex items-center justify-center rounded-lg text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]"
+            >
+              <Sparkles className="w-6 h-6" aria-hidden="true" />
+            </button>
+            <button
+              className="w-11 h-11 flex items-center justify-center rounded-lg text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]"
+              aria-label={isMobileMenuOpen ? 'Close menu' : 'Open menu'}
+              aria-expanded={isMobileMenuOpen}
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+            >
+              {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -240,6 +262,8 @@ export default function Navbar() {
           </div>
         </div>
       )}
+
+      <DataChatSheet open={isChatOpen} onClose={() => setIsChatOpen(false)} />
     </nav>
   );
 }
