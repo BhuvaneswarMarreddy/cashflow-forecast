@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "jest",
+    "test:ci": "jest --ci --testPathIgnorePatterns \"/node_modules/\" \"/\\.next/\" \"/functions/\" \"/e2e/\" \"/src/__tests__/flows\\.integration\\.test\\.ts$\"",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "deploy": "sh scripts/predeploy.sh && firebase deploy --only hosting",
