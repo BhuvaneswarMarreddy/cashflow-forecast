@@ -46,14 +46,25 @@ DOC_FIELDS = ("title", "amount", "type", "category", "merchant", "description",
 # HTTP (injectable — the tests never touch the network)
 # ---------------------------------------------------------------------------
 
+# urllib's default UA ("Python-urllib/3.x") is 403'd by the CDN in front of
+# bridge.simplefin.org. Identify the app instead — this is their documented
+# developer API, it just wants a real User-Agent.
+UA = "CashFlowForecast/1.0 (+https://cashflowforcast.com)"
+
+
 def _post(url: str, timeout: int = 30) -> str:
-    req = urllib.request.Request(url, data=b"", method="POST")
+    req = urllib.request.Request(
+        url, data=b"", method="POST",
+        headers={"User-Agent": UA, "Content-Length": "0", "Accept": "*/*"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read().decode()
 
 
 def _get(url: str, auth: str | None = None, timeout: int = 60) -> str:
-    req = urllib.request.Request(url, headers={"Authorization": auth} if auth else {})
+    headers = {"User-Agent": UA, "Accept": "application/json"}
+    if auth:
+        headers["Authorization"] = auth
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read().decode()
 
