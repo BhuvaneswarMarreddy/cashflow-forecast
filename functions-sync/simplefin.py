@@ -106,7 +106,14 @@ def fetch_accounts(access_url: str, start_ts: int, end_ts: int, get=_get) -> dic
     base, auth = split_auth(access_url)
     url = f"{base}/accounts?start-date={int(start_ts)}&end-date={int(end_ts)}"
     data = json.loads(get(url, auth))
-    errs = [str(e) for e in (data.get("errors") or []) if e]
+    errs, warns = [], []
+    for e in (data.get("errors") or []):
+        if not e:
+            continue
+        # Advisory, not a failure: the server still returns the capped range.
+        (warns if "capped" in str(e).lower() else errs).append(str(e))
+    if warns:
+        data["warnings"] = warns
     if errs:
         raise RuntimeError("SimpleFIN errors: " + "; ".join(errs))
     return data
@@ -151,9 +158,7 @@ def map_sf_txn(t: dict, account_id: str, provider: str):
     """SimpleFIN transaction -> app row dict, or None for rows that must not be
     written (pending, zero amount, no posted date). Mirrors sync_core.map_txn's
     conventions; the deliberate difference is NO sourceCategory."""
-    if t.get("pending"):
-        return None  # re-posts later with a different id
-    posted = t.get("posted")
+    posted = t.get("posted") or t.get("transacted_at")
     if posted in (None, ""):
         return None
     cents = to_cents(t.get("amount") or 0)
@@ -218,7 +223,9 @@ def fetch_window(last_sync_date, today: dt.date | None = None):
     rows — clamped to SimpleFIN's 90-day history, which is a hard server limit, not
     a preference — and ends TOMORROW so today's rows are always in range."""
     today = today or dt.date.fromisoformat(sync_core.today_key())
-    floor = today - dt.timedelta(days=HISTORY_DAYS)
+    # The window ENDS tomorrow, so the floor must be HISTORY_DAYS-1 back or the
+    # span is 91 days and the server caps it (and complains).
+    floor = today - dt.timedelta(days=HISTORY_DAYS - 1)
     start = floor
     if last_sync_date:
         start = (dt.date.fromisoformat(str(last_sync_date)[:10])
@@ -327,6 +334,8 @@ async def run_simplefin_sync(db, uid: str, access_url: str,
 
     added = enriched = fetched = 0
     skip_pending = skip_unmatched = skip_existing = 0
+    pending_seen: set[str] = set()          # pending_ ids present in THIS fetch
+    pending_rows: list[tuple[dict, dict]] = []  # (app_account, row) to upsert
     max_written_date = ""
     writes = []  # (doc_ref, fields)
     for sa in raw_accounts:
@@ -339,11 +348,20 @@ async def run_simplefin_sync(db, uid: str, access_url: str,
         app = pair[1]
         provider = app.get("provider") or "other"
         for t in sorted(txns, key=lambda x: (int(x.get("posted") or 0), str(x.get("id")))):
-            if t.get("pending"):
-                skip_pending += 1
-                continue
             row = map_sf_txn(t, app["id"], provider)
             if row is None:
+                continue
+
+            # PENDING rows are live state, not history: the same charge re-posts
+            # later with a different id AND often a different amount (tip, fuel
+            # hold), so they can never be fingerprint-matched to their posted
+            # twin. They are written under a pending_ id, refreshed every run,
+            # and deleted the moment they stop being pending — see the
+            # reconciliation pass below.
+            if t.get("pending"):
+                pending_seen.add("pending_" + row["sf_id"])
+                pending_rows.append((app, row))
+                skip_pending += 1
                 continue
 
             doc_id = "sf_" + row["sf_id"]
@@ -380,11 +398,36 @@ async def run_simplefin_sync(db, uid: str, access_url: str,
                     f"{row['signed_cents'] / 100:>10.2f} {row['type']:<8} "
                     f"{row['title'][:32]!r} -> {app.get('name')}")
 
+    # --- pending reconciliation -------------------------------------------
+    # Pending charges are a SET, not a log: upsert everything currently pending,
+    # then delete every pending_ doc we previously wrote that is absent now (it
+    # either posted — and arrived above under its real id — or was declined).
+    # This is what stops a $50 hold and its $58 posted twin both surviving.
+    pending_writes = []
+    for app, row in pending_rows:
+        fields = {k: row[k] for k in DOC_FIELDS if row.get(k) is not None}
+        fields.update({"pending": True, "sources": [SOURCE],
+                       "updatedAt": gcf.SERVER_TIMESTAMP})
+        pending_writes.append((tx_col.document("pending_" + row["sf_id"]), fields))
+        if dry_run:
+            log(f"  would write PENDING pending_{row['sf_id']}: {row['date_key']} "
+                f"{row['signed_cents'] / 100:>10.2f} {row['title'][:32]!r} -> {app.get('name')}")
+
+    stale_pending = [i for i in existing_ids
+                     if i.startswith("pending_") and i not in pending_seen]
+    if stale_pending and dry_run:
+        log(f"  would clear {len(stale_pending)} pending row(s) that posted or were declined")
+
     if not dry_run:
-        for i in range(0, len(writes), 450):  # Firestore batch limit is 500
+        for i in range(0, len(writes) + len(pending_writes), 450):
             batch = db.batch()
-            for ref, fields in writes[i:i + 450]:
+            for ref, fields in (writes + pending_writes)[i:i + 450]:
                 batch.set(ref, fields, merge=True)
+            batch.commit()
+        for i in range(0, len(stale_pending), 450):
+            batch = db.batch()
+            for doc_id in stale_pending[i:i + 450]:
+                batch.delete(tx_col.document(doc_id))
             batch.commit()
 
     # Balance re-anchor, guarded exactly like the Monarch path: (1) first run only
@@ -436,7 +479,8 @@ async def run_simplefin_sync(db, uid: str, access_url: str,
         "fetched": fetched,
         "added": added,
         "enriched": enriched,
-        "skippedPending": skip_pending,
+        "pendingLive": len(pending_rows),
+        "pendingCleared": len(stale_pending),
         "skippedUnmatched": skip_unmatched,
         "skippedAlreadySynced": skip_existing,
         "unmatchedAccounts": sorted(set(unmatched)),
@@ -449,7 +493,8 @@ async def run_simplefin_sync(db, uid: str, access_url: str,
     if not dry_run:
         meta_ref.set(status, merge=True)
     log(f"simplefin done: fetched {fetched}, +{added} added, {enriched} enriched, "
-        f"skipped(pending {skip_pending} / unmatched {skip_unmatched} / "
+        f"pending live {len(pending_rows)} / cleared {len(stale_pending)}, "
+        f"skipped(unmatched {skip_unmatched} / "
         f"already {skip_existing}), {len(reanchored)} re-anchored, "
         f"cursor -> {next_cursor}, unmatched={sorted(set(unmatched))}")
     return status

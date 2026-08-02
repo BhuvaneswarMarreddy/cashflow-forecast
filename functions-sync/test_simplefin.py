@@ -115,11 +115,24 @@ class TxnMapping(unittest.TestCase):
         self.assertEqual(sf.map_sf_txn(mk(payee="", description=""), "a", "chase")["title"],
                          "Transaction")
 
-    def test_pending_and_zero_and_undated_are_dropped(self):
-        self.assertIsNone(sf.map_sf_txn(mk(pending=True), "a", "chase"))
+    def test_zero_and_undated_are_dropped(self):
         self.assertIsNone(sf.map_sf_txn(mk(amount="0.00"), "a", "chase"))
         self.assertIsNone(sf.map_sf_txn(mk(amount="-0.00"), "a", "chase"))
         self.assertIsNone(sf.map_sf_txn(mk(posted=None), "a", "chase"))
+
+    def test_pending_rows_ARE_mapped(self):
+        # The owner wants pending charges visible. map_sf_txn no longer drops them;
+        # run_simplefin_sync writes them under a pending_ id and reconciles the set
+        # each run, because a pending hold re-posts with a different id AND often a
+        # different amount (tip, fuel hold) so it can never fingerprint-match.
+        row = sf.map_sf_txn(mk(pending=True), "a", "chase")
+        self.assertIsNotNone(row)
+        self.assertEqual(row["signed_cents"], -2354)
+
+    def test_pending_without_posted_falls_back_to_transacted_at(self):
+        t = mk(pending=True, posted=None)
+        t["transacted_at"] = 1753412400
+        self.assertIsNotNone(sf.map_sf_txn(t, "a", "chase"))
 
     def test_date_is_chicago_midnight_of_the_posted_day(self):
         # 2026-07-25 03:00 UTC is still 2026-07-24 in Chicago — the calendar day the
@@ -189,7 +202,10 @@ class FetchWindow(unittest.TestCase):
 
     def test_first_run_reaches_the_full_90_day_history(self):
         start, end = self._days(None)
-        self.assertEqual(start, self.TODAY - dt.timedelta(days=90))
+        # 89 days back, not 90: the window ENDS tomorrow, so a 90-day floor makes
+        # the span 91 days and the bridge caps it (and complains).
+        self.assertEqual(start, self.TODAY - dt.timedelta(days=89))
+        self.assertEqual((end - start).days, 90, "span must be exactly the 90-day limit")
         self.assertEqual(end, self.TODAY + dt.timedelta(days=1),
                          "end must be TOMORROW or today's rows fall outside the window")
 
@@ -202,7 +218,7 @@ class FetchWindow(unittest.TestCase):
         # An old cursor (or a long outage) must not ask for history the bridge
         # refuses to serve.
         start, _ = self._days("2026-01-01")
-        self.assertEqual(start, self.TODAY - dt.timedelta(days=90))
+        self.assertEqual(start, self.TODAY - dt.timedelta(days=89))
 
     def test_bounds_are_local_midnight_unix_seconds(self):
         start_ts, _ = sf.fetch_window("2026-08-01", self.TODAY)
