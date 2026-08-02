@@ -1,7 +1,8 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from 'react';
-import { UserProfile, PaymentAccount, IncomeSource } from '@/types';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef, useMemo } from 'react';
+import { UserProfile, PaymentAccount, IncomeSource, InflowReview } from '@/types';
+import type { IncomeContext } from '@/lib/classify';
 import { useAuth } from './AuthContext';
 import * as firestoreService from '@/lib/firestore';
 import { sortAccounts, reindex, reconcile } from '@/lib/accounts';
@@ -26,6 +27,13 @@ export interface UserProfileContextType {
   addIncomeSource: (income: Omit<IncomeSource, 'id'>) => Promise<void>;
   updateIncomeSource: (id: string, updates: Partial<IncomeSource>) => Promise<void>;
   deleteIncomeSource: (id: string) => Promise<void>;
+  /**
+   * The ONE earned-income context, passed verbatim to sumIncomeCents(),
+   * monthlyAverages(), generateForecast() and selectInflowReviewQueue() by every
+   * screen. One object so no surface can drift into its own idea of what income is.
+   */
+  incomeContext: IncomeContext;
+  setInflowReview: (review: InflowReview) => Promise<void>;
   completeOnboarding: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
@@ -54,6 +62,9 @@ const createDefaultProfile = (user: { id: string; email: string; name: string })
 export function UserProfileProvider({ children }: { children: ReactNode }) {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  // users/{uid}/reviews — the owner's decisions about individual inflows, kept OUT of
+  // the profile document because they are per-transaction, not per-user settings.
+  const [inflowReviews, setInflowReviews] = useState<Record<string, InflowReview>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isFirestoreOnline, setIsFirestoreOnline] = useState(true);
@@ -99,11 +110,13 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
       // profile) — otherwise one hiccup renders "you have zero accounts" and even
       // caches that empty state to localStorage. Same bug class as the old
       // getTransactions empty-read wipe.
-      const [firestoreUser, accounts, incomeSources] = await Promise.all([
+      const [firestoreUser, accounts, incomeSources, reviews] = await Promise.all([
         firestoreService.getUserProfile(userId),
         firestoreService.getAccounts(userId),
         firestoreService.getIncomeSources(userId),
+        firestoreService.getInflowReviews(userId),
       ]);
+      setInflowReviews(reviews);
 
       setIsFirestoreOnline(true);
 
@@ -483,6 +496,31 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  /**
+   * Record the owner's decision about one inflow. Optimistic, matching every other
+   * write here: the queue and every income total update in the same render, and the
+   * Firestore write is fire-and-forget (offline persistence makes awaiting the ack
+   * hang until the network returns).
+   *
+   * Writes ONLY the review document. The transaction's provider description, provider
+   * category, amount, provider id and posted date are never touched.
+   */
+  const setInflowReview = async (review: InflowReview) => {
+    const stamped: InflowReview = { ...review, updatedAt: new Date().toISOString() };
+    setInflowReviews((prev) => ({ ...prev, [review.transactionId]: stamped }));
+    if (!user?.id || !isFirestoreOnline) return;
+    try {
+      await firestoreService.setInflowReview(user.id, stamped);
+    } catch (err) {
+      console.error('Failed to sync inflow review:', err);
+    }
+  };
+
+  const incomeContext = useMemo<IncomeContext>(
+    () => ({ sources: profile?.incomeSources ?? [], reviews: inflowReviews }),
+    [profile?.incomeSources, inflowReviews]
+  );
+
   // Complete onboarding
   const completeOnboarding = async () => {
     if (!profile || !user?.id) return;
@@ -523,6 +561,8 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
         addIncomeSource,
         updateIncomeSource,
         deleteIncomeSource,
+        incomeContext,
+        setInflowReview,
         completeOnboarding,
         refreshProfile,
       }}

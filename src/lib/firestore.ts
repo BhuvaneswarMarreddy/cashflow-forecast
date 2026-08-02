@@ -42,6 +42,7 @@ import {
   Transaction, 
   PaymentAccount, 
   IncomeSource,
+  InflowReview,
   ExpenseCategory,
   CategoryBudget,
   NotificationPreferences,
@@ -531,12 +532,20 @@ export async function addIncome(
   }
 }
 
+/**
+ * ALL income sources, paused ones included.
+ *
+ * This used to filter `where('isActive', '==', true)`, which made "pause" behave as
+ * delete: the document stayed in Firestore but vanished from the app, so nothing could
+ * ever un-pause it. Every consumer that cares already filters on `isActive`
+ * (generateIncomeEvents, activeApprovedSources), and only the ones that filter treat a
+ * paused source as income.
+ */
 export async function getIncomeSources(userId: string): Promise<IncomeSource[]> {
   try {
     const incomeRef = collection(db, 'users', userId, 'income');
-    const q = query(incomeRef, where('isActive', '==', true));
-    const snapshot = await getDocs(q);
-    
+    const snapshot = await getDocs(incomeRef);
+
     return snapshot.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),
@@ -580,6 +589,56 @@ export async function deleteIncome(userId: string, incomeId: string): Promise<vo
       console.warn('Firestore offline - delete will sync when online');
       return;
     }
+    throw error;
+  }
+}
+
+// ============================================
+// Inflow Review Operations (FIN-INCOME-001)
+//
+// users/{uid}/reviews/{transactionId} — review state stored INDEPENDENTLY of the
+// transaction's category, so a classification the owner confirmed never returns to
+// the queue and an untouched `other` is not mistaken for an answer. Nothing here
+// writes to the transaction document: provider description, provider category,
+// amount, provider id and posted date are immutable.
+// ============================================
+
+export async function getInflowReviews(userId: string): Promise<Record<string, InflowReview>> {
+  try {
+    const snapshot = await getDocs(collection(db, 'users', userId, 'reviews'));
+    return Object.fromEntries(
+      snapshot.docs.map((d) => [d.id, { ...(d.data() as InflowReview), transactionId: d.id }])
+    );
+  } catch (error) {
+    if (isOfflineError(error)) {
+      console.warn('Firestore offline - using local review state');
+      return {};
+    }
+    console.error('Error getting inflow reviews:', error);
+    return {};
+  }
+}
+
+/** The doc id IS the transaction id, so there is at most one review per transaction. */
+export async function setInflowReview(userId: string, review: InflowReview): Promise<void> {
+  try {
+    const ref = doc(db, 'users', userId, 'reviews', review.transactionId);
+    await setDoc(ref, removeUndefined({ ...review, updatedAt: new Date().toISOString() }), { merge: true });
+  } catch (error) {
+    if (isOfflineError(error)) {
+      console.warn('Firestore offline - review will sync when online');
+      return;
+    }
+    throw error;
+  }
+}
+
+/** Reopening a decision: the row returns to the queue on the next recompute. */
+export async function deleteInflowReview(userId: string, transactionId: string): Promise<void> {
+  try {
+    await deleteDoc(doc(db, 'users', userId, 'reviews', transactionId));
+  } catch (error) {
+    if (isOfflineError(error)) return;
     throw error;
   }
 }
