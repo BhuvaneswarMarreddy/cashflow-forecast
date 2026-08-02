@@ -62,11 +62,16 @@ export const displayPerson = (name: string) =>
 // ============================================================
 // buildFlowGraph — the Sankey data + reconciliation
 // ============================================================
-import { classifyTransaction, isReward, isRefund } from './classify';
+import { IncomeContext, classifyTransaction } from './classify';
 import { matchTransfers } from './transfers';
 import { displayCategory } from '@/types';
 import type { FlowColorKey } from './palette';
 import { currentOf } from '@/lib/accounts';
+import { emit } from '@/lib/obs/events';
+import {
+  BORROWED_ON_CARDS, FlowNetting, TOP_CATEGORIES, inflowLane, residualCategoryLabel,
+  spendingCategoryIndex, spendingLane, unpairedLegLane,
+} from '@/lib/flow-lanes';
 
 export interface FlowNode { id: string; label: string; kind: FlowColorKey }
 export interface FlowLink {
@@ -83,16 +88,35 @@ export interface FlowGraph {
   nodes: FlowNode[]; links: FlowLink[];
   reconciliation: ReconRow[]; between: BetweenRow[];
   nodeTxnIds: Record<string, string[]>; // node id -> transaction ids behind it (drill-down)
+  /**
+   * How much CONFIRMED refund money was netted out of the category links in this period.
+   * Gross is still reachable — build the graph again with no links (the page's "gross"
+   * toggle does exactly that), or read the rows in the drill-down, which never change.
+   */
+  nettedRefundCents: number;
 }
 
-const TOP_CATEGORIES = 8;
 const TOP_PEOPLE = 5;
+
+/** What the graph may read beyond the ledger itself. Both optional; both default to off. */
+export interface FlowOptions {
+  /**
+   * `flowNetting()`'s resolved links (flow-netting.ts, which the page owns). A CONFIRMED
+   * allocation nets its cents out of the category it reverses and the credit stops being
+   * a left-side lane; `suggested` and `provisional` links never reach here at all,
+   * because you cannot net an unproven match. Absent = the gross picture.
+   */
+  netting?: FlowNetting;
+  income?: IncomeContext;
+}
 
 export function buildFlowGraph(
   transactions: Transaction[],
   accounts: PaymentAccount[],
-  period: { start?: string; end?: string } = {}
+  period: { start?: string; end?: string } = {},
+  options: FlowOptions = {}
 ): FlowGraph {
+  const startedAt = Date.now();
   const start = period.start ?? '0000-00-00';
   const end = period.end ?? '9999-12-31';
   // PENDING: excluded. Flow reconciles gross movement against the derived account
@@ -183,7 +207,8 @@ export function buildFlowGraph(
   }
 
   // --- income / expense / unmatched legs: accumulate, then materialize top-N ---
-  const catCents = new Map<string, Map<string, number>>();  // category -> accNode -> cents
+  const catCents = new Map<string, Map<string, number>>();  // lane key -> accNode -> cents
+  const catLabels = new Map<string, string>();               // lane key -> what to print
   const sent = new Map<string, Map<string, number>>();       // person -> accNode -> cents
   const recv = new Map<string, Map<string, number>>();
   const add = (m: Map<string, Map<string, number>>, key: string, accNode: string, cents: number) => {
@@ -209,30 +234,63 @@ export function buildFlowGraph(
       : node('unlinked-out', 'No account tagged (out)', 'stub');
   };
 
+  // --- FIN-FLOW-001: lanes, and what a CONFIRMED link is allowed to net ------
+  // flow-lanes.ts owns "which lane"; this loop only routes what it is told. The one
+  // rule enforced here is the netting rule: a confirmed refund link reduces the
+  // category it reverses and its credit stops being a left-side lane — and it may only
+  // do that when BOTH rows are inside the rendered period, or the credit would vanish
+  // from an account whose matching purchase is off-screen and the account would stop
+  // balancing. `suggested`/`provisional` links net nothing, ever.
+  const rowIds = new Set(rows.map((r) => r.id));
+  const allocations = (options.netting?.allocations ?? []).filter(
+    (a) => rowIds.has(a.creditId) && rowIds.has(a.purchaseId)
+  );
+  const refundedByPurchase = new Map<string, number>();
+  const allocatedByCredit = new Map<string, number>();
+  for (const a of allocations) {
+    refundedByPurchase.set(a.purchaseId, (refundedByPurchase.get(a.purchaseId) ?? 0) + a.cents);
+    allocatedByCredit.set(a.creditId, (allocatedByCredit.get(a.creditId) ?? 0) + a.cents);
+  }
+  let nettedRefundCents = 0;
+
+  const laneCtx = {
+    accounts,
+    laneOf: options.netting?.laneOf,
+    income: options.income,
+    // The WHOLE ledger, not the period: otherwise a credit changes lane when the owner
+    // switches to a month in which that category happens to have no spending.
+    spendingCategories: spendingCategoryIndex(transactions, accounts),
+  };
+
   for (const t of rows) {
     const cls = classifyTransaction(t, accounts);
     if (cls === 'transfer') continue; // handled via the matchTransfers partition
-    const cents = toCents(t.amount);
+    const gross = toCents(t.amount);
     const person = personFrom(t.description ?? t.title);
     if (cls === 'income') {
       const an = accNodeOf(t, 'in');
-      if (person && !isSelfPerson(person)) { add(recv, person, an, cents); pushId(recvTxns, person, t.id); continue; }
-      const a = t.accountId ? byId.get(t.accountId) : undefined;
-      // A refund is not income (owner rule) — on a bank it must reach the same 'refunds'
-      // node a card refund does, so the story nets it out of spending instead of counting
-      // it as money in.
-      const src = isDebtAccount(a)
-        ? node(isReward(t) ? 'rewards' : 'refunds', isReward(t) ? 'Rewards' : 'Refunds', 'source')
-        : isRefund(t)
-          ? node('refunds', 'Refunds', 'source')
-          : node(`inc:${t.sourceCategory ?? 'Other income'}`, t.sourceCategory ?? 'Other income', 'source');
+      if (person && !isSelfPerson(person)) { add(recv, person, an, gross); pushId(recvTxns, person, t.id); continue; }
+      const cents = Math.max(0, gross - (allocatedByCredit.get(t.id) ?? 0));
+      const lane = inflowLane(t, laneCtx);
+      const src = node(lane.id, lane.label, lane.kind);
       link(src, an, cents);
-      tagTxn(src, t.id);
+      tagTxn(src, t.id); // gross stays reachable: the drill-down lists the row at full size
     } else {
       const an = accNodeOf(t, 'out');
-      if (person && isSelfPerson(person)) { link(an, node('self-ext-out', 'Other money out', 'stub'), cents); tagTxn('self-ext-out', t.id); continue; }
+      const refunded = Math.min(refundedByPurchase.get(t.id) ?? 0, gross);
+      const cents = gross - refunded;
+      nettedRefundCents += refunded;
+      if (person && isSelfPerson(person)) {
+        const lane = unpairedLegLane(t, 'out');
+        link(an, node(lane.id, lane.label, lane.kind), cents);
+        tagTxn(lane.id, t.id);
+        continue;
+      }
       if (person) { add(sent, person, an, cents); pushId(sentTxns, person, t.id); continue; }
-      add(catCents, displayCategory(t), an, cents); pushId(catTxns, displayCategory(t), t.id);
+      const lane = spendingLane(displayCategory(t), normalizeMerchant(t.merchant || t.title));
+      add(catCents, lane.key, an, cents);
+      pushId(catTxns, lane.key, t.id);
+      catLabels.set(lane.key, lane.label);
     }
   }
   // stray pair legs (dangling accountId) and the person legs excluded from pairing
@@ -240,30 +298,46 @@ export function buildFlowGraph(
   const looseLegs = [...strayLegs, ...personTransferLegs];
   const strayOut = looseLegs.filter((t) => (t.transferDirection ?? (isPositive(t, accounts) ? 'in' : 'out')) === 'out');
   const strayIn = looseLegs.filter((t) => !strayOut.includes(t));
+  // An unpaired leg is not "other": the row still says whether it is a card settlement
+  // or a plain transfer, and which way the money went. Four named lanes, one reason.
   for (const t of [...unmatchedOut, ...strayOut]) {
     const cents = toCents(t.amount);
     const an = accNodeOf(t, 'out');
     const person = personFrom(t.description ?? t.title);
     if (person && !isSelfPerson(person)) { add(sent, person, an, cents); pushId(sentTxns, person, t.id); }
-    else { link(an, node('self-ext-out', 'Other money out', 'stub'), cents); tagTxn('self-ext-out', t.id); }
+    else {
+      const lane = unpairedLegLane(t, 'out');
+      link(an, node(lane.id, lane.label, lane.kind), cents);
+      tagTxn(lane.id, t.id);
+    }
   }
   for (const t of [...unmatchedIn, ...strayIn]) {
     const cents = toCents(t.amount);
     const an = accNodeOf(t, 'in');
     const person = personFrom(t.description ?? t.title);
     if (person && !isSelfPerson(person)) { add(recv, person, an, cents); pushId(recvTxns, person, t.id); }
-    else { link(node('self-ext-in', 'Other money in', 'stub'), an, cents); tagTxn('self-ext-in', t.id); }
+    else {
+      const lane = unpairedLegLane(t, 'in');
+      link(node(lane.id, lane.label, lane.kind), an, cents);
+      tagTxn(lane.id, t.id);
+    }
   }
 
-  // categories: top-8 named, rest merged
+  // Categories: the top TOP_CATEGORIES get their own lane; the tail folds into ONE
+  // residual that states its own size, so "other" can never again hide a quarter of the
+  // spending without saying how many things it is.
   const catTotals = [...catCents.entries()]
     .map(([c, m]) => [c, [...m.values()].reduce((s, v) => s + v, 0)] as const)
-    .sort((a, b) => b[1] - a[1]);
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   const namedCats = new Set(catTotals.slice(0, TOP_CATEGORIES).map(([c]) => c));
+  const residualCount = catTotals.filter(([c, v]) => !namedCats.has(c) && v > 0).length;
+  const residualId = () => node('cat:other', residualCategoryLabel(residualCount), 'category');
   for (const [cat, m] of catCents) {
-    const id = namedCats.has(cat) ? node(`cat:${cat}`, cat, 'category') : node('cat:other', 'Other spending', 'category');
+    const id = namedCats.has(cat)
+      ? node(`cat:${cat}`, catLabels.get(cat) ?? cat, 'category')
+      : residualId();
     for (const [an, cents] of m) link(an, id, cents);
-    for (const tid of catTxns.get(cat) ?? []) tagTxn(id, tid); // merges into cat:other follow for free
+    for (const tid of catTxns.get(cat) ?? []) tagTxn(id, tid); // merges into the residual for free
   }
 
   // people: Remitly always named; top-5 others named; rest folded
@@ -299,10 +373,12 @@ export function buildFlowGraph(
     let verdict: ReconRow['verdict'];
     let gap = 0;
     if (plausible) {
-      if (opening > 0) link(node('opening', 'Starting balance', 'source'), id, opening);
+      // 'stub', not 'source': an opening balance is money you already had. It is the
+      // mirror of 'held' at the other end, and it is not income either.
+      if (opening > 0) link(node('opening', 'Starting balance', 'stub'), id, opening);
       const r2 = residual + Math.max(opening, 0);
       if (r2 > 0) link(id, bank ? node('held', 'Still in your accounts', 'stub') : node('debt-down', 'Paid down existing balance', 'stub'), r2);
-      else if (r2 < 0) link(node('debt-up', 'New card charges', 'source'), id, -r2);
+      else if (r2 < 0) link(node(BORROWED_ON_CARDS.id, BORROWED_ON_CARDS.label, BORROWED_ON_CARDS.kind), id, -r2);
       verdict = opening === 0 ? 'flat' : bank ? 'opening' : 'pre-export-debt';
     } else {
       gap = Math.abs(opening);
@@ -318,7 +394,7 @@ export function buildFlowGraph(
         link(node('missing-in', '⚠ Not in your data yet', 'warning'), id, gap);
         // A normal card owes (negative closing → new-debt inflow); an overpaid card holds a
         // positive balance that must LEAVE the node as held, else sources exceed sinks.
-        if (closing <= 0) link(node('debt-up', 'New card charges', 'source'), id, -closing);
+        if (closing <= 0) link(node(BORROWED_ON_CARDS.id, BORROWED_ON_CARDS.label, BORROWED_ON_CARDS.kind), id, -closing);
         else link(id, node('held', 'Still in your accounts', 'stub'), closing);
       }
     }
@@ -332,11 +408,41 @@ export function buildFlowGraph(
   // drop nodes that ended up with no links (defensive; recharts rejects islands)
   const used = new Set<string>();
   for (const l of links.values()) { used.add(l.source); used.add(l.target); }
+
+  // ONE event for the whole build (OBS-001's performance rule). Lane IDS (ours, not the
+  // owner's words), counts and a duration — no label the owner typed, no amount, no
+  // account, no transaction id.
+  const LANE_IDS = [
+    'refunds', 'rewards', 'card-credit-unexplained', 'debt-up',
+    'self-ext-in', 'self-ext-out', 'cardpay-in', 'cardpay-out', 'cat:other',
+  ];
+  emit({
+    eventName: 'Flow.GraphBuilt',
+    eventCategory: 'activity',
+    severity: 'debug',
+    traceId: '',
+    component: 'FlowLanes',
+    route: '/flow',
+    calculationName: 'buildFlowGraph',
+    durationMs: Date.now() - startedAt,
+    recordCount: rows.length,
+    resultStatus: links.size ? 'ok' : 'empty',
+    metadata: {
+      nodeCount: used.size,
+      linkCount: links.size,
+      residualCategoryCount: residualCount,
+      confirmedLinkCount: allocations.length,
+      nettedAnything: nettedRefundCents > 0,
+      lanesPresent: LANE_IDS.filter((id) => used.has(id)),
+    },
+  });
+
   return {
     nodes: [...nodes.values()].filter((n) => used.has(n.id)),
     links: [...links.values()],
     reconciliation, between,
     nodeTxnIds: Object.fromEntries(nodeTxns),
+    nettedRefundCents,
   };
 }
 
