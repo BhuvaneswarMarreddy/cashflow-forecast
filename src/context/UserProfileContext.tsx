@@ -5,8 +5,10 @@ import { UserProfile, PaymentAccount, IncomeSource } from '@/types';
 import { useAuth } from './AuthContext';
 import * as firestoreService from '@/lib/firestore';
 import { sortAccounts, reindex, reconcile } from '@/lib/accounts';
+import { startSpan, getTrace, errorType } from '@/lib/obs/trace';
+import { emit } from '@/lib/obs/events';
 
-interface UserProfileContextType {
+export interface UserProfileContextType {
   profile: UserProfile | null;
   isLoading: boolean;
   isOnboarded: boolean;
@@ -28,7 +30,7 @@ interface UserProfileContextType {
   refreshProfile: () => Promise<void>;
 }
 
-const UserProfileContext = createContext<UserProfileContextType | undefined>(undefined);
+export const UserProfileContext = createContext<UserProfileContextType | undefined>(undefined);
 
 const LOCAL_STORAGE_KEY = 'cashflow_profile_';
 
@@ -84,6 +86,13 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
     if (isFetching.current) return;
     isFetching.current = true;
 
+    // Application-service boundary for the Accounts flow. Joins whatever trace the
+    // page started; the repository spans below nest under it automatically.
+    const span = startSpan('UserProfile.SyncFromFirestore', {
+      service: 'UserProfileContext',
+      operation: 'LoadAccountsAndProfile',
+      dataSource: 'Firestore',
+    });
     try {
       // Fetch all data in parallel. Do NOT swallow errors into [] here: a failed
       // accounts read must reject the whole sync (outer catch keeps the cached
@@ -122,6 +131,7 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
 
         setProfile(fullProfile);
         saveLocalProfile(userId, fullProfile);
+        span.end({ recordCount: accounts.length, metadata: { incomeSourceCount: incomeSources.length, profileExisted: true } });
 
         // Update last login in background - fire and forget
         firestoreService.updateLastLogin(userId).catch(() => {});
@@ -134,6 +144,7 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
         const seeded: UserProfile = { ...createDefaultProfile(user), paymentAccounts: sortAccounts(accounts), incomeSources };
         setProfile(seeded);
         saveLocalProfile(userId, seeded);
+        span.end({ recordCount: accounts.length, metadata: { incomeSourceCount: incomeSources.length, profileExisted: false } });
         firestoreService.createUserProfile(userId, {
           email: user.email,
           displayName: user.name || user.email.split('@')[0] || 'User',
@@ -143,8 +154,10 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.warn('Firestore sync failed, using cached data:', err);
       setIsFirestoreOnline(false);
+      span.end({ status: 'error', error: err });
     } finally {
       isFetching.current = false;
+      span.end(); // no-op if already ended; guarantees no span is left open
     }
   }, [saveLocalProfile, user]);
 
@@ -242,10 +255,13 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
 
   // Add payment account
   const addPaymentAccount = async (account: Omit<PaymentAccount, 'id'>) => {
-    console.log('📝 [UserProfile] addPaymentAccount called:', account.name);
-    
+    // OBS-001: was logging the account name here and the Firestore id below.
     if (!profile || !user?.id) {
-      console.warn('⚠️ [UserProfile] Cannot add account - no profile or user');
+      emit({
+        eventName: 'Accounts.AddSkipped', eventCategory: 'activity', severity: 'warn',
+        traceId: getTrace()?.traceId ?? '', service: 'UserProfileContext', operation: 'AddPaymentAccount',
+        resultStatus: 'error', metadata: { reason: 'no-profile-or-user' },
+      });
       return;
     }
 
@@ -258,17 +274,11 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
     };
     setProfile(updatedProfile);
     saveLocalProfile(user.id, updatedProfile);
-    console.log('✅ [UserProfile] Account saved to localStorage');
 
-    console.log('📝 [UserProfile] isFirestoreOnline:', isFirestoreOnline);
-    
     // Always try to save to Firestore
     try {
-      console.log('📝 [UserProfile] Saving account to Firestore...');
       const firestoreId = await firestoreService.addAccount(user.id, account);
-      
-      console.log('✅ [UserProfile] Account saved to Firestore with ID:', firestoreId);
-      
+
       // Update with real ID
       const finalAccount = { ...newAccount, id: firestoreId };
       const finalProfile = {
@@ -280,7 +290,11 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
       setProfile(finalProfile);
       saveLocalProfile(user.id, finalProfile);
     } catch (err) {
-      console.error('❌ [UserProfile] Failed to sync account to Firestore:', err);
+      emit({
+        eventName: 'Accounts.AddFailed', eventCategory: 'activity', severity: 'error',
+        traceId: getTrace()?.traceId ?? '', service: 'UserProfileContext', operation: 'AddPaymentAccount',
+        resultStatus: 'error', metadata: { errorType: errorType(err) },
+      });
     }
   };
 

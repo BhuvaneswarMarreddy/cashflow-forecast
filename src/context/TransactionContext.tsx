@@ -8,7 +8,7 @@ import { db, collection, doc, getDocs, setDoc, updateDoc, deleteDoc } from '@/li
 import { applyMappingRules, definedSet, MappingRule, NewMappingRule } from '@/lib/mapping-rules';
 import { generateSampleData } from '@/lib/storage';
 
-interface TransactionContextType {
+export interface TransactionContextType {
   transactions: Transaction[];
   isLoading: boolean;
   error: string | null;
@@ -35,7 +35,7 @@ interface TransactionContextType {
   initializeSampleData: () => Promise<void>;
 }
 
-const TransactionContext = createContext<TransactionContextType | undefined>(undefined);
+export const TransactionContext = createContext<TransactionContextType | undefined>(undefined);
 
 const LOCAL_STORAGE_KEY = 'cashflow_transactions_';
 

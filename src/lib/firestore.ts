@@ -51,6 +51,7 @@ import {
   PlannedTransaction,
   PlannedTransactionStatus,
 } from '@/types';
+import { startSpan } from '@/lib/obs/trace';
 
 // ============================================
 // Types for Firestore Documents
@@ -207,13 +208,16 @@ export async function createUserProfile(
     signUpMethod: 'email' | 'google';
   }
 ): Promise<void> {
-  console.log('📝 [Firestore] Creating user profile...', { userId, email: data.email });
-  console.log('📝 [Firestore] Database: cashflow-forecast');
-  
+  // OBS-001: was logging the user's email and, below, the entire profile document.
+  const span = startSpan('Firestore.CreateUserProfile', {
+    repository: 'firestore.createUserProfile',
+    dataSource: 'Firestore',
+    metadata: { collection: 'users', signUpMethod: data.signUpMethod },
+  });
+
   try {
     const userRef = doc(db, 'users', userId);
-    console.log('📝 [Firestore] Document path: users/' + userId);
-    
+
     const now = serverTimestamp();
 
     const profileData = {
@@ -236,8 +240,6 @@ export async function createUserProfile(
       },
     };
 
-    console.log('📝 [Firestore] Writing document...');
-    
     // Set a timeout for the write operation to detect hanging
     const timeoutPromise = new Promise((_, reject) => {
       setTimeout(() => reject(new Error('Write operation timed out after 10 seconds')), 10000);
@@ -248,33 +250,20 @@ export async function createUserProfile(
     // Race between the write and timeout
     await Promise.race([writePromise, timeoutPromise]);
     
-    console.log('✅✅✅ [Firestore] SUCCESS! User profile created!');
-    console.log('✅ [Firestore] Document written to: users/' + userId);
-    
-    // Verify the write by reading back
+    // Verify the write by reading back. Existence only — the document itself is the
+    // user's profile and has no business in a console.
+    let verified: boolean | 'unknown' = 'unknown';
     try {
-      const verifyDoc = await getDoc(userRef);
-      if (verifyDoc.exists()) {
-        console.log('✅ [Firestore] VERIFIED: Document exists in Firestore!');
-        console.log('✅ [Firestore] Document data:', JSON.stringify(verifyDoc.data(), null, 2));
-      } else {
-        console.warn('⚠️ [Firestore] WARNING: Document not found after write (may still be syncing)');
-      }
-    } catch (verifyError) {
-      console.warn('⚠️ [Firestore] Could not verify write:', verifyError);
+      verified = (await getDoc(userRef)).exists();
+      if (!verified) console.warn('⚠️ [Firestore] Profile not found after write (may still be syncing)');
+    } catch {
+      console.warn('⚠️ [Firestore] Could not verify profile write');
     }
-    
+    span.end({ recordCount: 1, metadata: { verified } });
+
   } catch (error: any) {
-    console.error('❌❌❌ [Firestore] FAILED to create profile!');
-    console.error('❌ [Firestore] Error:', error);
-    console.error('❌ [Firestore] Error code:', error?.code);
-    console.error('❌ [Firestore] Error message:', error?.message);
-    
-    if (error?.message?.includes('timed out')) {
-      console.error('❌ [Firestore] Write operation timed out - check network/database connection');
-      console.error('❌ [Firestore] Verify database name matches Firebase Console: "cashflow-forecast"');
-    }
-    
+    span.end({ status: 'error', error, metadata: { timedOut: Boolean(error?.message?.includes('timed out')) } });
+
     if (isOfflineError(error)) {
       console.warn('⚠️ [Firestore] Offline - profile will sync when online');
       return;
@@ -390,31 +379,33 @@ export async function addAccount(
   userId: string,
   account: Omit<FirestoreAccount, 'id' | 'createdAt' | 'updatedAt'>
 ): Promise<string> {
-  console.log('📝 [Firestore] addAccount called for user:', userId);
-  
+  // OBS-001: the old logging here printed the whole account payload (balance, credit
+  // limit, last four) to the browser console on every add. Replaced with a span that
+  // records the SHAPE of the write — which fields were set — and never their values.
+  const span = startSpan('Firestore.AddAccount', {
+    repository: 'firestore.addAccount',
+    dataSource: 'Firestore',
+    metadata: { collection: 'users/{uid}/accounts' },
+  });
+
   // Remove undefined values - Firestore doesn't accept them
   const cleanAccount = removeUndefined(account);
-  console.log('📝 [Firestore] Account data (cleaned):', JSON.stringify(cleanAccount, null, 2));
-  
+
   try {
     const accountsRef = collection(db, 'users', userId, 'accounts');
-    console.log('📝 [Firestore] Writing to: users/' + userId + '/accounts');
-    
     const now = serverTimestamp();
-    
+
     const docRef = await addDoc(accountsRef, {
       ...cleanAccount,
       createdAt: now,
       updatedAt: now,
     });
-    
-    console.log('✅ [Firestore] Account created with ID:', docRef.id);
+
+    span.end({ recordCount: 1, metadata: { accountId: docRef.id, type: account.type, fieldsSet: Object.keys(cleanAccount).sort() } });
     return docRef.id;
   } catch (error: any) {
-    console.error('❌ [Firestore] Failed to add account:', error);
-    console.error('❌ [Firestore] Error code:', error?.code);
-    console.error('❌ [Firestore] Error message:', error?.message);
-    
+    span.end({ status: 'error', error });
+
     if (isOfflineError(error)) {
       console.warn('⚠️ [Firestore] Offline - account will sync when online');
       return `offline_${Date.now()}`;
@@ -424,21 +415,31 @@ export async function addAccount(
 }
 
 export async function getAccounts(userId: string): Promise<PaymentAccount[]> {
+  // Repository boundary: record count + duration + source, never the documents.
+  const span = startSpan('Firestore.GetAccounts', {
+    repository: 'firestore.getAccounts',
+    dataSource: 'Firestore',
+    metadata: { collection: 'users/{uid}/accounts', filter: 'isActive == true' },
+  });
   try {
     const accountsRef = collection(db, 'users', userId, 'accounts');
     const q = query(accountsRef, where('isActive', '==', true));
     const snapshot = await getDocs(q);
-    
-    return snapshot.docs.map((doc) => ({
+
+    const accounts = snapshot.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),
     })) as PaymentAccount[];
+    span.end({ recordCount: accounts.length, metadata: { fromCache: snapshot.metadata.fromCache } });
+    return accounts;
   } catch (error) {
     if (isOfflineError(error)) {
       console.warn('Firestore offline - using local accounts');
+      span.end({ status: 'error', error, recordCount: 0, metadata: { offline: true } });
       return [];
     }
     console.error('Error getting accounts:', error);
+    span.end({ status: 'error', error, recordCount: 0 });
     return [];
   }
 }
@@ -628,12 +629,17 @@ export async function getTransactions(
     limit?: number;
   }
 ): Promise<Transaction[]> {
+  const span = startSpan('Firestore.GetTransactions', {
+    repository: 'firestore.getTransactions',
+    dataSource: 'Firestore',
+    metadata: { collection: 'users/{uid}/transactions', orderBy: 'date desc' },
+  });
   try {
     const transactionsRef = collection(db, 'users', userId, 'transactions');
     const q = query(transactionsRef, orderBy('date', 'desc'));
-    
+
     const snapshot = await getDocs(q);
-    
+
     let transactions = snapshot.docs.map((doc) => {
       const data = doc.data();
       return {
@@ -656,9 +662,14 @@ export async function getTransactions(
     if (options?.limit) {
       transactions = transactions.slice(0, options.limit);
     }
-    
+
+    span.end({
+      recordCount: transactions.length,
+      metadata: { fetched: snapshot.size, fromCache: snapshot.metadata.fromCache, filtered: snapshot.size !== transactions.length },
+    });
     return transactions;
   } catch (error) {
+    span.end({ status: 'error', error });
     // Must throw, never return []. The caller writes whatever comes back straight over
     // the localStorage mirror, so returning [] for a failed read erased the user's
     // entire cached history. Throwing is also the only way the caller can tell a
