@@ -89,7 +89,7 @@ describe('cross-surface consistency', () => {
   });
 
   it('Budgets agrees with Analytics for classified expenses', () => {
-    const spending = getAllCategorySpending(LEDGER, new Date('2026-03-15'));
+    const spending = getAllCategorySpending(LEDGER, new Date('2026-03-15'), accounts);
     const budgetTotalCents = Object.values(spending).reduce((s, v) => s + toCents(v), 0);
     expect(budgetTotalCents).toBe(EXPECTED_EXPENSE_CENTS);
     expect(toCents(spending.food)).toBe(16500);      // 120.00 + 45.00
@@ -98,9 +98,8 @@ describe('cross-surface consistency', () => {
 
   it('Export matches the app authoritative classification', () => {
     const wb = buildExportWorkbook({ profile, accounts, incomeSources: [], transactions: LEDGER });
-    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets['Summary'], { header: 1 });
-    const cell = (label: string) =>
-      (rows as unknown[][]).find((r) => r[0] === label)?.[1] as number;
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets['Summary'], { header: 1 });
+    const cell = (label: string) => rows.find((r) => r[0] === label)?.[1] as number;
     expect(toCents(cell('Total Income'))).toBe(EXPECTED_INCOME_CENTS);
     expect(toCents(cell('Total Expenses'))).toBe(EXPECTED_EXPENSE_CENTS);
   });
@@ -138,7 +137,7 @@ describe('cross-surface consistency', () => {
     // Card: purchase 45 + posted replacement 64.20 - payment 300 + refund -15 = -205.80 owed
     expect(deriveAccountBalance(accounts[2], LEDGER)).toBeCloseTo(-205.8, 2);
     // and the hold is not in the budget either
-    const spending = getAllCategorySpending(LEDGER, new Date('2026-03-15'));
+    const spending = getAllCategorySpending(LEDGER, new Date('2026-03-15'), accounts);
     expect(toCents(spending.shopping)).toBe(6420);
   });
 
@@ -162,8 +161,9 @@ describe('cross-surface consistency', () => {
       { ...CARD_PAYMENT_BANK_LEG, category: 'utilities', isRecurring: true, recurringFrequency: 'monthly' },
       { ...ORDINARY_EXPENSE, category: 'subscriptions', isRecurring: true, recurringFrequency: 'monthly' },
     ];
-    const out = generateTransactionReminders(recurringLedger, undefined, [], 400);
-    expect(out.map((r) => r.relatedTransactionId).sort()).toEqual(['f1']);
+    // Accounts are what let the classifier see that f6 is a card-payment leg.
+    const out = generateTransactionReminders(recurringLedger, undefined, [], 400, accounts);
+    expect([...new Set(out.map((r) => r.relatedTransactionId))].sort()).toEqual(['f1']);
   });
 
   it('Forecast starts from the posted balance, not the pending one', () => {

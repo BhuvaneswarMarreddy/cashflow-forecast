@@ -445,6 +445,7 @@ export default function ForecastPage() {
               <BudgetStatusPanel
                 budgets={profile.settings.categoryBudgets}
                 transactions={transactions}
+                accounts={profile?.paymentAccounts}
                 compact={true}
               />
             )}

@@ -18,6 +18,7 @@ import DebtPlannerPanel from '@/components/DebtPlannerPanel';
 import { PAYMENT_METHODS, ACCOUNT_TYPES, PaymentAccount, IncomeSource, AccountType, PaymentMethod, CategoryBudget } from '@/types';
 import { deriveAccountBalance, withDerivedBalances, monthlyAverages } from '@/lib/forecast';
 import { matchTransfers } from '@/lib/transfers';
+import { interpretTransaction } from '@/lib/classify';
 import { currentOf } from '@/lib/accounts';
 import { syncNow, describeSync } from '@/lib/sync-client';
 import { useAccountsObservability } from '@/lib/obs/useAccountsObservability';
@@ -661,7 +662,10 @@ export default function AccountsPage() {
               {(() => {
                 const byMethod = new Map<string, number>();
                 for (const t of transactions) {
-                  if (t.type !== 'expense') continue;
+                  // Shared classifier, not the stored type — a card payment settles
+                  // spending, it is not spending. PENDING: EXCLUDED (a hold is not
+                  // settled spending on any payment method yet).
+                  if (interpretTransaction(t, profile?.paymentAccounts).expense !== 'counted') continue;
                   byMethod.set(t.paymentMethod, (byMethod.get(t.paymentMethod) ?? 0) + t.amount);
                 }
                 const rows = [...byMethod.entries()]
@@ -998,6 +1002,7 @@ export default function AccountsPage() {
                   <BudgetStatusPanel
                     budgets={profile.settings.categoryBudgets}
                     transactions={transactions}
+                    accounts={profile?.paymentAccounts}
                     compact={false}
                   />
                 </div>

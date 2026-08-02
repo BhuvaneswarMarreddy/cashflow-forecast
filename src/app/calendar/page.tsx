@@ -8,7 +8,7 @@ import { useUserProfile } from '@/context/UserProfileContext';
 import Navbar from '@/components/Navbar';
 import AddTransactionModal from '@/components/AddTransactionModal';
 import { PAYMENT_METHODS, EXPENSE_CATEGORIES, Transaction } from '@/types';
-import { isPositive } from '@/lib/classify';
+import { isPositive, sumIncomeCents, sumExpenseCents, isPosted } from '@/lib/classify';
 import { formatMoney } from '@/lib/money';
 import {
   TrendingUp,
@@ -73,11 +73,20 @@ export default function CalendarPage() {
     return transactions.filter((t) => isSameDay(parseISO(t.date), date));
   };
 
+  // Day and month totals go through the SHARED classifier, not the stored type.
+  // Reading t.type here made a credit-card payment count as income on the card leg
+  // AND as an expense on the bank leg — the same money, twice, in both directions,
+  // while /flow and /analytics counted it as neither.
+  //
+  // PENDING: EXCLUDED from these totals (sum*Cents is posted-only) but still LISTED
+  // in the day's transactions below with a Pending badge. Filtered from the total,
+  // not from sight.
+  const accountsForClassify = profile?.paymentAccounts;
   const getDayTotal = (date: Date): { income: number; expense: number } => {
     const dayTxns = getDayTransactions(date);
     return {
-      income: dayTxns.filter((t) => t.type === 'income').reduce((sum, t) => sum + t.amount, 0),
-      expense: dayTxns.filter((t) => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0),
+      income: sumIncomeCents(dayTxns, accountsForClassify) / 100,
+      expense: sumExpenseCents(dayTxns, accountsForClassify) / 100,
     };
   };
 
@@ -102,13 +111,8 @@ export default function CalendarPage() {
     return isSameMonth(txnDate, currentMonth);
   });
 
-  const monthlyIncome = monthlyTransactions
-    .filter((t) => t.type === 'income')
-    .reduce((sum, t) => sum + t.amount, 0);
-
-  const monthlyExpenses = monthlyTransactions
-    .filter((t) => t.type === 'expense')
-    .reduce((sum, t) => sum + t.amount, 0);
+  const monthlyIncome = sumIncomeCents(monthlyTransactions, accountsForClassify) / 100;
+  const monthlyExpenses = sumExpenseCents(monthlyTransactions, accountsForClassify) / 100;
 
   return (
     <div className="min-h-screen relative">
@@ -321,7 +325,15 @@ export default function CalendarPage() {
                           {category?.icon || '📋'}
                         </div>
                         <div>
-                          <p className="font-medium text-[var(--foreground)]">{txn.title}</p>
+                          <p className="font-medium text-[var(--foreground)]">
+                            {txn.title}
+                            {/* A hold is shown but is not in the day's totals above. */}
+                            {!isPosted(txn) && (
+                              <span className="ml-2 align-middle text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-[var(--background-secondary)] text-[var(--foreground-muted)] border border-[var(--border-color)]">
+                                Pending
+                              </span>
+                            )}
+                          </p>
                           <p className="text-xs text-[var(--foreground-secondary)]" style={{ color: paymentMethod?.color }}>
                             {paymentMethod?.label}
                           </p>

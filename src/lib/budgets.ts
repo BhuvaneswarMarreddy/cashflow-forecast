@@ -5,8 +5,28 @@
  * Supports the primary question: "Can I afford this today?"
  */
 
-import { Transaction, CategoryBudget, CategoryBudgetStatus, ExpenseCategory, EXPENSE_CATEGORIES } from '@/types';
+import { Transaction, PaymentAccount, CategoryBudget, CategoryBudgetStatus, ExpenseCategory, EXPENSE_CATEGORIES } from '@/types';
 import { startOfMonth, endOfMonth, format, parseISO, differenceInDays, isWithinInterval } from 'date-fns';
+import { interpretTransaction } from '@/lib/classify';
+
+/**
+ * Does this row count against a category budget?
+ *
+ * The shared interpretation decides, never the stored `type`. That keeps a
+ * credit-card payment out of the budget (it is a transfer, and counting it made
+ * "Other" blow its limit every statement cycle).
+ *
+ * PENDING: EXCLUDED. A hold is not settled spending and often posts at a different
+ * amount; letting it count would flip a category to over-budget and then unflip it.
+ * The hold is still visible on the transaction lists — it is filtered from the
+ * TOTAL, not from sight.
+ *
+ * `accounts` is optional: without it a card-payment leg on a card cannot be
+ * recognised, which is the pre-existing behaviour of every caller that has no
+ * account list to hand.
+ */
+const countsAgainstBudget = (t: Transaction, accounts?: PaymentAccount[]) =>
+  interpretTransaction(t, accounts).budget === 'counted';
 
 /**
  * Get spending for a specific category in the current month
@@ -14,16 +34,17 @@ import { startOfMonth, endOfMonth, format, parseISO, differenceInDays, isWithinI
 export function getCategorySpending(
   transactions: Transaction[],
   categoryId: ExpenseCategory,
-  month: Date = new Date()
+  month: Date = new Date(),
+  accounts?: PaymentAccount[]
 ): number {
   const monthStart = startOfMonth(month);
   const monthEnd = endOfMonth(month);
-  
+
   return transactions
     .filter(t => {
       const txnDate = parseISO(t.date);
       return (
-        t.type === 'expense' &&
+        countsAgainstBudget(t, accounts) &&
         t.category === categoryId &&
         isWithinInterval(txnDate, { start: monthStart, end: monthEnd })
       );
@@ -36,7 +57,8 @@ export function getCategorySpending(
  */
 export function getAllCategorySpending(
   transactions: Transaction[],
-  month: Date = new Date()
+  month: Date = new Date(),
+  accounts?: PaymentAccount[]
 ): Record<ExpenseCategory, number> {
   const monthStart = startOfMonth(month);
   const monthEnd = endOfMonth(month);
@@ -53,7 +75,7 @@ export function getAllCategorySpending(
     .filter(t => {
       const txnDate = parseISO(t.date);
       return (
-        t.type === 'expense' &&
+        countsAgainstBudget(t, accounts) &&
         isWithinInterval(txnDate, { start: monthStart, end: monthEnd })
       );
     })
@@ -93,9 +115,10 @@ export function projectMonthEndSpending(
 export function calculateBudgetStatuses(
   budgets: CategoryBudget[],
   transactions: Transaction[],
-  month: Date = new Date()
+  month: Date = new Date(),
+  accounts?: PaymentAccount[]
 ): CategoryBudgetStatus[] {
-  const spending = getAllCategorySpending(transactions, month);
+  const spending = getAllCategorySpending(transactions, month, accounts);
   
   return budgets
     .filter(b => b.isEnabled && b.monthlyLimit > 0)
@@ -129,9 +152,10 @@ export function getTopBudgetRisks(
   budgets: CategoryBudget[],
   transactions: Transaction[],
   limit: number = 3,
-  month: Date = new Date()
+  month: Date = new Date(),
+  accounts?: PaymentAccount[]
 ): CategoryBudgetStatus[] {
-  const statuses = calculateBudgetStatuses(budgets, transactions, month);
+  const statuses = calculateBudgetStatuses(budgets, transactions, month, accounts);
   
   // Filter to categories that are over budget or at risk
   const atRisk = statuses.filter(s => s.isOverBudget || s.isAtRisk || s.percentUsed >= 80);
@@ -147,7 +171,8 @@ export function simulateBudgetImpact(
   transactions: Transaction[],
   categoryId: ExpenseCategory,
   amount: number,
-  month: Date = new Date()
+  month: Date = new Date(),
+  accounts?: PaymentAccount[]
 ): {
   currentStatus: CategoryBudgetStatus | null;
   afterSpend: CategoryBudgetStatus | null;
@@ -163,7 +188,7 @@ export function simulateBudgetImpact(
     };
   }
   
-  const spending = getAllCategorySpending(transactions, month);
+  const spending = getAllCategorySpending(transactions, month, accounts);
   const currentSpent = spending[categoryId] || 0;
   const afterSpent = currentSpent + amount;
   

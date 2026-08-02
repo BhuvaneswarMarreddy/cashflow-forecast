@@ -10,6 +10,7 @@ import * as XLSX from 'xlsx';
 import { withDerivedBalances } from '@/lib/forecast';
 import { PaymentAccount, Transaction, IncomeSource, SavingsGoal, DebtPayoffPlan, UserProfile } from '@/types';
 import { currentOf } from '@/lib/accounts';
+import { interpretTransaction, isPositive, sumIncomeCents, sumExpenseCents } from '@/lib/classify';
 
 export interface ExportData {
   profile: Pick<UserProfile, 'name' | 'email' | 'monthlyBudget' | 'currency' | 'settings'>;
@@ -52,8 +53,13 @@ export function buildExportWorkbook(data: ExportData): XLSX.WorkBook {
     [''],
     ['Transaction Summary'],
     ['Total Transactions', data.transactions.length],
-    ['Total Income', data.transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0)],
-    ['Total Expenses', data.transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0)],
+    // The app's authoritative classification, not the stored type: a card payment is
+    // a transfer, so it is neither income nor spending here — same as every screen.
+    // PENDING: EXCLUDED from these totals (they are the posted accounting truth) but
+    // still exported row-by-row below with a Pending column, so nothing is hidden.
+    ['Total Income', sumIncomeCents(data.transactions, accounts) / 100],
+    ['Total Expenses', sumExpenseCents(data.transactions, accounts) / 100],
+    ['Pending (not in the totals above)', data.transactions.filter(t => t.pending).length],
   ];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryData), 'Summary');
 
@@ -81,16 +87,20 @@ export function buildExportWorkbook(data: ExportData): XLSX.WorkBook {
 
   // 4. All Transactions Sheet
   if (data.transactions.length > 0) {
-    const txnHeaders = ['Date', 'Title', 'Merchant', 'Category', 'Type', 'Amount', 'Payment Method', 'Account', 'Recurring'];
+    const txnHeaders = ['Date', 'Title', 'Merchant', 'Category', 'Type', 'Amount', 'Payment Method', 'Account', 'Recurring', 'Pending'];
     const txnRows = [...data.transactions]
       .sort((a, b) => b.date.localeCompare(a.date))
       .map(t => {
         const account = data.accounts.find(a => a.id === t.accountId);
         return [
-          formatDate(t.date), t.title, t.merchant || '', t.category, t.type,
-          signedAmount(t),
+          // Type is the AUTHORITATIVE classification. The stored provider value is
+          // never mutated — this column just reports what the app actually believes.
+          formatDate(t.date), t.title, t.merchant || '', t.category,
+          interpretTransaction(t, accounts).type,
+          signedAmount(t, accounts),
           t.paymentMethod, account?.name || 'Unlinked',
           t.isRecurring ? 'Yes' : 'No',
+          t.pending ? 'Yes' : 'No',
         ];
       });
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([txnHeaders, ...txnRows]), 'Transactions_All');
@@ -110,13 +120,15 @@ export function buildExportWorkbook(data: ExportData): XLSX.WorkBook {
       const rows = [...txns]
         .sort((a, b) => b.date.localeCompare(a.date))
         .map(t => [
-          formatDate(t.date), t.title, t.merchant || '', t.category, t.type,
-          signedAmount(t),
+          formatDate(t.date), t.title, t.merchant || '', t.category,
+          interpretTransaction(t, accounts).type,
+          signedAmount(t, accounts),
           t.isRecurring ? 'Yes' : 'No',
+          t.pending ? 'Yes' : 'No',
         ]);
       XLSX.utils.book_append_sheet(
         wb,
-        XLSX.utils.aoa_to_sheet([['Date', 'Title', 'Merchant', 'Category', 'Type', 'Amount', 'Recurring'], ...rows]),
+        XLSX.utils.aoa_to_sheet([['Date', 'Title', 'Merchant', 'Category', 'Type', 'Amount', 'Recurring', 'Pending'], ...rows]),
         `Txn_${sanitizeSheetName(account.name)}`
       );
     });
@@ -175,10 +187,10 @@ export function workbookToBlob(wb: XLSX.WorkBook): Blob {
 
 // A transfer is not income: without the direction check an outbound
 // $5,000 move exports as +$5,000 and the Amount column is off by $10,000.
-function signedAmount(t: Transaction): number {
-  return t.type === 'expense' || (t.type === 'transfer' && t.transferDirection === 'out')
-    ? -t.amount
-    : t.amount;
+// isPositive() is the same sign rule every screen renders with, so the export and
+// the app can never disagree about which way a row moved.
+function signedAmount(t: Transaction, accounts?: PaymentAccount[]): number {
+  return isPositive(t, accounts) ? t.amount : -t.amount;
 }
 
 function getMonthlyAmount(amount: number, frequency: string): number {

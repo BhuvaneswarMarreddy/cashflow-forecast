@@ -1,29 +1,33 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import { CategoryBudget, CategoryBudgetStatus, Transaction, EXPENSE_CATEGORIES } from '@/types';
+import { CategoryBudget, CategoryBudgetStatus, PaymentAccount, Transaction, EXPENSE_CATEGORIES } from '@/types';
 import { calculateBudgetStatuses, getTopBudgetRisks } from '@/lib/budgets';
 import { PieChart, AlertTriangle, CheckCircle2, TrendingUp } from 'lucide-react';
 
 interface BudgetStatusPanelProps {
   budgets: CategoryBudget[];
   transactions: Transaction[];
+  // Needed so a credit-card payment leg is recognised as a transfer rather than
+  // charged to a category budget — classification needs the account types.
+  accounts?: PaymentAccount[];
   compact?: boolean; // For forecast page (show only risks)
 }
 
 export default function BudgetStatusPanel({
   budgets,
   transactions,
+  accounts,
   compact = true,
 }: BudgetStatusPanelProps) {
-  const statuses = useMemo(() => 
-    calculateBudgetStatuses(budgets, transactions),
-    [budgets, transactions]
+  const statuses = useMemo(() =>
+    calculateBudgetStatuses(budgets, transactions, new Date(), accounts),
+    [budgets, transactions, accounts]
   );
-  
-  const risks = useMemo(() => 
-    getTopBudgetRisks(budgets, transactions, 3),
-    [budgets, transactions]
+
+  const risks = useMemo(() =>
+    getTopBudgetRisks(budgets, transactions, 3, new Date(), accounts),
+    [budgets, transactions, accounts]
   );
   
   if (budgets.length === 0 || statuses.length === 0) {

@@ -1,12 +1,13 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useMemo, useRef } from 'react';
-import { Transaction, PaymentMethod, ExpenseCategory } from '@/types';
+import { Transaction, PaymentAccount, PaymentMethod, ExpenseCategory } from '@/types';
 import { useAuth } from './AuthContext';
 import * as firestoreService from '@/lib/firestore';
 import { db, collection, doc, getDocs, setDoc, updateDoc, deleteDoc } from '@/lib/firebase';
 import { applyMappingRules, definedSet, MappingRule, NewMappingRule } from '@/lib/mapping-rules';
 import { generateSampleData } from '@/lib/storage';
+import { interpretTransaction } from '@/lib/classify';
 
 export interface TransactionContextType {
   transactions: Transaction[];
@@ -29,9 +30,9 @@ export interface TransactionContextType {
   getTransactionsByCategory: (category: ExpenseCategory) => Transaction[];
   getPastTransactions: () => Transaction[];
   getFutureTransactions: () => Transaction[];
-  getTotalByPaymentMethod: () => { method: PaymentMethod; total: number; count: number }[];
-  getTotalByCategory: () => { category: ExpenseCategory; total: number; count: number }[];
-  getMonthlyTotals: () => { month: string; income: number; expenses: number }[];
+  getTotalByPaymentMethod: (accounts?: PaymentAccount[]) => { method: PaymentMethod; total: number; count: number }[];
+  getTotalByCategory: (accounts?: PaymentAccount[]) => { category: ExpenseCategory; total: number; count: number }[];
+  getMonthlyTotals: (accounts?: PaymentAccount[]) => { month: string; income: number; expenses: number }[];
   initializeSampleData: () => Promise<void>;
 }
 
@@ -363,11 +364,17 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
     return transactions.filter((t) => new Date(t.date) >= today);
   };
 
-  const getTotalByPaymentMethod = (): { method: PaymentMethod; total: number; count: number }[] => {
+  // These three drive the dashboard's spending breakdowns, so they use the SHARED
+  // interpretation rather than the stored type — otherwise a credit-card payment is
+  // charged to a payment method / category as if it were a purchase, on top of the
+  // purchases it settles. `accounts` is optional so the classifier can see account
+  // types; the dashboard passes profile.paymentAccounts.
+  // PENDING: EXCLUDED — interpretTransaction returns 'excluded' for a hold.
+  const getTotalByPaymentMethod = (accounts?: PaymentAccount[]): { method: PaymentMethod; total: number; count: number }[] => {
     const totals: { [key: string]: { total: number; count: number } } = {};
-    
+
     transactions
-      .filter((t) => t.type === 'expense')
+      .filter((t) => interpretTransaction(t, accounts).expense === 'counted')
       .forEach((t) => {
         if (!totals[t.paymentMethod]) {
           totals[t.paymentMethod] = { total: 0, count: 0 };
@@ -383,11 +390,11 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
     }));
   };
 
-  const getTotalByCategory = (): { category: ExpenseCategory; total: number; count: number }[] => {
+  const getTotalByCategory = (accounts?: PaymentAccount[]): { category: ExpenseCategory; total: number; count: number }[] => {
     const totals: { [key: string]: { total: number; count: number } } = {};
-    
+
     transactions
-      .filter((t) => t.type === 'expense')
+      .filter((t) => interpretTransaction(t, accounts).expense === 'counted')
       .forEach((t) => {
         if (!totals[t.category]) {
           totals[t.category] = { total: 0, count: 0 };
@@ -403,9 +410,9 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
     }));
   };
 
-  const getMonthlyTotals = (): { month: string; income: number; expenses: number }[] => {
+  const getMonthlyTotals = (accounts?: PaymentAccount[]): { month: string; income: number; expenses: number }[] => {
     const monthlyData: { [key: string]: { income: number; expenses: number } } = {};
-    
+
     transactions.forEach((t) => {
       const date = new Date(t.date);
       const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
@@ -415,10 +422,12 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
       }
       
       // Bare `else` would bucket every transfer as spending. This drives the
-      // dashboard's Monthly Overview chart.
-      if (t.type === 'income') {
+      // dashboard's Monthly Overview chart, and the interpretation keeps it
+      // agreeing with /flow and /analytics on the same data.
+      const i = interpretTransaction(t, accounts);
+      if (i.income === 'counted') {
         monthlyData[monthKey].income += t.amount;
-      } else if (t.type === 'expense') {
+      } else if (i.expense === 'counted') {
         monthlyData[monthKey].expenses += t.amount;
       }
     });

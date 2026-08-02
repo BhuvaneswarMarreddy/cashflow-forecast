@@ -10,7 +10,7 @@ import Navbar from '@/components/Navbar';
 import AddTransactionModal from '@/components/AddTransactionModal';
 import ChartSrTable from '@/components/ChartSrTable';
 import { PAYMENT_METHODS, EXPENSE_CATEGORIES, AccountType } from '@/types';
-import { isPositive } from '@/lib/classify';
+import { isPositive, sumExpenseCents } from '@/lib/classify';
 import {
   TrendingUp,
   TrendingDown,
@@ -103,20 +103,24 @@ export default function DashboardPage() {
   // Scoped to THIS MONTH because it is compared against profile.monthlyBudget below.
   // Summing every past expense ever worked only while all data was hand-entered;
   // importing a year of history made "Budget Remaining" a six-figure negative.
-  const pastExpenses = pastTransactions
-    .filter((t) => t.type === 'expense')
-    .filter((t) =>
+  // Spending goes through the SHARED classifier (raw t.type charged a credit-card
+  // payment to the budget as if it were a purchase, on top of the purchases it paid
+  // for). PENDING: EXCLUDED — a hold is not settled spending and often posts at a
+  // different amount, so it must not eat this month's budget twice.
+  const pastExpenses = sumExpenseCents(
+    pastTransactions.filter((t) =>
       isWithinInterval(parseISO(t.date), {
         start: startOfMonth(new Date()),
         end: endOfMonth(new Date()),
       })
-    )
-    .reduce((sum, t) => sum + t.amount, 0);
+    ),
+    profile?.paymentAccounts
+  ) / 100;
   
 
-  const paymentMethodTotals = getTotalByPaymentMethod();
-  const categoryTotals = getTotalByCategory();
-  const monthlyTotals = getMonthlyTotals();
+  const paymentMethodTotals = getTotalByPaymentMethod(profile?.paymentAccounts);
+  const categoryTotals = getTotalByCategory(profile?.paymentAccounts);
+  const monthlyTotals = getMonthlyTotals(profile?.paymentAccounts);
 
   // Balances are derived from linked transactions (opening balance + past effects),
   // so every card/total/forecast below reflects reality, not the stored opening figure.

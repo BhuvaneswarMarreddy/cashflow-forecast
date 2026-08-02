@@ -16,6 +16,7 @@ import {
   NotificationPreferences 
 } from '@/types';
 import { currentOf } from '@/lib/accounts';
+import { interpretTransaction } from '@/lib/classify';
 import {
   addDays,
   format, 
@@ -175,7 +176,8 @@ export function generateTransactionReminders(
   transactions: Transaction[],
   preferences: NotificationPreferences | undefined,
   existingReminders: Reminder[],
-  daysAhead: number = 14
+  daysAhead: number = 14,
+  accounts?: PaymentAccount[]
 ): Reminder[] {
   const reminders: Reminder[] = [];
   const today = startOfDay(new Date());
@@ -185,10 +187,16 @@ export function generateTransactionReminders(
   const existingIds = new Set(existingReminders.map(r => r.id));
   
   // Get recurring expense transactions
+  // The shared interpretation decides what is a bill, not the stored type: a
+  // recurring credit-card payment is a transfer and must not become a second
+  // "bill due" next to the purchases that made it.
+  //
+  // PENDING: EXCLUDED. A hold is not evidence a bill exists — reminding on one
+  // would fire a notification for a charge that may never post at that amount.
   transactions
-    .filter(t => 
-      t.isRecurring && 
-      t.type === 'expense' &&
+    .filter(t =>
+      t.isRecurring &&
+      interpretTransaction(t, accounts).expense === 'counted' &&
       (t.category === 'subscriptions' || t.category === 'utilities' || t.category === 'insurance' || t.category === 'rent')
     )
     .forEach(txn => {
@@ -265,7 +273,9 @@ export function getAllUpcomingReminders(
   daysAhead: number = 14
 ): Reminder[] {
   const accountReminders = generateAccountReminders(accounts, preferences, existingReminders, daysAhead);
-  const transactionReminders = generateTransactionReminders(transactions, preferences, existingReminders, daysAhead);
+  // Accounts are passed on so a recurring card-payment row is recognised as a
+  // transfer rather than turned into a duplicate "bill due".
+  const transactionReminders = generateTransactionReminders(transactions, preferences, existingReminders, daysAhead, accounts);
   
   // Combine and sort by date
   return [...accountReminders, ...transactionReminders]
