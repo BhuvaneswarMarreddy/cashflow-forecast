@@ -307,6 +307,12 @@ export interface Transaction {
   // label for display, grouping and filtering. Absent on manually-added rows.
   sourceCategory?: string;
   transferDirection?: TransferDirection; // Only meaningful when type === 'transfer'
+  // A provider-side HOLD, not settled history. Written by functions-sync/simplefin.py
+  // under a `pending_` doc id, refreshed every sync and DELETED the moment the charge
+  // posts (under its own id, often at a different amount). It was already arriving in
+  // the app untyped and being counted as posted truth. Every financial consumer must
+  // decide about it explicitly — see interpretTransaction() in src/lib/classify.ts.
+  pending?: boolean;
   isRecurring?: boolean;
   recurringFrequency?: 'weekly' | 'monthly' | 'yearly';
   recurringEndDate?: string; // When recurring payments end (ISO date)
