@@ -196,9 +196,10 @@ export function accountsSummaryProvenance(
       'Inactive accounts never reach this calculation: firestore.getAccounts() filters isActive == true at the repository, so "excludedAccountCount" counts type exclusions only.',
       `Last-sync is derived (${sync.source}); the authoritative meta/monarchSync.lastSuccess is not readable by the browser under the current Firestore rules.`,
       'AvailableCredit excludes cards with no creditLimit set rather than treating a missing limit as zero — matching the page, which sums only the limits it has.',
-      // Faithful description of current execution, not an endorsement of it. FIN-INCOME-001
-      // replaces this rule with approved income sources + an unknown-inflow queue.
-      'NOT COVERED: the "Monthly Income" and "Monthly Budget" cards. Monthly Income comes from monthlyAverages() (src/lib/forecast.ts), which today prefers rows whose sourceCategory is the literal "Paychecks" (or whose text matches /payroll|paycheck/i) and otherwise sums EVERY income-classified row over the last 6 months — so refunds, reimbursements and one-off deposits currently count as income. Provenance for earned income needs the approved-income-source model first.',
+      // Faithful description of current execution. FIN-INCOME-001 replaced the
+      // "Paychecks"-literal rule this used to record; the remaining gap is that
+      // per-metric provenance rows have not been written for the income cards yet.
+      'NOT COVERED: the "Monthly Income" and "Monthly Budget" cards have no per-metric provenance row yet. Monthly Income comes from monthlyAverages() (src/lib/forecast.ts), which since FIN-INCOME-001 counts a row ONLY when interpretTransaction() resolves it to the financial meaning "earned_income" — that is, it matched an ACTIVE APPROVED source in users/{uid}/income or the owner confirmed it in users/{uid}/reviews. Every other credit is an "unknown_inflow": it moves the balance and is excluded from income, so refunds, reimbursements, Zelle credits and one-off deposits no longer inflate this figure. With no approved source configured the honest answer is 0, and the unexplained credits are listed by selectInflowReviewQueue() (src/lib/classify.ts).',
     ],
   };
 }

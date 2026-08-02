@@ -11,14 +11,18 @@
  */
 
 import * as XLSX from 'xlsx';
-import { PaymentAccount, Transaction, UserProfile } from '@/types';
-import { sumIncomeCents, sumExpenseCents, postedOnly, interpretTransaction } from '@/lib/classify';
+import { IncomeSource, PaymentAccount, Transaction, UserProfile } from '@/types';
+import {
+  sumIncomeCents, sumExpenseCents, postedOnly, interpretTransaction,
+  selectInflowReviewQueue, IncomeContext,
+} from '@/lib/classify';
 import { getAllCategorySpending } from '@/lib/budgets';
 import { generateTransactionReminders } from '@/lib/reminders';
 import { buildExportWorkbook } from '@/lib/export-xlsx';
 import { buildFlowGraph, toCents } from '@/lib/flows';
 import { deriveAccountBalance } from '@/lib/forecast';
 import { matchTransfers } from '@/lib/transfers';
+import { monthlyAverages } from '@/lib/forecast';
 
 const accounts: PaymentAccount[] = [
   {
@@ -35,6 +39,16 @@ const accounts: PaymentAccount[] = [
     openingBalance: 0, openingDate: '2000-01-01', color: '#222', isActive: true,
   },
 ];
+
+/**
+ * FIN-INCOME-001: the owner's ONE approved income source. Every surface reads the
+ * same `INCOME` context, which is what makes a single earned-income total possible.
+ */
+const EMPLOYER: IncomeSource = {
+  id: 'src-employer', name: 'Larkspur Studio', amount: 3200, frequency: 'biweekly',
+  isActive: true, kind: 'employment',
+};
+const INCOME: IncomeContext = { sources: [EMPLOYER] };
 
 const tx = (o: Partial<Transaction> & { id: string; title: string; amount: number }): Transaction => ({
   type: 'expense', category: 'other', paymentMethod: 'other', date: '2026-03-10', ...o,
@@ -62,11 +76,13 @@ const LEDGER: Transaction[] = [
 // Hand-computed authoritative truth for this ledger, in integer cents.
 // Expenses: Willowbrook 12000 + Brightleaf 4500 + Cedarline posted 6420 = 22920.
 //   (transfers, both card-payment legs and the pending hold are all excluded)
-// Income:   Direct Deposit 320000 + Refund 1500 + Unknown inflow 8800 = 330300.
-//   (refund/unknown stay counted until FIN-INCOME-001 rules on earned income;
-//    the card-payment card leg is a transfer and contributes nothing)
+// Income:   Direct Deposit 320000 ONLY — it is the one row the approved source
+//   "Larkspur Studio" explains.
+//   FIN-INCOME-001 changed this figure from 330300: the $15.00 refund and the $88.00
+//   unknown credit used to be counted as income merely because they were positive.
+//   Both are still real cash on the balance; neither is earnings.
 const EXPECTED_EXPENSE_CENTS = 22920;
-const EXPECTED_INCOME_CENTS = 330300;
+const EXPECTED_INCOME_CENTS = 320000;
 
 const profile = {
   name: 'Test', email: 't@example.com', monthlyBudget: 5000, currency: 'USD', settings: undefined,
@@ -75,13 +91,13 @@ const profile = {
 describe('cross-surface consistency', () => {
   it('the shared totals are the authoritative answer', () => {
     expect(sumExpenseCents(LEDGER, accounts)).toBe(EXPECTED_EXPENSE_CENTS);
-    expect(sumIncomeCents(LEDGER, accounts)).toBe(EXPECTED_INCOME_CENTS);
+    expect(sumIncomeCents(LEDGER, accounts, INCOME)).toBe(EXPECTED_INCOME_CENTS);
   });
 
   it('Dashboard and Calendar agree with the shared totals', () => {
     // Both pages sum through the same helper; a per-page reduce would drift.
     const dashboardExpense = sumExpenseCents(LEDGER, accounts);
-    const calendarIncome = sumIncomeCents(LEDGER, accounts);
+    const calendarIncome = sumIncomeCents(LEDGER, accounts, INCOME);
     const calendarExpense = sumExpenseCents(LEDGER, accounts);
     expect(dashboardExpense).toBe(EXPECTED_EXPENSE_CENTS);
     expect(calendarExpense).toBe(EXPECTED_EXPENSE_CENTS);
@@ -97,7 +113,7 @@ describe('cross-surface consistency', () => {
   });
 
   it('Export matches the app authoritative classification', () => {
-    const wb = buildExportWorkbook({ profile, accounts, incomeSources: [], transactions: LEDGER });
+    const wb = buildExportWorkbook({ profile, accounts, incomeSources: [EMPLOYER], transactions: LEDGER });
     const rows = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets['Summary'], { header: 1 });
     const cell = (label: string) => rows.find((r) => r[0] === label)?.[1] as number;
     expect(toCents(cell('Total Income'))).toBe(EXPECTED_INCOME_CENTS);
@@ -113,9 +129,9 @@ describe('cross-surface consistency', () => {
   });
 
   it('card payments never become earned income', () => {
-    expect(interpretTransaction(CARD_PAYMENT_CARD_LEG, accounts).income).toBe('excluded');
-    expect(interpretTransaction(CARD_PAYMENT_CARD_LEG, accounts).meaning).toBe('card_payment');
-    expect(sumIncomeCents([CARD_PAYMENT_CARD_LEG], accounts)).toBe(0);
+    expect(interpretTransaction(CARD_PAYMENT_CARD_LEG, accounts, INCOME).income).toBe('excluded');
+    expect(interpretTransaction(CARD_PAYMENT_CARD_LEG, accounts, INCOME).meaning).toBe('card_payment');
+    expect(sumIncomeCents([CARD_PAYMENT_CARD_LEG], accounts, INCOME)).toBe(0);
   });
 
   it('card payments are not double-counted as expense', () => {
@@ -123,7 +139,7 @@ describe('cross-surface consistency', () => {
   });
 
   it('internal transfers net to zero aggregate income and expense', () => {
-    expect(sumIncomeCents([TRANSFER_OUT, TRANSFER_IN], accounts)).toBe(0);
+    expect(sumIncomeCents([TRANSFER_OUT, TRANSFER_IN], accounts, INCOME)).toBe(0);
     expect(sumExpenseCents([TRANSFER_OUT, TRANSFER_IN], accounts)).toBe(0);
     const m = matchTransfers(LEDGER, accounts);
     // savings move + card payment, both two-sided
@@ -171,4 +187,62 @@ describe('cross-surface consistency', () => {
     const withoutHold = deriveAccountBalance(accounts[2], postedOnly(LEDGER));
     expect(withHold).toBeCloseTo(withoutHold, 2);
   });
+
+  // --- FIN-INCOME-001 §8: ONE earned-income total ---------------------------
+
+  it('every surface reports the SAME earned-income total from the same context', () => {
+    const shared = sumIncomeCents(LEDGER, accounts, INCOME);
+
+    // Calendar (per-day sum) and Dashboard/Analytics (whole-ledger sum)
+    const byDay = [...new Set(LEDGER.map((t) => t.date))]
+      .map((d) => sumIncomeCents(LEDGER.filter((t) => t.date === d), accounts, INCOME))
+      .reduce((a, b) => a + b, 0);
+    expect(byDay).toBe(shared);
+
+    // Export
+    const wb = buildExportWorkbook({ profile, accounts, incomeSources: [EMPLOYER], transactions: LEDGER });
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets['Summary'], { header: 1 });
+    const total = rows.find((r) => r[0] === 'Total Income')?.[1] as number;
+    expect(toCents(total)).toBe(shared);
+
+    // Forecast / Accounts / AI context, via monthlyAverages over the same rule
+    const inWindow = LEDGER.map((t) => ({ ...t, date: monthAgo(t.date) }));
+    expect(monthlyAverages(inWindow, accounts, 1, INCOME).income * 100).toBe(shared);
+
+    expect(shared).toBe(EXPECTED_INCOME_CENTS);
+  });
+
+  it('the unknown inflow is on the balance but in no income total, on any surface', () => {
+    // It really arrived: the checking balance includes it.
+    const chk = deriveAccountBalance(accounts[0], LEDGER);
+    const withoutIt = deriveAccountBalance(accounts[0], LEDGER.filter((t) => t.id !== 'f11'));
+    expect(chk - withoutIt).toBeCloseTo(88, 2);
+
+    // And it is income nowhere.
+    expect(interpretTransaction(UNKNOWN_INFLOW, accounts, INCOME).financialMeaning).toBe('unknown_inflow');
+    expect(sumIncomeCents([UNKNOWN_INFLOW], accounts, INCOME)).toBe(0);
+    const wb = buildExportWorkbook({ profile, accounts, incomeSources: [EMPLOYER], transactions: [UNKNOWN_INFLOW] });
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets['Summary'], { header: 1 });
+    expect(rows.find((r) => r[0] === 'Total Income')?.[1]).toBe(0);
+  });
+
+  it('the review queue holds exactly the credits nothing explains', () => {
+    // The $88.00 unknown credit. The paycheck is explained, the refund and the card
+    // payment are named by the ledger layer, and the transfers are settled.
+    expect(selectInflowReviewQueue(LEDGER, accounts, INCOME).map((i) => i.transactionId)).toEqual(['f11']);
+  });
+
+  it('a refund is income nowhere and reduces spending, on every surface', () => {
+    expect(interpretTransaction(REFUND, accounts, INCOME).financialMeaning).toBe('refund');
+    expect(sumIncomeCents([REFUND], accounts, INCOME)).toBe(0);
+  });
 });
+
+/** Shift an ISO day into the previous calendar month, for monthlyAverages' window. */
+function monthAgo(iso: string): string {
+  const now = new Date();
+  const d = Number(iso.split('T')[0].slice(8, 10));
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, Math.min(d, 28)))
+    .toISOString()
+    .slice(0, 10);
+}

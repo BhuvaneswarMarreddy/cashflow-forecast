@@ -3,8 +3,20 @@
  * classifyBehaviors/buildAssumptions anchor "today" internally, so fixtures are
  * relative-dated (same style as monthly-averages.test.ts).
  */
-import { Transaction, PaymentAccount } from '@/types';
+import { Transaction, PaymentAccount, IncomeSource } from '@/types';
 import { classifyBehaviors, buildAssumptions, behaviorEvents } from '@/lib/behavior';
+import type { IncomeContext } from '@/lib/classify';
+
+/**
+ * FIN-INCOME-001: the paycheck line is built from rows an APPROVED income source
+ * explains, not from `sourceCategory === 'Paychecks'`. The alias is what ties the
+ * owner's source to the deposits their bank actually sends.
+ */
+const EMPLOYER: IncomeSource = {
+  id: 'src-employer', name: 'Larkspur Studio', amount: 2500, frequency: 'biweekly',
+  isActive: true, matchAliases: ['payroll deposit'], kind: 'employment',
+};
+const INCOME: IncomeContext = { sources: [EMPLOYER] };
 
 const tx = (o: Partial<Transaction> & { id: string; amount: number; date: string }): Transaction => ({
   title: o.id, type: 'expense', category: 'other', paymentMethod: 'bank-transfer', ...o,
@@ -100,7 +112,14 @@ describe('classifyBehaviors — all 8 classes', () => {
 });
 
 describe('buildAssumptions', () => {
-  const a = buildAssumptions(ledger, accounts);
+  const a = buildAssumptions(ledger, accounts, {}, INCOME);
+
+  it('builds NO paycheck line when no approved source explains the deposits', () => {
+    // The rows are still tagged `sourceCategory: 'Paychecks'` by the importer. That
+    // used to be the whole rule; it is now a suggestion with no authority.
+    expect(buildAssumptions(ledger, accounts).income).toBeNull();
+    expect(buildAssumptions(ledger, accounts, {}, { sources: [{ ...EMPLOYER, isActive: false }] }).income).toBeNull();
+  });
 
   it('detects biweekly paychecks: cadence, median amount, nextDate', () => {
     expect(a.income).toMatchObject({
@@ -131,7 +150,7 @@ describe('buildAssumptions', () => {
     // Shopping baseline is the $60 habit only — the $1,400 TV must not move it
     const shopping = a.categoryBaselines.find((b) => b.category === 'Shopping')!;
     expect(shopping.monthlyMedian).toBe(60);
-    const without = buildAssumptions(ledger.filter((t) => t.id !== 'tv'), accounts);
+    const without = buildAssumptions(ledger.filter((t) => t.id !== 'tv'), accounts, {}, INCOME);
     expect(without.categoryBaselines.find((b) => b.category === 'Shopping')!.monthlyMedian).toBe(60);
     // no baseline row for excluded classes
     expect(a.categoryBaselines.some((b) => b.category === 'Paychecks')).toBe(false);
@@ -142,7 +161,7 @@ describe('buildAssumptions', () => {
       income: { amount: 3000 },
       bills: { VERIZON: { amount: 55 } },
       baselines: { Groceries: null, 'Pet Care': 40 },
-    });
+    }, INCOME);
     expect(o.income!.medianAmount).toBe(3000);
     expect(o.fixedBills.find((b) => b.merchant === 'VERIZON')!.amount).toBe(55);
     expect(o.categoryBaselines.some((b) => b.category === 'Groceries')).toBe(false);
@@ -154,7 +173,7 @@ describe('buildAssumptions', () => {
 
 describe('behaviorEvents', () => {
   it('projects income at the pay cadence and bills at nextDue', () => {
-    const a = buildAssumptions(ledger, accounts);
+    const a = buildAssumptions(ledger, accounts, {}, INCOME);
     const evts = behaviorEvents(a, accounts, todayStr, 60);
     const pay = evts.filter((e) => e.type === 'income');
     expect(pay.length).toBeGreaterThanOrEqual(3); // biweekly over 60 days
@@ -166,7 +185,7 @@ describe('behaviorEvents', () => {
   });
 
   it('emits daily living costs with breakdown, confidence and contributors', () => {
-    const a = buildAssumptions(ledger, accounts);
+    const a = buildAssumptions(ledger, accounts, {}, INCOME);
     const evts = behaviorEvents(a, accounts, todayStr, 30);
     const living = evts.filter((e) => e.description === 'Projected living costs');
     expect(living.length).toBeGreaterThanOrEqual(28);
@@ -180,7 +199,7 @@ describe('behaviorEvents', () => {
   it('override: disabled bill produces no events; null income produces no income events', () => {
     const disabled = buildAssumptions(ledger, accounts, {
       income: null, bills: { VERIZON: { disabled: true } },
-    });
+    }, INCOME);
     expect(disabled.income).toBeNull();
     const evts = behaviorEvents(disabled, accounts, todayStr, 60);
     expect(evts.some((e) => e.type === 'income')).toBe(false);
