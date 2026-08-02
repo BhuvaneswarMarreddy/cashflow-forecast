@@ -3,7 +3,7 @@
  * dollars exist only at the render layer. Pure functions, no React.
  */
 import { PaymentAccount, Transaction } from '@/types';
-import { isPositive } from './classify';
+import { isPositive, isPosted } from './classify';
 
 export const toCents = (n: number) => Math.round(n * 100);
 export const day = (iso: string) => iso.slice(0, 10);
@@ -95,7 +95,12 @@ export function buildFlowGraph(
 ): FlowGraph {
   const start = period.start ?? '0000-00-00';
   const end = period.end ?? '9999-12-31';
-  const rows = transactions.filter((t) => day(t.date) >= start && day(t.date) <= end);
+  // PENDING: excluded. Flow reconciles gross movement against the derived account
+  // balances, which are posted-only — a hold in here puts the reconciliation out by
+  // its amount and then out again when the charge posts at a different figure.
+  const rows = transactions.filter(
+    (t) => isPosted(t) && day(t.date) >= start && day(t.date) <= end
+  );
   const byId = new Map(accounts.map((a) => [a.id, a]));
 
   const nodes = new Map<string, FlowNode>();

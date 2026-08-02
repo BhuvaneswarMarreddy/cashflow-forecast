@@ -131,7 +131,7 @@ function metric(
     excludedAccountCount: excluded.length,
     exclusionReasons,
     pendingDataTreatment:
-      'Balances are openingBalance ± transactions dated openingDate..today; rows dated after today are excluded as forecast, rows before openingDate are already inside the anchor.',
+      'Balances are openingBalance ± POSTED transactions dated openingDate..today; provider-pending rows (pending: true) are excluded because the anchor is the provider posted balance, rows dated after today are excluded as forecast, and rows before openingDate are already inside the anchor.',
     dataSource: shared.dataSource,
     cacheStatus: shared.cacheStatus,
     staleness: shared.staleness,

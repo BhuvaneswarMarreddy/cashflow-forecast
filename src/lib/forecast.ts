@@ -16,7 +16,7 @@ import {
   AccountForecast 
 } from '@/types';
 import { addDays, format, parseISO, startOfDay, isBefore, isAfter, isSameDay } from 'date-fns';
-import { isPositive, classifyTransaction } from '@/lib/classify';
+import { isPositive, classifyTransaction, interpretTransaction, isPosted } from '@/lib/classify';
 import { currentOf } from '@/lib/accounts';
 import { buildAssumptions, behaviorEvents, AssumptionOverrides } from '@/lib/behavior';
 import { normalizeMerchant } from '@/lib/flows';
@@ -47,6 +47,9 @@ export function monthlyAverages(
   let pay = 0, allInc = 0, sp = 0;
   for (const t of transactions) {
     if (!window.has(t.date.split('T')[0].slice(0, 7))) continue;
+    // PENDING: excluded — this is the settled-history baseline the forecast
+    // projects forward, and a hold is not settled history.
+    if (!isPosted(t)) continue;
     const c = classifyTransaction(t, accounts);
     if (c === 'income') {
       allInc += t.amount;
@@ -77,6 +80,10 @@ export function deriveAccountBalance(account: PaymentAccount, transactions: Tran
   const isDebt = account.type === 'credit_card' || account.type === 'personal_loan';
   const net = transactions.reduce((sum, t) => {
     if (t.accountId !== account.id) return sum;
+    // PENDING: excluded. The anchor this is added to is the provider's POSTED
+    // balance (simplefin.py re-anchors from `balance`, not available-balance), so
+    // folding holds in here counts the same money twice and moves the hero number.
+    if (!isPosted(t)) return sum;
     // Compare calendar days, not instants (IST timezone; see git history).
     const day = t.date.split('T')[0];
     if (day > todayKey) return sum;   // future = forecast, not current balance
@@ -322,8 +329,12 @@ function transactionsToEvents(
     // For income: only add if it's NOT projected (actual received income) AND not a credit card payment
     // Credit card "income" = payment to card (reduces balance), NOT real income
     // For expenses: add all
-    const isCreditCardPayment = t.type === 'income' && isCreditCardAccount(t.accountId);
-    const isActualIncome = t.type === 'income' && !t.isProjected && !isCreditCardPayment;
+    // The shared interpretation decides income/spending — not the stored type.
+    // It already excludes a card-payment leg (either side) and any pending hold,
+    // which is what the hand-rolled isCreditCardPayment test below used to approximate
+    // for the card side only.
+    const i = interpretTransaction(t, accounts);
+    const isActualIncome = i.income === 'counted' && !t.isProjected;
     // This forecast tracks the CASH pool (calculateCurrentCash excludes credit cards),
     // so a transfer is only invisible to it when both legs sit inside that pool. A
     // transfer out of checking — to a card, to savings the user has not set up, to an
@@ -337,12 +348,13 @@ function transactionsToEvents(
     // safe direction for a runway. Suppress it here if that ever stops being true.
     const transferAccount = t.accountId ? accounts.find(a => a.id === t.accountId) : undefined;
     const isCountableTransfer =
-      t.type === 'transfer' &&
+      i.type === 'transfer' &&
+      isPosted(t) &&
       !!transferAccount &&
       transferAccount.type !== 'credit_card' &&
       transferAccount.type !== 'personal_loan';
 
-    const shouldInclude = t.type === 'expense' || isActualIncome || isCountableTransfer;
+    const shouldInclude = i.expense === 'counted' || isActualIncome || isCountableTransfer;
 
     if (shouldInclude && isAfter(txnDate, startDate) && isBefore(txnDate, endDate)) {
       // A transfer's direction decides its sign. isPositive() resolves it from the
@@ -350,7 +362,7 @@ function transactionsToEvents(
       // the same rule every UI surface uses — the forecast must not disagree.
       const signedAmount = isCountableTransfer
         ? (isPositive(t, accounts) ? t.amount : -t.amount)
-        : (t.type === 'income' ? t.amount : -t.amount);
+        : (i.type === 'income' ? t.amount : -t.amount);
 
       events.push({
         date: t.date.split('T')[0],
@@ -365,7 +377,9 @@ function transactionsToEvents(
     
     // Generate future recurring events for EXPENSES ONLY
     // Income recurring events come from incomeSources, not transactions
-    if (t.isRecurring && t.recurringFrequency && t.type === 'expense'
+    // PENDING: excluded — a hold is not evidence of a recurring bill, and
+    // i.expense already says so.
+    if (t.isRecurring && t.recurringFrequency && i.expense === 'counted'
         && !suppressRecurringFor?.has(normalizeMerchant(t.merchant || t.title))) {
       const recurringEndDate = t.recurringEndDate ? parseISO(t.recurringEndDate) : null;
       let paymentCount = 0;
@@ -961,7 +975,7 @@ export function generateAccountForecast(
     // `type === 'expense' ? +amount : -amount` would push an inbound payment the
     // wrong way against this card's balance.
     transactions
-      .filter(t => t.accountId === account.id && t.type !== 'transfer')
+      .filter(t => t.accountId === account.id && classifyTransaction(t, allAccounts) !== 'transfer')
       .filter(t => {
         const txnDate = parseISO(t.date);
         return isAfter(txnDate, today) && isBefore(txnDate, endDate);
@@ -971,7 +985,9 @@ export function generateAccountForecast(
           date: t.date.split('T')[0],
           type: 'expense',
           description: t.title,
-          amount: t.type === 'expense' ? t.amount : -t.amount, // Credit card: spending increases balance (positive)
+          // Credit card: spending increases balance (positive). isPositive() is the
+          // shared sign rule, so this cannot disagree with the row's own classification.
+          amount: isPositive(t, [account]) ? -t.amount : t.amount,
           balanceAfter: 0,
           source: 'manual',
           accountId: account.id,
@@ -1021,10 +1037,13 @@ export function generateAccountForecast(
       return isAfter(txnDate, today) && isBefore(txnDate, endDate);
     })
     .forEach(t => {
-      const inflow = t.type === 'transfer' ? isPositive(t, [account]) : t.type === 'income';
+      // Sign and kind both come from the shared classifier, so a card-payment leg
+      // sitting on this account is a transfer here exactly as it is on Flow.
+      const kind = classifyTransaction(t, allAccounts);
+      const inflow = isPositive(t, [account]);
       events.push({
         date: t.date.split('T')[0],
-        type: t.type === 'transfer' ? 'transfer' : inflow ? 'income' : 'expense',
+        type: kind === 'transfer' ? 'transfer' : inflow ? 'income' : 'expense',
         description: t.title,
         amount: inflow ? t.amount : -t.amount,
         balanceAfter: 0,
