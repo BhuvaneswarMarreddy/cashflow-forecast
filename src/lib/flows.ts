@@ -357,7 +357,7 @@ export interface RecurringItem {
   confidence: number;
 }
 
-const BANDS: Array<[RecurringItem['cadence'], number, number, number]> = [
+export const BANDS: Array<[RecurringItem['cadence'], number, number, number]> = [
   ['weekly', 6, 8, 4.33], ['biweekly', 12, 16, 2.17], ['monthly', 26, 35, 1],
   ['quarterly', 80, 100, 1 / 3], ['yearly', 350, 380, 1 / 12],
 ];
