@@ -985,7 +985,9 @@ export function generateAccountForecast(
           date: t.date.split('T')[0],
           type: 'expense',
           description: t.title,
-          amount: t.type === 'expense' ? t.amount : -t.amount, // Credit card: spending increases balance (positive)
+          // Credit card: spending increases balance (positive). isPositive() is the
+          // shared sign rule, so this cannot disagree with the row's own classification.
+          amount: isPositive(t, [account]) ? -t.amount : t.amount,
           balanceAfter: 0,
           source: 'manual',
           accountId: account.id,
