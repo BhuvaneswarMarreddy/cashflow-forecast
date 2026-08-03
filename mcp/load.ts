@@ -4,7 +4,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import { IncomeSource, PaymentAccount, Transaction } from '@/types';
+import { PaymentAccount, Transaction } from '@/types';
 import { IncomeContext } from '@/lib/classify';
 import { loadFromCsvDir } from './load-csv';
 
@@ -35,6 +35,9 @@ export function resetLedgerCache(): void {
 
 export async function loadLedger(): Promise<LoadResult> {
   if (cache && Date.now() - cache.at < TTL_MS) return { ok: true, ledger: cache.ledger };
+  // Firestore connects only when BOTH env vars are set; the key alone routes here so a
+  // half-configured setup gets the missing-uid message instead of silently reading a
+  // stale CSV and reporting numbers the owner thinks are live.
   const result = process.env.CASHFLOW_FIRESTORE_KEY
     ? await loadFromFirestore(process.env.CASHFLOW_FIRESTORE_KEY)
     : loadFromCsv();
@@ -61,30 +64,30 @@ async function loadFromFirestore(keyPath: string): Promise<LoadResult> {
     const errno = (e as NodeJS.ErrnoException).code ?? String(e);
     return { ok: false, error: fail(`CASHFLOW_FIRESTORE_KEY points to ${keyPath} but it cannot be read: ${errno}. Check the path, or unset it to fall back to the CSV export.`) };
   }
-  const uid = process.env.CASHFLOW_FIRESTORE_UID;
-  if (!uid) {
+  if (!process.env.CASHFLOW_FIRESTORE_UID) {
     return { ok: false, error: fail('CASHFLOW_FIRESTORE_UID is not set. It must be the Firebase Auth uid whose ledger to read (Firebase console -> Authentication -> Users).') };
   }
   // Lazy import: the default CSV path must not pay firebase-admin's startup cost.
-  const { initializeApp, cert, getApps } = await import('firebase-admin/app');
-  const { getFirestore } = await import('firebase-admin/firestore');
-  const app = getApps()[0] ?? initializeApp({ credential: cert(keyPath) });
-  const db = getFirestore(app);
-  const [txSnap, acctSnap, incomeSnap] = await Promise.all([
-    db.collection(`users/${uid}/transactions`).get(),
-    db.collection(`users/${uid}/accounts`).get(),
-    db.collection(`users/${uid}/income`).get(),
-  ]);
-  const docs = <T>(snap: { docs: Array<{ id: string; data(): unknown }> }): T[] =>
-    snap.docs.map((d) => ({ ...(d.data() as object), id: d.id } as T));
-  return {
-    ok: true,
-    ledger: {
-      transactions: docs<Transaction>(txSnap),
-      accounts: docs<PaymentAccount>(acctSnap),
-      income: { sources: docs<IncomeSource>(incomeSnap) },
-      source: 'firestore',
-      loadedAt: new Date().toISOString(),
-    },
-  };
+  // The loader reads the same two env vars — both are known set by the time it runs.
+  try {
+    const { loadFromFirestore: read } = await import('./load-firestore');
+    return { ok: true, ledger: await read() };
+  } catch (e) {
+    return { ok: false, error: fail(firestoreFailure(e)) };
+  }
+}
+
+/**
+ * Firestore's own failures, translated once. The permission case names the exact role
+ * and no more: firestore.rules do not apply to the Admin SDK, so IAM is the only thing
+ * that actually keeps this server read-only, and a wider grant would silently work.
+ */
+export function firestoreFailure(e: unknown): string {
+  const code = (e as { code?: unknown } | null)?.code;
+  const message = e instanceof Error ? e.message : String(e);
+  if (code === 7 || code === 'permission-denied' || /PERMISSION_DENIED|insufficient permissions/i.test(message)) {
+    return 'The service account was refused by Firestore. It needs the roles/datastore.viewer role on the project — and nothing more; this server is read-only by design.';
+  }
+  // Message only, never the stack: a stack here would carry paths and row data.
+  return `Firestore read failed: ${message}. Check CASHFLOW_FIRESTORE_UID and the service account's project, or unset CASHFLOW_FIRESTORE_KEY to fall back to the CSV export.`;
 }
