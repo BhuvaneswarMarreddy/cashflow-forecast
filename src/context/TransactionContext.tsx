@@ -7,7 +7,7 @@ import * as firestoreService from '@/lib/firestore';
 import { db, collection, doc, getDocs, setDoc, updateDoc, deleteDoc } from '@/lib/firebase';
 import { applyMappingRules, definedSet, MappingRule, NewMappingRule } from '@/lib/mapping-rules';
 import { generateSampleData } from '@/lib/storage';
-import { interpretTransaction } from '@/lib/classify';
+import { interpretTransaction, IncomeContext } from '@/lib/classify';
 
 export interface TransactionContextType {
   transactions: Transaction[];
@@ -30,9 +30,9 @@ export interface TransactionContextType {
   getTransactionsByCategory: (category: ExpenseCategory) => Transaction[];
   getPastTransactions: () => Transaction[];
   getFutureTransactions: () => Transaction[];
-  getTotalByPaymentMethod: (accounts?: PaymentAccount[]) => { method: PaymentMethod; total: number; count: number }[];
-  getTotalByCategory: (accounts?: PaymentAccount[]) => { category: ExpenseCategory; total: number; count: number }[];
-  getMonthlyTotals: (accounts?: PaymentAccount[]) => { month: string; income: number; expenses: number }[];
+  getTotalByPaymentMethod: (accounts?: PaymentAccount[], income?: IncomeContext) => { method: PaymentMethod; total: number; count: number }[];
+  getTotalByCategory: (accounts?: PaymentAccount[], income?: IncomeContext) => { category: ExpenseCategory; total: number; count: number }[];
+  getMonthlyTotals: (accounts?: PaymentAccount[], income?: IncomeContext) => { month: string; income: number; expenses: number }[];
   initializeSampleData: () => Promise<void>;
 }
 
@@ -370,11 +370,11 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
   // purchases it settles. `accounts` is optional so the classifier can see account
   // types; the dashboard passes profile.paymentAccounts.
   // PENDING: EXCLUDED — interpretTransaction returns 'excluded' for a hold.
-  const getTotalByPaymentMethod = (accounts?: PaymentAccount[]): { method: PaymentMethod; total: number; count: number }[] => {
+  const getTotalByPaymentMethod = (accounts?: PaymentAccount[], income?: IncomeContext): { method: PaymentMethod; total: number; count: number }[] => {
     const totals: { [key: string]: { total: number; count: number } } = {};
 
     transactions
-      .filter((t) => interpretTransaction(t, accounts).expense === 'counted')
+      .filter((t) => interpretTransaction(t, accounts, income).expense === 'counted')
       .forEach((t) => {
         if (!totals[t.paymentMethod]) {
           totals[t.paymentMethod] = { total: 0, count: 0 };
@@ -390,11 +390,11 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
     }));
   };
 
-  const getTotalByCategory = (accounts?: PaymentAccount[]): { category: ExpenseCategory; total: number; count: number }[] => {
+  const getTotalByCategory = (accounts?: PaymentAccount[], income?: IncomeContext): { category: ExpenseCategory; total: number; count: number }[] => {
     const totals: { [key: string]: { total: number; count: number } } = {};
 
     transactions
-      .filter((t) => interpretTransaction(t, accounts).expense === 'counted')
+      .filter((t) => interpretTransaction(t, accounts, income).expense === 'counted')
       .forEach((t) => {
         if (!totals[t.category]) {
           totals[t.category] = { total: 0, count: 0 };
@@ -410,7 +410,7 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
     }));
   };
 
-  const getMonthlyTotals = (accounts?: PaymentAccount[]): { month: string; income: number; expenses: number }[] => {
+  const getMonthlyTotals = (accounts?: PaymentAccount[], income?: IncomeContext): { month: string; income: number; expenses: number }[] => {
     const monthlyData: { [key: string]: { income: number; expenses: number } } = {};
 
     transactions.forEach((t) => {
@@ -424,7 +424,7 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
       // Bare `else` would bucket every transfer as spending. This drives the
       // dashboard's Monthly Overview chart, and the interpretation keeps it
       // agreeing with /flow and /analytics on the same data.
-      const i = interpretTransaction(t, accounts);
+      const i = interpretTransaction(t, accounts, income);
       if (i.income === 'counted') {
         monthlyData[monthKey].income += t.amount;
       } else if (i.expense === 'counted') {

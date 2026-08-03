@@ -119,9 +119,13 @@ export default function DashboardPage() {
   ) / 100;
   
 
-  const paymentMethodTotals = getTotalByPaymentMethod(profile?.paymentAccounts);
-  const categoryTotals = getTotalByCategory(profile?.paymentAccounts);
-  const monthlyTotals = getMonthlyTotals(profile?.paymentAccounts);
+  const paymentMethodTotals = getTotalByPaymentMethod(profile?.paymentAccounts, incomeContext);
+  const categoryTotals = getTotalByCategory(profile?.paymentAccounts, incomeContext);
+  // incomeContext is load-bearing, not decoration: without it interpretTransaction
+  // has no approved sources to match and counts NOTHING as income, so this chart
+  // rendered $0 income over the whole ledger for every user. pastExpenses two lines
+  // above always passed it; these three had no parameter to pass it to.
+  const monthlyTotals = getMonthlyTotals(profile?.paymentAccounts, incomeContext);
 
   // Balances are derived from linked transactions (opening balance + past effects),
   // so every card/total/forecast below reflects reality, not the stored opening figure.
