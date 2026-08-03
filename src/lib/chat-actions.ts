@@ -18,6 +18,7 @@ import {
   Transaction,
   TransactionType,
 } from '@/types';
+import { buildLedgerSummary, LedgerSummary } from './chat-summary';
 import { describeRule, MappingRule, NewMappingRule } from './mapping-rules';
 import { MAX_PROPOSED_LINKS, ReviewCandidate } from './candidates';
 import { CARD_CREDIT_KINDS, CardCreditKind, LinkDraft, TxRef, validateLink } from './relations';
@@ -28,6 +29,8 @@ export interface ChatContext {
   merchants: string[];
   accounts: string[];
   recent: { title: string; merchant?: string; amount: number; category?: string }[];
+  /** App-computed totals over EVERY row — see chat-summary.ts. */
+  summary?: LedgerSummary;
 }
 
 /**
@@ -143,6 +146,9 @@ export function buildChatContext(
     merchants,
     accounts: accounts.slice(0, MAX.accounts).map((a) => clip(a.name || '')).filter(Boolean),
     recent,
+    // Totals over EVERY row. `recent` is 20 rows of raw text so the model can see what
+    // bank feeds look like for rule-writing; it is NOT the evidence for any number.
+    summary: buildLedgerSummary(transactions, accounts),
   };
 }
 

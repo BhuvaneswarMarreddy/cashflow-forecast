@@ -148,8 +148,24 @@ describe('buildChatContext', () => {
     expect(ctx.categories.length).toBeLessThanOrEqual(20);
     expect(Math.max(...ctx.merchants.map((m) => m.length))).toBeLessThanOrEqual(60);
     expect(Math.max(...ctx.recent.map((r) => r.title.length))).toBeLessThanOrEqual(60);
-    // the whole payload, not just the row count
-    expect(JSON.stringify(ctx).length).toBeLessThan(6000);
+    // The whole payload, not just the row count. Raised from 6k when the ledger
+    // summary landed: the context now carries app-computed totals over every row,
+    // which is what makes "what did I spend this year" answerable at all.
+    expect(JSON.stringify(ctx).length).toBeLessThan(16000);
+  });
+
+  it('does not grow with the size of the ledger — the actual guarantee', () => {
+    // The cap above is a number; THIS is the invariant. A user with ten times the
+    // history must not send ten times the prompt, or cost tracks the ledger forever.
+    const make = (n: number) =>
+      Array.from({ length: n }, (_, i) =>
+        txn({ title: `MERCHANT ${i % 300}`, date: `2026-0${(i % 9) + 1}-01` })
+      );
+    const small = JSON.stringify(buildChatContext(make(500), [])).length;
+    const large = JSON.stringify(buildChatContext(make(50_000), [])).length;
+
+    // Totals get wider (more digits), never longer. A few percent, not a few hundred.
+    expect(large).toBeLessThan(small * 1.2);
   });
 
   it('ranks merchants by frequency and falls back to the title when the feed has no merchant', () => {
