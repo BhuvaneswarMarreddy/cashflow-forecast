@@ -148,6 +148,11 @@ Ranked by how much of the picture each unlocks.
 
 | Gap | Closed by | Commit |
 |---|---|---|
+| The person lanes were TERMINAL — 0 of 155 outbound counterparty rows could be asked about | `counterpartyRowIds()` off the graph's own `nodeTxnIds`, as a third `UnmappedKind` | FIN-SETTLEMENT-003 |
+| A confirmed answer on a counterparty row was IGNORED — 261 of 284 are provider-typed `Transfer` | `interpretTransaction()`'s confirm veto narrowed by one case: a row naming an external counterparty. One guard, no call sites patched | FIN-SETTLEMENT-003 |
+| A confirmation changed the LABEL and not the NUMBER — `expense` treatment read `type`, which is never re-derived | a confirmed meaning decides its own treatment via the existing `personalCostSign` / `countsAsEarnedIncome`; a derived one still defers to the type | FIN-SETTLEMENT-003 |
+| An OUTFLOW group could not be answered at all — all ten `GROUP_MEANINGS` are credits | `OUTFLOW_GROUP_MEANINGS` + `groupMeanings(direction)`; six existing `FinancialMeaning` values, no new taxonomy member | FIN-SETTLEMENT-003 |
+| A person-to-person credit was answered "this reverses a purchase" (30 groups) or "money between your own accounts" (5 groups) | both rungs now stand down for a counterparty group | FIN-SETTLEMENT-003 |
 | `same_day_opposite_leg` called SALARY an internal transfer at 0.9 | both legs must now be accounts the owner HOLDS (the rung never read the account list at all), and a payer who pays on a cadence is refused outright | MAP-002 |
 | 45 of 50 unknown-inflow groups said "no evidence, you decide" | four derived detectors — refund proposals, payroll shape, loan proceeds, owned-counterparty transfer; 5/50 -> **32/50** | MAP-002 |
 | The owner had to GUESS when an income stream ended | `endDate` derived from the last occurrence of a stopped series, using `detectRecurring()`'s own 1.5-cycle staleness rule against the ledger's last day | MAP-002 |
@@ -194,6 +199,36 @@ Ranked by how much of the picture each unlocks.
   surfacing the same-day case as evidence, which MAP-001 does: `same_day_opposite_leg` is
   one of the four suggestion sources, and on the real export it fires for **17 of the 80
   groups** (12 of the 30 leg groups). The owner decides; nothing is paired automatically.
+
+## 8b. Counterparty ("people") lines — measured, FIN-SETTLEMENT-003 phase 1
+
+Measured read-only on the real export, 2026-08-02. Full evidence and the window-by-window
+match tables: `docs/features/FIN-SETTLEMENT-003-MEASUREMENT.md`. Aggregates only; no
+counterparty is named.
+
+- **284 rows / $280,790.64 — 24.1% of all gross movement — carry an external counterparty**
+  across 81 distinct keys (9 two-way, 40 inbound-only, 32 outbound-only).
+- **~~None of it can be asked about.~~ CLOSED by phase 2.** `buildMappingGroups()` was fed
+  only by the unknown-inflow queue and the unpaired-leg lanes, and a counterparty leg is in
+  neither: `buildFlowGraph()` routes it to a `person-in:`/`person-out:` node instead. **7 of
+  284 rows reached the queue; 0 of the 155 outbound rows did**; by key, 0/32 outbound-only,
+  6/40 inbound-only, 1/9 two-way. The person lane was terminal. Phase 2 added
+  `counterpartyRowIds` (a third `UnmappedKind`, fed from the graph's own `nodeTxnIds`):
+  **284 of 284 rows and 155 of 155 outbound rows now reach the queue**, as 85 counterparty
+  groups of which 18 carry a suggestion and 67 honestly carry none.
+- **The app asserts $259,206.71 across 81 counterparties is `internal_transfer`** — money
+  between the owner's own accounts, `personalCostSign` 0. 261 of the 284 rows.
+- **REMITLY ($120,562.36, 78 rows) never returned to any of the 9 accounts.** 0/78 same-day
+  matches, **0 inbound REMITLY rows in the entire ledger**, and against a like-for-like
+  round-amount control REMITLY matches *below* chance (23.8% vs 34.2% at ±7d). Whether the
+  destination is still the owner's is **not in the data** and needs owner intent.
+- **Same-amount round-tripping does not happen at named-person lines either**: 0/77 within
+  ±14 days from the same counterparty; the apparent signal against a naive control was
+  entirely round-number collision.
+- **The brief's `ZELLE ~$10,026 / 11 rows` and `BANK OF AMERICA 12 rows / $1,494.43` do not
+  reproduce.** There is no `ZELLE` or `BANK OF AMERICA` counterparty key. 182 Zelle rows
+  ($166,698.30, 90 out / 92 in, near-balanced) resolve to the OWNER'S OWN NAME via
+  `isSelfPerson()` and belong to the self-transfer lanes, not to any people line.
 
 ## 9. Still open
 

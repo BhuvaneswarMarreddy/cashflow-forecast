@@ -114,7 +114,8 @@ export default function DashboardPage() {
         end: endOfMonth(new Date()),
       })
     ),
-    profile?.paymentAccounts
+    profile?.paymentAccounts,
+    incomeContext
   ) / 100;
   
 

@@ -29,8 +29,9 @@ import { IncomeContext, InflowReviewItem, selectInflowReviewQueue } from './clas
 import { unpairedLegLane } from './flow-lanes';
 import { BANDS, daysBetween, day, isSelfPerson, median, normalizeMerchant, personFrom, toCents } from './flows';
 import {
-  PayerSeries, detectLoanProceeds, detectPayerSeries, isDepositAccount, missingPeriods,
-  refundEvidenceFor, seriesEndDate, sharedTokens,
+  CounterpartyLedger, PayerSeries, detectCounterpartyLedger, detectLoanProceeds,
+  detectPayerSeries, isDepositAccount, missingPeriods, refundEvidenceFor, seriesEndDate,
+  sharedTokens,
 } from './mapping-evidence';
 import { MappingRule, NewMappingRule, RuleMatch, describeRule, rowDirection, rulePreview } from './mapping-rules';
 import { formatMoneyCents } from './money';
@@ -42,7 +43,15 @@ import { generateRefundCandidates } from './refunds';
 // What an unmapped row is, and what identifies its group
 // ---------------------------------------------------------------------------
 
-export type UnmappedKind = 'unknown_inflow' | 'unpaired_leg';
+/**
+ * `counterparty_line` is FIN-SETTLEMENT-003's addition, and it is a bug fix as much as a
+ * feature: a leg naming an external counterparty is routed by `buildFlowGraph()` to a
+ * `person-in:`/`person-out:` node instead of an unpaired-leg lane, and this queue was fed
+ * only by unknown inflows and unpaired legs. Measured on the real export: 7 of 284
+ * counterparty rows reached the queue and 0 of the 155 OUTBOUND ones did. The person
+ * lanes were terminal — $280,790.64 of movement with no question attached to it.
+ */
+export type UnmappedKind = 'unknown_inflow' | 'unpaired_leg' | 'counterparty_line';
 
 /**
  * The reason id written onto a review record when a whole group is answered
@@ -85,7 +94,12 @@ export type SuggestionEvidence =
   | 'refund_candidate'
   | 'payroll_shape'
   | 'loan_proceeds'
-  | 'same_day_opposite_leg';
+  | 'same_day_opposite_leg'
+  // --- FIN-SETTLEMENT-003 --------------------------------------------------
+  /** Money moved BOTH ways with this counterparty. `signFlips` says which kind. */
+  | 'counterparty_settlement'
+  /** The owner filed at least one of these rows under a category of their own. */
+  | 'owner_stated_category';
 
 export interface MappingSuggestion {
   evidence: SuggestionEvidence;
@@ -147,6 +161,13 @@ export interface UnmappedContext {
   inflowItems?: readonly InflowReviewItem[];
   /** Rows the Flow graph put in a "other leg not found" lane. Absent = none. */
   unpairedLegIds?: readonly string[];
+  /**
+   * FIN-SETTLEMENT-003 — rows the Flow graph put behind a `person-*` node. Fed exactly
+   * like `unpairedLegIds`, from the graph's own `nodeTxnIds` via
+   * `counterpartyRowIds(graph)`, so the queue asks about precisely what the chart drew.
+   * Absent = none, and the counterparty lanes stay terminal.
+   */
+  counterpartyRowIds?: readonly string[];
   rules?: readonly MappingRule[];
   income?: IncomeContext;
   /**
@@ -226,6 +247,12 @@ interface GroupFacts {
   ledgerLastDate: string;
   /** Later money going back to the same party. Loan repayments look exactly like this. */
   laterOutflowsToSamePayer: Transaction[];
+  /**
+   * FIN-SETTLEMENT-003 — the WHOLE relationship with this counterparty, both directions,
+   * group rows and siblings together. Present only for a counterparty group: a merchant
+   * is not a party you settle up with.
+   */
+  counterparty: CounterpartyLedger | null;
 }
 
 /** `IncomeSource.frequency` cannot express every band, and an offer it cannot express
@@ -280,6 +307,71 @@ function suggestFor(
     };
   }
 
+  // --- FIN-SETTLEMENT-003, rungs 2a/2b ---------------------------------------
+  // Both fire ONLY for a counterparty group, so no merchant group can reach them, and
+  // both sit above the refund rung on purpose: measured on the real export, 6 of the 7
+  // counterparty groups that reached the old queue were answered `refund_candidate`,
+  // which is the wrong evidence for a person-to-person row.
+  const cp = facts.counterparty;
+
+  // 2a. The owner filed these rows under a category of their OWN. Their word for what a
+  //     row was beats anything this module can infer from shape — the same reason
+  //     `prior_confirmation` outranks every detector. It stays BELOW an explicit
+  //     confirmation because a category is a label, not an answer to this question.
+  if (cp && facts.direction === 'outflow' && cp.ownerCategorisedRows > 0) {
+    const total = cp.outRows + cp.inRows;
+    const coverage = cp.ownerCategorisedRows / total;
+    const oneWay = cp.inRows === 0;
+    return {
+      evidence: 'owner_stated_category',
+      meaning: 'personal_expense',
+      supportCount: cp.ownerCategorisedRows,
+      // 0.70 -> 0.85 with how much of the relationship the owner has already labelled.
+      // Never 0.9: that rung belongs to an answer they actually gave.
+      confidence: Math.min(0.85, 0.7 + 0.15 * coverage),
+      why:
+        `You filed ${cp.ownerCategorisedRows} of these ${total} rows under your own ` +
+        `${plural(cp.ownerCategories.length, 'category', 'categories')} — ${cp.ownerCategories.join(', ')} — ` +
+        `rather than leaving them as a transfer` +
+        (oneWay
+          ? `, and nothing has ever come back from this counterparty: ${plural(cp.outRows, 'row')} out, none in`
+          : ''),
+    };
+  }
+
+  // 2b. Money moved BOTH ways. `signFlips` is the whole discriminator: at most one
+  //     reversal is one party fronting money and being repaid; two or more is a running
+  //     tab that both sides add to. Capped at 0.85 — a shape is inference.
+  //
+  //     Only the INFLOW side gets a meaning. There is no `money_i_lent` outflow value in
+  //     `FinancialMeaning`, and inventing one to complete the symmetry would change no
+  //     number (its cost sign would be 0, exactly what the row already scores) while
+  //     rippling through the taxonomy, the prompts and the stored-value validators. The
+  //     outflow side of a two-way line is left to the owner, with the net stated.
+  if (cp && cp.outRows > 0 && cp.inRows > 0 && facts.direction === 'inflow') {
+    const lending = cp.signFlips <= 1;
+    const net = cp.netCents;
+    return {
+      evidence: 'counterparty_settlement',
+      meaning: lending ? 'receivable_repayment' : 'shared_expense_reimbursement',
+      supportCount: Math.min(cp.outRows, cp.inRows),
+      confidence: Math.min(
+        0.85,
+        0.5 + (cp.outRows >= 3 && cp.inRows >= 3 ? 0.15 : 0) + (cp.spanDays >= 60 ? 0.1 : 0) + (cp.settled ? 0.1 : 0)
+      ),
+      why:
+        `Money has moved both ways with this counterparty — ${plural(cp.outRows, 'row')} out ` +
+        `(${formatMoneyCents(cp.outCents)}) and ${plural(cp.inRows, 'row')} in ` +
+        `(${formatMoneyCents(cp.inCents)}) over ${plural(cp.spanDays, 'day')}. ` +
+        (lending
+          ? `The balance between you turned over ${cp.signFlips === 0 ? 'never' : 'once'}, which is what lending and being repaid looks like`
+          : `The balance between you turned over ${cp.signFlips} times, which is a running tab rather than one loan`) +
+        (cp.settled
+          ? ' — and it is square: you are exactly even.'
+          : `. ${net > 0 ? 'You are ahead by' : 'You are behind by'} ${formatMoneyCents(Math.abs(net))}.`),
+    };
+  }
+
   // 3. An APPROVED income source the amounts and cadence agree with. Amount can only
   //    ever narrow, never create — FIN-INCOME-001's rule, restated here.
   const cadence = cadenceOf(rows.map((t) => day(t.date)));
@@ -305,11 +397,21 @@ function suggestFor(
   }
 
   // 4. FIN-REFUND-001 has ALREADY proposed a purchase for these credits.
+  //
+  //    NOT for a counterparty. A refund in this app's model is a credit reversing a
+  //    PURCHASE; a person sending you money is not that, whatever the amounts happen to
+  //    line up with. The transport string on both legs of a person-to-person row is the
+  //    same word ("Zelle"), which is exactly the same-merchant collision `flows.ts` keeps
+  //    away from the transfer pairer — and it cost that audit $2,000. Measured here:
+  //    without this guard, wiring the counterparty lanes in hands 30 person-to-person
+  //    inflow groups a "this reverses a purchase" answer. `receivable_repayment` and
+  //    `shared_expense_reimbursement` are the right answers and they are both on the
+  //    owner's list; a wrong suggestion is worse than none.
   //    A group whose rows the refund matcher has matched must say so instead of "you
   //    decide" — the work is done, it is sitting one screen away, and asking the owner to
   //    rediscover it is the defect this whole task exists to fix. No matching happens
   //    here; `refundEvidenceFor()` reads that generator's output and cites its score.
-  const refunds = refundEvidenceFor(rows, refundCandidates);
+  const refunds = cp ? null : refundEvidenceFor(rows, refundCandidates);
   if (refunds) {
     return {
       evidence: 'refund_candidate',
@@ -417,7 +519,14 @@ function suggestFor(
   //          relying on rung 5 running first, because rung 5 declines for a payer who
   //          pays into a card or on a band an income source cannot express — and the
   //          answer there is still "not a transfer", not "probably a transfer".
-  if (facts.series) return null;
+  //      (c) FIN-SETTLEMENT-003: a row that NAMES AN EXTERNAL COUNTERPARTY is not money
+  //          moving between accounts the owner holds — those two statements contradict
+  //          each other, and `signalOf()` has already made the first one. A Zelle naming
+  //          the owner themselves never reaches here (it groups by merchant), so this
+  //          costs nothing real. Measured: without it, wiring the counterparty lanes in
+  //          answers 5 person-to-person groups — one of them 10 rows and $11,064 — with
+  //          `internal_transfer`.
+  if (facts.series || facts.counterparty) return null;
   const owned = new Set((ctx.accounts ?? []).map((a) => a.id));
   const sameDay = rows.filter((t) =>
     owned.has(t.accountId ?? '') &&
@@ -501,22 +610,26 @@ export function buildMappingGroups(ctx: UnmappedContext): MappingGroup[] {
     const t = byId.get(item.transactionId);
     if (t && !seen.has(t.id)) { seen.add(t.id); unmapped.push({ t, kind: 'unknown_inflow' }); }
   }
-  for (const id of ctx.unpairedLegIds ?? []) {
-    const t = byId.get(id);
-    // A leg the owner has already answered is out, on the same review record the
-    // inflow selector uses. One vocabulary, one store.
-    const state = reviews[id]?.state;
-    if (!t || seen.has(id) || state === 'confirmed' || state === 'dismissed') continue;
-    seen.add(id);
-    unmapped.push({ t, kind: 'unpaired_leg' });
-  }
+  // Both id-fed sources share one rule: a row the owner has already answered is out, on
+  // the same review record the inflow selector uses. One vocabulary, one store.
+  const feed = (ids: readonly string[] | undefined, kind: UnmappedKind) => {
+    for (const id of ids ?? []) {
+      const t = byId.get(id);
+      const state = reviews[id]?.state;
+      if (!t || seen.has(id) || state === 'confirmed' || state === 'dismissed') continue;
+      seen.add(id);
+      unmapped.push({ t, kind });
+    }
+  };
+  feed(ctx.unpairedLegIds, 'unpaired_leg');
+  feed(ctx.counterpartyRowIds, 'counterparty_line');
 
   // Which keys the owner has already declared unanswerable, from the review records.
   const silenced = new Set<string>();
   for (const t of ctx.transactions) {
     if (!reviews[t.id]?.reasons?.includes(GROUP_UNKNOWN_REASON)) continue;
     const { signal, value } = signalOf(t);
-    for (const kind of ['unknown_inflow', 'unpaired_leg'] as UnmappedKind[]) {
+    for (const kind of ['unknown_inflow', 'unpaired_leg', 'counterparty_line'] as UnmappedKind[]) {
       silenced.add(groupKey(kind, signal, value, directionOf(t)));
     }
   }
@@ -570,6 +683,16 @@ export function buildMappingGroups(ctx: UnmappedContext): MappingGroup[] {
       laterOutflowsToSamePayer: (siblings as Transaction[]).filter(
         (t) => directionOf(t) === 'outflow' && day(t.date) > dates[dates.length - 1]
       ),
+      // The group key carries a DIRECTION, so a two-way counterparty is two groups. The
+      // ledger has to see the whole relationship or "money came back" is invisible from
+      // either side — hence group rows PLUS siblings, which is every other row sharing
+      // this counterparty in either direction.
+      counterparty:
+        b.signal === 'counterparty'
+          ? detectCounterpartyLedger([...rows, ...(siblings as Transaction[])], (t) =>
+              directionOf(t) === 'outflow' ? 'out' : 'in'
+            )
+          : null,
     };
     groups.push({
       key,
@@ -848,7 +971,11 @@ export interface GroupDecision {
   incomeSourceOffer?: Omit<IncomeSource, 'id'>;
 }
 
-/** The meanings a group can be answered with, in the order a person would consider them. */
+/**
+ * The meanings an INFLOW group can be answered with, in the order a person would
+ * consider them. Every entry is a credit: until FIN-SETTLEMENT-003 the queue only ever
+ * held unknown inflows and transfer legs, so this was the whole list.
+ */
 export const GROUP_MEANINGS: readonly { value: FinancialMeaning; label: string }[] = [
   { value: 'internal_transfer', label: 'Money moving between my own accounts' },
   { value: 'card_payment', label: 'A payment to one of my cards' },
@@ -861,3 +988,29 @@ export const GROUP_MEANINGS: readonly { value: FinancialMeaning; label: string }
   { value: 'earned_income', label: 'Income I earned' },
   { value: 'other_non_income_credit', label: 'Something else — but not income' },
 ];
+
+/**
+ * The meanings an OUTFLOW group can be answered with. FIN-SETTLEMENT-003 is the first
+ * task to put a debit in this queue, and not one of the ten credit answers above fits
+ * one — without this list the owner literally could not say "that money is gone".
+ *
+ * Every value already exists in `FinancialMeaning`. No new taxonomy member was added:
+ * `personal_expense` already costs 1 under `personalCostSign()`, `internal_transfer` and
+ * `card_payment` already cost 0, and `reimbursable_expense` is the existing value for a
+ * cost you expect back — which is as close as the taxonomy gets to "money I lent", and
+ * close enough that inventing a new member for it would change no number.
+ */
+export const OUTFLOW_GROUP_MEANINGS: readonly { value: FinancialMeaning; label: string }[] = [
+  { value: 'personal_expense', label: 'Money I spent — it is gone' },
+  { value: 'shared_expense', label: 'A cost I share with this person' },
+  { value: 'reimbursable_expense', label: 'Money I expect to get back' },
+  { value: 'gift_or_personal_transfer', label: 'A gift or a personal transfer' },
+  { value: 'internal_transfer', label: 'Money moving between my own accounts' },
+  { value: 'card_payment', label: 'A payment to one of my cards' },
+];
+
+/** The answers that make sense for this group. One list per direction, nothing else. */
+export const groupMeanings = (
+  direction: MappingGroup['direction']
+): readonly { value: FinancialMeaning; label: string }[] =>
+  direction === 'outflow' ? OUTFLOW_GROUP_MEANINGS : GROUP_MEANINGS;

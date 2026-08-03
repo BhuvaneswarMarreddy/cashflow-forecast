@@ -86,7 +86,7 @@ export default function CalendarPage() {
     const dayTxns = getDayTransactions(date);
     return {
       income: sumIncomeCents(dayTxns, accountsForClassify, incomeContext) / 100,
-      expense: sumExpenseCents(dayTxns, accountsForClassify) / 100,
+      expense: sumExpenseCents(dayTxns, accountsForClassify, incomeContext) / 100,
     };
   };
 
@@ -113,7 +113,7 @@ export default function CalendarPage() {
 
   // EARNED income: an unmatched credit raises the balance but is not income here.
   const monthlyIncome = sumIncomeCents(monthlyTransactions, accountsForClassify, incomeContext) / 100;
-  const monthlyExpenses = sumExpenseCents(monthlyTransactions, accountsForClassify) / 100;
+  const monthlyExpenses = sumExpenseCents(monthlyTransactions, accountsForClassify, incomeContext) / 100;
 
   return (
     <div className="min-h-screen relative">
