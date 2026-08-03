@@ -1,14 +1,18 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Plus, Camera, FileText, X, DollarSign } from 'lucide-react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { Plus, Camera, X, DollarSign } from 'lucide-react';
 import AddTransactionModal from './AddTransactionModal';
 import ReceiptScannerModal from './ReceiptScannerModal';
+import { SECONDARY_ITEMS } from '@/lib/nav';
 
 export default function QuickAddFAB() {
   const [isOpen, setIsOpen] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showScanModal, setShowScanModal] = useState(false);
+  const pathname = usePathname();
 
   const toggleMenu = () => {
     setIsOpen(!isOpen);
@@ -31,11 +35,36 @@ export default function QuickAddFAB() {
         {/* Sub-buttons (shown when open) */}
         {isOpen && (
           <>
+            {/* The four screens that left the nav bar when it collapsed to four
+                destinations (UX-IA-001). They lived at the bottom of /flow, which
+                made them reachable from exactly one page; here they are reachable
+                from every page. SECONDARY_ITEMS is the same list nav.ts owns, so
+                adding a screen there surfaces it here with no second edit.
+                Rendered first = furthest from the thumb, since navigation is the
+                colder action; Add/Scan stay closest. */}
+            {SECONDARY_ITEMS.map(({ href, label, icon: Icon }, i) => (
+              <Link
+                key={href}
+                href={href}
+                onClick={() => setIsOpen(false)}
+                aria-current={pathname === href ? 'page' : undefined}
+                className={`flex items-center gap-2 px-4 py-3 min-h-[44px] rounded-full border shadow-lg animate-fade-in-up transition-colors ${
+                  pathname === href
+                    ? 'bg-[var(--accent-primary)] border-transparent text-[#16181c]'
+                    : 'bg-[var(--background-secondary)] border-[var(--border-color)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)]'
+                }`}
+                style={{ animationDelay: `${i * 30}ms` }}
+              >
+                <Icon className="w-5 h-5" aria-hidden="true" />
+                <span className="font-medium text-sm">{label}</span>
+              </Link>
+            ))}
+
             {/* Scan Receipt */}
             <button
               onClick={handleScanReceipt}
               className="flex items-center gap-2 px-4 py-3 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-lg shadow-amber-500/30 animate-fade-in-up"
-              style={{ animationDelay: '0ms' }}
+              style={{ animationDelay: '120ms' }}
             >
               <Camera className="w-5 h-5" />
               <span className="font-medium text-sm">Scan Receipt</span>
@@ -45,7 +74,7 @@ export default function QuickAddFAB() {
             <button
               onClick={handleAddTransaction}
               className="flex items-center gap-2 px-4 py-3 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/30 animate-fade-in-up"
-              style={{ animationDelay: '50ms' }}
+              style={{ animationDelay: '150ms' }}
             >
               <DollarSign className="w-5 h-5" />
               <span className="font-medium text-sm">Add Expense</span>
@@ -56,7 +85,7 @@ export default function QuickAddFAB() {
         {/* Main FAB Button */}
         <button
           onClick={toggleMenu}
-          aria-label={isOpen ? 'Close quick add menu' : 'Quick add — expense or receipt'}
+          aria-label={isOpen ? 'Close menu' : 'Add a transaction, scan a receipt, or open another view'}
           aria-expanded={isOpen}
           className={`w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 ${
             isOpen 

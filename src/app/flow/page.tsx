@@ -1,9 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { SECONDARY_ITEMS } from '@/lib/nav';
 import { askAbout, askAboutNode } from '@/lib/ask';
 import {
   ResponsiveContainer, Sankey, Tooltip, LineChart, Line, XAxis, YAxis, CartesianGrid,
@@ -1630,24 +1628,6 @@ export default function FlowPage() {
             </ResponsiveContainer>
           </div>
         </section>
-
-        {/* The four screens that left the nav bar (UX-IA-001). Flow owns the past
-            ledger, so this is where the other views of it are reached from. */}
-        <nav aria-label="Other views of this data" className="mt-8 pt-6 border-t border-[var(--border-color)]">
-          <h2 className="text-sm font-medium text-[var(--foreground-muted)] mb-3">Other views of this data</h2>
-          <div className="flex flex-wrap gap-2">
-            {SECONDARY_ITEMS.map(({ href, label, icon: Icon }) => (
-              <Link
-                key={href}
-                href={href}
-                className="min-h-[44px] flex items-center gap-2 px-4 py-2 rounded-xl border border-[var(--border-color)] bg-[var(--background-secondary)] text-sm text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)] transition-colors"
-              >
-                <Icon className="w-4 h-4" aria-hidden="true" />
-                {label}
-              </Link>
-            ))}
-          </div>
-        </nav>
 
         {reviewOpen && !isDesktop && <RecoveryReviewPanel {...reviewPanelProps} variant="sheet" />}
 
