@@ -1,0 +1,6 @@
+Date,Merchant,Category,Account,Original Statement,Notes,Amount,Tags
+2026-07-01,ACME Groceries,Groceries,ACME Bank Checking,ACME GROCERIES #100 SPRINGFIELD,,-50.00,
+2026-07-02,ACME Payroll,Paychecks,ACME Bank Checking,ACME PAYROLL DIRECT DEP,,3000.00,
+2026-07-03,ACME Coffee,Restaurants & Bars,ACME Rewards® Card,ACME COFFEE 4111111111111111,planted PAN for redaction test,-5.00,
+2026-07-04,ACME Utilities,Utilities,ACME Rewards® Card,AUTOPAY https://user:sometoken@bridge.example.invalid/x,planted credential URL for redaction test,-100.00,
+2026-07-05,Transfer to Savings,Transfer,ACME Bank Checking,ACME XFER TO SAVINGS,,-500.00,transfer
