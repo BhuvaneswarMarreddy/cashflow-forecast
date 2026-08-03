@@ -155,8 +155,8 @@ verified whole-history totals the implementation must reproduce (±$1):
 | Counterparty | Sent to | Received from | Rows |
 |---|---|---|---|
 | Sent to India (Remitly — no payee name in statements) | $120,562.36 | $0 | 78 |
-| Sridevi Gogineni | $18,612.00 | $0 | 8 |
-| Lok Pulukuri | $2,380.00 | $17,788.00 | 21 |
+| Priya Example | $18,612.00 | $0 | 8 |
+| Arjun Example | $2,380.00 | $17,788.00 | 21 |
 | Rishikesh Katta | $0 | $11,064.00 | 10 |
 | Venu Guntupalli | $2,500.00 | $9,857.50 | 20 |
 | Mallikarjuna Muddana | $3,000.00 | $5,550.00 | 9 |

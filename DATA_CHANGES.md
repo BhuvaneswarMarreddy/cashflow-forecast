@@ -73,7 +73,7 @@ Every direct DB change, so nothing is a mystery later. All writes go via Firesto
 ## 2026-07-23 — Backfilled recipient text (description)
 - Added `description` = Original Statement to all 2,913 transactions (matched by imp_ id;
   preserves loan accounts, balances, Carvana). Lets History show/search the real payee
-  (e.g. "Zelle payment to SRIDEVI GOGINENI") and lets the cashflow dashboard tell a
+  (e.g. "Zelle payment to PRIYA EXAMPLE") and lets the cashflow dashboard tell a
   self-transfer ("to Bhuvaneswar / to me") from money actually sent to a person.
 
 ## 2026-07-23 — Flow page shipped (/flow, branch feat/flow-page)

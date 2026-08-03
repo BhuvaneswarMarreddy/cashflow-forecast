@@ -52,8 +52,8 @@ describe('cents & balance rollback', () => {
 
 describe('person extraction', () => {
   it('parses the four real statement shapes', () => {
-    expect(personFrom('Zelle payment to SRIDEVI GOGINENI Conf# ab12cd')).toBe('SRIDEVI GOGINENI');
-    expect(personFrom('Zelle payment from LOK SUNDEEP PULUKURI 12345678')).toBe('LOK PULUKURI');
+    expect(personFrom('Zelle payment to PRIYA EXAMPLE Conf# ab12cd')).toBe('PRIYA EXAMPLE');
+    expect(personFrom('Zelle payment from ARJUN KUMAR EXAMPLE 12345678')).toBe('ARJUN EXAMPLE');
     expect(personFrom('Zelle Transfer Conf# X9Y8Z7; VENU GOPAL GUNTUPALLI')).toBe('VENU GUNTUPALLI');
     // Chase glues a BACxxxx confirmation token straight after the name ($23,300 of self rows)
     expect(personFrom('Zelle payment from BHUVANESWAR REDDY MARREDDY BACmc15udzvd')).toBe('BHUVANESWAR MARREDDY');
@@ -72,10 +72,10 @@ describe('person extraction', () => {
     expect(isSelfPerson('BHUVANESWAR MARREDDY')).toBe(true);
     expect(isSelfPerson('BHUVANESWAR REDDY')).toBe(true);
     expect(isSelfPerson('ME')).toBe(true);
-    expect(isSelfPerson('SRIDEVI GOGINENI')).toBe(false);
+    expect(isSelfPerson('PRIYA EXAMPLE')).toBe(false);
   });
   it('title-cases for display', () => {
-    expect(displayPerson('SRIDEVI GOGINENI')).toBe('Sridevi Gogineni');
+    expect(displayPerson('PRIYA EXAMPLE')).toBe('Priya Example');
   });
 });
 
@@ -102,8 +102,8 @@ describe('buildFlowGraph', () => {
     tx({ id: 'ba-o', amount: 80, type: 'transfer', transferDirection: 'out', accountId: 'B', date: '2026-01-09' }),
     tx({ id: 'ba-i', amount: 80, type: 'transfer', transferDirection: 'in', accountId: 'A', date: '2026-01-09' }),
     // people
-    tx({ id: 'zin', amount: 60, type: 'income', accountId: 'B', description: 'Zelle payment from LOK PULUKURI 123', date: '2026-01-10' }),
-    tx({ id: 'zout', amount: 40, type: 'expense', accountId: 'B', description: 'Zelle payment to SRIDEVI GOGINENI Conf# x', date: '2026-01-11' }),
+    tx({ id: 'zin', amount: 60, type: 'income', accountId: 'B', description: 'Zelle payment from ARJUN EXAMPLE 123', date: '2026-01-10' }),
+    tx({ id: 'zout', amount: 40, type: 'expense', accountId: 'B', description: 'Zelle payment to PRIYA EXAMPLE Conf# x', date: '2026-01-11' }),
     // unmatched self leg
     tx({ id: 'me', amount: 25, type: 'transfer', transferDirection: 'out', accountId: 'B', description: 'Zelle payment to Me', date: '2026-01-12' }),
   ];
@@ -152,8 +152,8 @@ describe('buildFlowGraph', () => {
   });
 
   it('splits people into in/out nodes and catches self', () => {
-    expect(find('person-in:LOK PULUKURI', 'acct:B')).toBe(6000);
-    expect(find('acct:B', 'person-out:SRIDEVI GOGINENI')).toBe(4000);
+    expect(find('person-in:ARJUN EXAMPLE', 'acct:B')).toBe(6000);
+    expect(find('acct:B', 'person-out:PRIYA EXAMPLE')).toBe(4000);
     expect(find('acct:B', 'self-ext-out')).toBe(2500);
   });
 
