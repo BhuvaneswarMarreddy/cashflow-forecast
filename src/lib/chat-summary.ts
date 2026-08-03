@@ -41,6 +41,16 @@ export interface MerchantTotal {
   name: string;
   spending: number;
   income: number;
+  /**
+   * Money that moved to/from this merchant while classified as a transfer, so it
+   * counts as neither spending nor income.
+   *
+   * Without this, "how much did I send to X" under-reports badly wherever X's rows
+   * are mostly transfers. Measured on the real export: a remittance service showed
+   * $5,208.25 of spending against $120,562.36 actually sent — 23x low, and stated
+   * as fact. The totals were right; the question was "sent", not "spent".
+   */
+  transferred: number;
   count: number;
   /** Every category this merchant's rows actually carry, most-used first. */
   categories: string[];
@@ -103,7 +113,7 @@ export function buildLedgerSummary(
   const months = new Map<string, Acc>();
   const cats = new Map<string, { spending: number; count: number }>();
   const merchants = new Map<string, {
-    spending: number; income: number; count: number;
+    spending: number; income: number; transferred: number; count: number;
     cats: Map<string, number>; first: string; last: string;
   }>();
 
@@ -115,29 +125,34 @@ export function buildLedgerSummary(
     if (date < from) from = date;
     if (date > to) to = date;
 
-    // Transfers move money between the owner's own accounts — they are neither
-    // income nor spending, and counting them would double the ledger.
     const kind = classifyTransaction(t, accounts);
-    if (kind !== 'income' && kind !== 'expense') continue;
 
-    bump(years, date.slice(0, 4), kind, t.amount);
-    bump(months, date.slice(0, 7), kind, t.amount);
+    // Transfers move money between the owner's own accounts — they are neither
+    // income nor spending, and counting them in the period totals would double
+    // the ledger. Merchant totals below DO record them, separately: "how much did
+    // I send to X" is a different question from "what did X cost me".
+    if (kind === 'income' || kind === 'expense') {
+      bump(years, date.slice(0, 4), kind, t.amount);
+      bump(months, date.slice(0, 7), kind, t.amount);
 
-    if (kind === 'expense' && date.slice(0, 4) === thisYear) {
-      const label = displayCategory(t);
-      const c = cats.get(label) ?? { spending: 0, count: 0 };
-      c.spending += t.amount;
-      c.count += 1;
-      cats.set(label, c);
+      if (kind === 'expense' && date.slice(0, 4) === thisYear) {
+        const label = displayCategory(t);
+        const c = cats.get(label) ?? { spending: 0, count: 0 };
+        c.spending += t.amount;
+        c.count += 1;
+        cats.set(label, c);
+      }
     }
 
     const name = clip(t.merchant || t.title || '');
     if (!name) continue;
     const m = merchants.get(name) ?? {
-      spending: 0, income: 0, count: 0, cats: new Map<string, number>(), first: date, last: date,
+      spending: 0, income: 0, transferred: 0, count: 0,
+      cats: new Map<string, number>(), first: date, last: date,
     };
     if (kind === 'income') m.income += t.amount;
-    else m.spending += t.amount;
+    else if (kind === 'expense') m.spending += t.amount;
+    else m.transferred += t.amount;
     m.count += 1;
     const label = displayCategory(t);
     m.cats.set(label, (m.cats.get(label) ?? 0) + 1);
@@ -150,9 +165,11 @@ export function buildLedgerSummary(
   const allCats = [...cats.entries()]
     .sort((a, b) => b[1].spending - a[1].spending)
     .map(([category, c]) => ({ category, spending: r2(c.spending), count: c.count }));
-  // Rank by total money moved, so a large rare merchant outranks a tiny frequent one.
-  const rankedMerchants = [...merchants.entries()]
-    .sort((a, b) => (b[1].spending + b[1].income) - (a[1].spending + a[1].income));
+  // Rank by total money moved — INCLUDING transfers, or a merchant the owner sends
+  // six figures through ranks below a coffee shop and falls off the list entirely.
+  const moved = (m: { spending: number; income: number; transferred: number }) =>
+    m.spending + m.income + m.transferred;
+  const rankedMerchants = [...merchants.entries()].sort((a, b) => moved(b[1]) - moved(a[1]));
 
   return {
     span: { from, to, transactions: transactions.length },
@@ -165,6 +182,7 @@ export function buildLedgerSummary(
       name,
       spending: r2(m.spending),
       income: r2(m.income),
+      transferred: r2(m.transferred),
       count: m.count,
       categories: [...m.cats.entries()].sort((a, b) => b[1] - a[1]).map(([c]) => c),
       firstDate: m.first,

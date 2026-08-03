@@ -66,6 +66,36 @@ describe('buildLedgerSummary', () => {
     expect(s.span.transactions).toBe(4);
   });
 
+  it('records what was SENT through a merchant, not just what it cost', () => {
+    // The Remitly bug: 3 spending rows and 75 transfer rows reported as "$5,208.25
+    // spent" when $120,562.36 had actually been sent. Both numbers were true; the
+    // one shown answered a question nobody asked.
+    const s = buildLedgerSummary([
+      tx({ merchant: 'WIRE SVC', amount: 100, type: 'expense', date: '2026-01-05' }),
+      tx({ merchant: 'WIRE SVC', amount: 5000, type: 'transfer', transferDirection: 'out', date: '2026-02-05' }),
+      tx({ merchant: 'WIRE SVC', amount: 3000, type: 'transfer', transferDirection: 'out', date: '2026-03-05' }),
+    ], ACCOUNTS, TODAY);
+
+    const m = s.topMerchants.find((x) => x.name === 'WIRE SVC')!;
+    expect({ spending: m.spending, transferred: m.transferred, count: m.count })
+      .toEqual({ spending: 100, transferred: 8000, count: 3 });
+
+    // ...and the transfers still stay out of the period totals.
+    expect(s.byYear.find((y) => y.period === '2026')!.spending).toBe(100);
+  });
+
+  it('ranks a transfer-heavy merchant by everything that moved', () => {
+    // Ranked on spending alone, a six-figure remittance service falls off the list
+    // below a coffee shop and the owner can never ask about it.
+    const rows = [
+      tx({ merchant: 'WIRE SVC', amount: 90_000, type: 'transfer', transferDirection: 'out', date: '2026-01-05' }),
+      ...Array.from({ length: 60 }, (_, i) =>
+        tx({ merchant: `SHOP${i}`, amount: i + 1, date: '2026-04-01' })),
+    ];
+    const s = buildLedgerSummary(rows, ACCOUNTS, TODAY);
+    expect(s.topMerchants[0].name).toBe('WIRE SVC');
+  });
+
   it('gives a merchant its real total and the categories it actually carries', () => {
     // The Instacart question: the answer must come from rows, not world knowledge.
     const s = buildLedgerSummary([

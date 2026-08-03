@@ -209,7 +209,7 @@ export interface LedgerSummary {
   byCategoryThisYear?: { category?: string; spending?: number; count?: number }[];
   categoriesOmitted?: number;
   topMerchants?: {
-    name?: string; spending?: number; income?: number; count?: number;
+    name?: string; spending?: number; income?: number; transferred?: number; count?: number;
     categories?: string[]; firstDate?: string; lastDate?: string;
   }[];
   merchantsOmitted?: number;
@@ -340,9 +340,18 @@ function summaryLines(s: LedgerSummary | undefined): string[] {
     ),
     ...omitted(s.categoriesOmitted, 'categories'),
     '',
-    'TOP MERCHANTS, ALL TIME (spending | income | count | categories used | first..last):',
+    'TOP MERCHANTS, ALL TIME (spent | received | transferred | count | categories used | first..last):',
+    '"transferred" is money moved to or from this name that is classified as a transfer,',
+    'so it counts as neither spending nor income. When the user asks how much they SENT,',
+    'PAID, or MOVED to someone, the answer is spent + transferred — say both parts and',
+    'what each means. Only "what did X cost me" is the spent column alone.',
+    'These rows are keyed on the merchant name only. Where a payee is named in the raw',
+    'bank description instead, its rows are counted under that description as a separate',
+    'entry, so a total here can be LOW for someone paid via a bank feed. If the user asks',
+    'about a person or a money-transfer service, give the figure and say it may not be',
+    'their whole relationship with that payee.',
     ...(s.topMerchants || []).slice(0, CAPS.topMerchants).map((m) =>
-      `- ${clip(m.name) || '(unnamed)'} | ${money(m.spending)} | ${money(m.income)} | ${num(m.count)} | ${(m.categories || []).slice(0, 4).map((c) => clip(c, 30)).join('/') || '-'} | ${clip(m.firstDate, 10)}..${clip(m.lastDate, 10)}`
+      `- ${clip(m.name) || '(unnamed)'} | ${money(m.spending)} | ${money(m.income)} | ${money(m.transferred)} | ${num(m.count)} | ${(m.categories || []).slice(0, 4).map((c) => clip(c, 30)).join('/') || '-'} | ${clip(m.firstDate, 10)}..${clip(m.lastDate, 10)}`
     ),
     ...omitted(s.merchantsOmitted, 'merchants'),
   ];
