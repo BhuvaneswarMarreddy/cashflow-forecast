@@ -1,0 +1,11 @@
+Date,Merchant,Category,Account,Original Statement,Notes,Amount,Tags
+2026-07-06,Payment Thank You,Credit Card Payment,ACME Rewards® Card,ACME CARD PAYMENT RECEIVED,,200.00,
+2026-07-06,ACME Card Payment,Credit Card Payment,ACME Bank Checking,ACME CARD AUTOPAY,,-200.00,
+2026-04-10,ACME Streaming,Entertainment & Recreation,ACME Rewards® Card,ACME STREAMING MONTHLY,,-9.99,
+2026-05-10,ACME Streaming,Entertainment & Recreation,ACME Rewards® Card,ACME STREAMING MONTHLY,,-9.99,
+2026-06-10,ACME Streaming,Entertainment & Recreation,ACME Rewards® Card,ACME STREAMING MONTHLY,,-9.99,
+2026-07-10,ACME Streaming,Entertainment & Recreation,ACME Rewards® Card,ACME STREAMING MONTHLY,,-9.99,
+2026-06-01,ACME Gym,Fitness,ACME Rewards® Card,ACME GYM MEMBERSHIP,,-25.00,
+2026-07-01,ACME Gym,Fitness,ACME Rewards® Card,ACME GYM MEMBERSHIP,,-25.00,
+2026-07-10,Zelle,Transfer,ACME Bank Checking,Zelle payment to John Doe conf# ABC123,,-200.00,
+2026-07-15,Zelle,Transfer,ACME Bank Checking,Zelle payment from John Doe conf# DEF456,,300.00,
