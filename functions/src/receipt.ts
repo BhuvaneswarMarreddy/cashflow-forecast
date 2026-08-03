@@ -1,7 +1,8 @@
 /**
  * parseReceipt callable — port of src/app/api/parse-receipt/route.ts.
  *
- * Azure OpenAI GPT-4 Vision primary, OpenAI fallback.
+ * OpenAI gpt-4o-mini vision. Azure was a second provider for this same job and
+ * was dropped 2026-08-02 — one vendor, one key, one thing to rotate.
  * Input: { imageBase64, mimeType } (client converts the file, no FormData).
  * Response shape matches the old route body: { success, parsed, source }.
  */
@@ -58,19 +59,13 @@ IMPORTANT:
 
 If you cannot parse: { "transactions": [], "summary": "Could not parse image", "error": true }`;
 
-/** Shared vision call + JSON extraction for both providers. */
-async function callVision(
-  url: string,
-  headers: Record<string, string>,
-  extraBody: Record<string, unknown>,
-  imageUrl: Record<string, unknown>,
-  source: 'azure' | 'openai'
-) {
-  const response = await fetch(url, {
+/** Vision call + JSON extraction. */
+async function callVision(apiKey: string, dataUrl: string) {
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...headers },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
-      ...extraBody,
+      model: 'gpt-4o-mini',
       messages: [
         { role: 'system', content: EXTRACTION_PROMPT },
         {
@@ -80,7 +75,7 @@ async function callVision(
               type: 'text',
               text: 'Analyze this image and extract all transaction details. Return as JSON.',
             },
-            { type: 'image_url', image_url: imageUrl },
+            { type: 'image_url', image_url: { url: dataUrl, detail: 'high' } },
           ],
         },
       ],
@@ -91,7 +86,7 @@ async function callVision(
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => null);
-    console.error(`${source} error:`, errorData);
+    console.error('openai error:', errorData);
     throw new HttpsError('internal', 'Failed to parse image');
   }
 
@@ -104,23 +99,18 @@ async function callVision(
   try {
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
-      return { success: true, parsed: JSON.parse(jsonMatch[0]), source };
+      return { success: true, parsed: JSON.parse(jsonMatch[0]), source: 'openai' };
     }
   } catch (parseError) {
     console.error('JSON parse error:', parseError);
   }
 
-  return { success: true, parsed: { transactions: [], summary: content }, source };
+  return { success: true, parsed: { transactions: [], summary: content }, source: 'openai' };
 }
 
 export const parseReceipt = onCall(
   {
-    secrets: [
-      'AZURE_OPENAI_ENDPOINT',
-      'AZURE_OPENAI_KEY',
-      'AZURE_OPENAI_DEPLOYMENT',
-      'OPENAI_API_KEY',
-    ],
+    secrets: ['OPENAI_API_KEY'],
     cors: true,
     // Base64 images are large; give vision calls room.
     memory: '512MiB',
@@ -142,27 +132,10 @@ export const parseReceipt = onCall(
     const mime = typeof mimeType === 'string' && mimeType ? mimeType : 'image/jpeg';
     const dataUrl = `data:${mime};base64,${imageBase64}`;
 
-    const azureEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
-    const azureApiKey = process.env.AZURE_OPENAI_KEY;
-    const azureDeployment = process.env.AZURE_OPENAI_DEPLOYMENT || 'gpt-4o';
-
-    if (!azureEndpoint || !azureApiKey) {
-      // Fallback to OpenAI if Azure not configured
-      const openaiKey = process.env.OPENAI_API_KEY;
-      if (!openaiKey) {
-        throw new HttpsError('unavailable', 'AI service not configured');
-      }
-      return callVision(
-        'https://api.openai.com/v1/chat/completions',
-        { Authorization: `Bearer ${openaiKey}` },
-        { model: 'gpt-4o-mini' },
-        { url: dataUrl, detail: 'high' },
-        'openai'
-      );
+    const openaiKey = process.env.OPENAI_API_KEY;
+    if (!openaiKey) {
+      throw new HttpsError('unavailable', 'AI service not configured');
     }
-
-    // Use Azure OpenAI
-    const azureUrl = `${azureEndpoint}/openai/deployments/${azureDeployment}/chat/completions?api-version=2024-02-15-preview`;
-    return callVision(azureUrl, { 'api-key': azureApiKey }, {}, { url: dataUrl }, 'azure');
+    return callVision(openaiKey, dataUrl);
   }
 );
