@@ -413,3 +413,53 @@ test('wiring: listTools returns exactly the five tools and a call round-trips', 
     }
   });
 });
+
+/**
+ * The one failure the InMemoryTransport wiring test structurally cannot see.
+ *
+ * Under stdio, stdout carries JSON-RPC framing and nothing else. This app's obs layer
+ * prints '[obs] …' via console.debug — to STDOUT — whenever its level allows, and
+ * every tool exercises code that emits. server.ts defends with a
+ * `process.env.NEXT_PUBLIC_OBS_LEVEL ??= 'off'` ABOVE its imports, which only works
+ * because environment()/the level are read per-emit rather than cached at module load.
+ * That is a real assumption about another module, so it is pinned here: spawn the
+ * actual binary, drive a real tool call, and require every stdout line to parse as
+ * JSON. Measured: without the guard, one summary call emits 700+ poisoning lines.
+ */
+test('stdio: stdout stays protocol-pure through a real tool call', async () => {
+  const { spawn } = await import('node:child_process');
+  // The child must DEFEND ITSELF, so strip the obs vars this suite sets for its own
+  // output on line 7. Inheriting them made this test pass with server.ts's guard
+  // deleted — it was asserting the parent's hygiene, not the server's. Claude Desktop
+  // spawns with a clean environment, which is what this now reproduces.
+  // Destructured out rather than deleted: this repo augments ProcessEnv with a
+  // required NODE_ENV, so a Record<string, string|undefined> no longer satisfies
+  // SpawnOptions.env.
+  const { NEXT_PUBLIC_OBS_LEVEL: _lvl, NEXT_PUBLIC_OBS_ENV: _env, ...inherited } = process.env;
+  const childEnv = { ...inherited, CASHFLOW_CSV_DIR: FIXTURES };
+  const proc = spawn(process.execPath, ['--import', 'tsx', path.join(process.cwd(), 'mcp', 'server.ts')], {
+    cwd: process.cwd(),
+    env: childEnv,
+  });
+  let out = '';
+  proc.stdout.on('data', (d) => { out += String(d); });
+  const send = (o: unknown) => proc.stdin.write(JSON.stringify(o) + '\n');
+
+  try {
+    send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {
+      protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'check', version: '0' } } });
+    await new Promise((r) => setTimeout(r, 1200));
+    send({ jsonrpc: '2.0', method: 'notifications/initialized' });
+    send({ jsonrpc: '2.0', id: 2, method: 'tools/call',
+      params: { name: 'list_unmapped', arguments: {} } });
+    await new Promise((r) => setTimeout(r, 2500));
+
+    const lines = out.split('\n').filter((l) => l.trim());
+    const notJson = lines.filter((l) => { try { JSON.parse(l); return false; } catch { return true; } });
+    assert.deepEqual(notJson, [], 'non-JSON on stdout corrupts the JSON-RPC stream');
+    const reply = lines.map((l) => JSON.parse(l)).find((m) => m.id === 2);
+    assert.ok(reply?.result, 'the tool call must answer over real stdio, not just in-memory');
+  } finally {
+    proc.kill();
+  }
+});
