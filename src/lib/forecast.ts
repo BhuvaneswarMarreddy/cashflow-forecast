@@ -837,8 +837,11 @@ export function prepareFullContextForAI(context: AIUserContext): string {
       numberOfSources: incomeSources.length,
       estimatedMonthlyIncome: incomeSources.reduce((sum, i) => {
         if (i.frequency === 'monthly') return sum + i.amount;
-        if (i.frequency === 'biweekly') return sum + (i.amount * 2);
-        if (i.frequency === 'weekly') return sum + (i.amount * 4);
+        // 26/12 and 52/12, matching the dashboard: biweekly is 26 paychecks a year,
+        // not 24 — the naive *2 understated a $4,340 paycheck by ~$723/month, so the
+        // AI panels reasoned from different income than the tile the owner sees.
+        if (i.frequency === 'biweekly') return sum + (i.amount * 26 / 12);
+        if (i.frequency === 'weekly') return sum + (i.amount * 52 / 12);
         if (i.frequency === 'yearly') return sum + (i.amount / 12);
         return sum;
       }, 0),
