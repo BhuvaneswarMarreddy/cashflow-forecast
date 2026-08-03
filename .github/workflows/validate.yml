@@ -129,6 +129,37 @@ jobs:
         run: npm run test:rules
 
       # ---------------------------------------------------------------------
+      # 3b. Deployability — can `firebase deploy` still resolve this manifest?
+      # ---------------------------------------------------------------------
+      # Everything above proves the CODE is correct. None of it proves the app can
+      # still SHIP, because CI installs from the lockfile (always resolvable) while
+      # `firebase deploy` installs firebase-frameworks fresh and resolves peers
+      # against the whole tree.
+      #
+      # That gap let three consecutive deploys fail while this job stayed green:
+      # firebase-admin@^14 arrived in dependencies for the MCP Firestore loader, and
+      # firebase-frameworks@0.11.8 peers on ^11 || ^12 || ^13. ERESOLVE, every time,
+      # after a full clean validation run.
+      #
+      # Done in a scratch copy so nothing here can touch the real lockfile.
+      # --dry-run: resolution is the whole question, installing proves nothing more.
+      - name: Deploy resolvability (firebase-frameworks peers)
+        run: |
+          WORK="$RUNNER_TEMP/resolvecheck"
+          rm -rf "$WORK" && mkdir -p "$WORK"
+          cp package.json package-lock.json "$WORK/"
+          cd "$WORK"
+          if ! npm install firebase-frameworks@^0.11.0 --package-lock-only --dry-run 2>&1 | tee out.txt; then
+            echo "::error::A dependency in package.json conflicts with what firebase deploy installs. CI would stay green and every deploy would fail at install. See the ERESOLVE output above."
+            exit 1
+          fi
+          if grep -q "ERESOLVE\|npm error" out.txt; then
+            echo "::error::ERESOLVE against firebase-frameworks — deploy would fail at install."
+            exit 1
+          fi
+          echo "deploy resolvability: OK"
+
+      # ---------------------------------------------------------------------
       # 4. Production build
       # ---------------------------------------------------------------------
       # No env vars, and none are needed — re-verified on a clean clone with an empty
