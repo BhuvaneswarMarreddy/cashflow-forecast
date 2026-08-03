@@ -31,8 +31,13 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          # functions/package.json declares engines.node = 20; match the deployed runtime.
-          node-version: '20'
+          # Matches the runtime that actually serves the app: the Firebase web-frameworks
+          # SSR function `ssrmarreddycashflow` runs nodejs24. functions/package.json still
+          # declares engines.node = 20, so `npm ci --prefix functions` prints one
+          # EBADENGINE *warning* here — it is a warning, it does not fail the install, and
+          # the functions suite passes on both. Node 20 was verified working end to end
+          # too; 24 is pinned because it is the version production runs.
+          node-version: '24'
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -48,6 +53,10 @@ jobs:
       - name: Install web dependencies
         run: npm ci
 
+      # LOAD-BEARING, not just for the functions suite. The ROOT tsconfig's
+      # `include: ["**/*.ts"]` pulls functions/src/*.ts into `npx tsc --noEmit` below, so
+      # without this install the type check fails with 12 errors (TS2307 on
+      # firebase-admin / firebase-functions). Keep this step BEFORE the type check.
       - name: Install Firebase Functions dependencies
         run: npm ci --prefix functions
 
@@ -69,14 +78,28 @@ jobs:
       # ---------------------------------------------------------------------
       # 3. Test suites — all three, not just the web one
       # ---------------------------------------------------------------------
-      # test:ci excludes src/__tests__/flows.integration.test.ts, which reads the
-      # gitignored transactionsbyaccount/ CSV export (real personal financial data
-      # that must never reach CI). See docs/ci/VALIDATION-PIPELINE.md § Exclusions.
+      # Full suite, no path exclusions. src/__tests__/flows.integration.test.ts reads the
+      # gitignored transactionsbyaccount/ CSV export (real personal financial data that
+      # must never reach CI); it now guards itself correctly — `load()` sits behind an
+      # fs.existsSync ternary INSIDE the describe body, so a checkout with no CSVs
+      # collects the file and skips its 7 tests instead of throwing ENOENT at collection.
+      # Verified on a clean clone: 57 suites (1 skipped), 947 tests (7 skipped), 0 failed.
+      # Running plain jest rather than `npm run test:ci` is deliberate: it keeps CI as the
+      # thing that catches a regression in that guard. docs/ci/VALIDATION-PIPELINE.md
+      # § Exclusions describes the old broken guard and is stale on this point.
       - name: Web Jest tests
-        run: npm run test:ci
+        run: npx jest --ci
 
       - name: Firebase Functions tests
         run: npm test --prefix functions
+
+      # firebase.json runs exactly this as the `api` codebase predeploy. It compiles under
+      # functions/tsconfig.json (module commonjs, moduleResolution node), which the root
+      # type check above does NOT use — root tsc reads those same files with
+      # module esnext / moduleResolution bundler. A resolution break that only shows up
+      # under node resolution would otherwise pass CI and fail at deploy time.
+      - name: Firebase Functions tsc build
+        run: npm run build --prefix functions
 
       - name: Python SimpleFIN/sync tests
         run: python -m pytest functions-sync -q
@@ -84,8 +107,13 @@ jobs:
       # ---------------------------------------------------------------------
       # 4. Production build
       # ---------------------------------------------------------------------
-      # No env vars: this must validate the real production artifact. The build
-      # needs no .env and no Firebase credentials.
+      # No env vars, and none are needed — re-verified on a clean clone with an empty
+      # environment. The Firebase web config is hard-coded in src/lib/firebase.ts (public
+      # client config, not a secret), the AI proxy routes are gone (src/app/api holds only
+      # /api/diagnostics/trace), and OPENAI_API_KEY is read at REQUEST time inside the
+      # Cloud Functions handlers, never at build time. So there is nothing to supply here,
+      # not even a placeholder. Do NOT add env: to this step — NEXT_PUBLIC_OBS_ENV in
+      # particular would stop this from validating the real production artifact.
       - name: Next.js production build
         run: npm run build
 
