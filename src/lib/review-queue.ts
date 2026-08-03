@@ -24,7 +24,7 @@ import { formatMoneyCents } from './money';
 import { PurchaseEconomics, RefundEconomics, purchaseEconomics, refundEconomics } from './refunds';
 import { LinkStatus, REFUND_SOURCE_TYPES, TransactionLink } from './relations';
 import { getAllCategorySpending } from './budgets';
-import { MappingGroup } from './mapping-suggestions';
+import { MappingGroup, groupMeanings } from './mapping-suggestions';
 
 // ---------------------------------------------------------------------------
 // §2.3 — ONE state vocabulary, aligned once, with no translation layer
@@ -97,21 +97,91 @@ export interface ReviewSection {
   /** Chip wording on the Flow entry strip (§3), which is terser than the heading. */
   chipLabel: string;
   candidateTypes: readonly CandidateType[];
+  /** What these items ARE, in one sentence nobody had to learn the app to understand. */
+  what: string;
+  /** What answering one actually DOES — read before the decision, not discovered after. */
+  after: string;
 }
 
+/**
+ * Ordered by how much money an answer here is worth, NOT by how many items there are.
+ *
+ * The owner opened this panel and could not work out what to do, because the counts run
+ * the other way: 400-odd refund matches worth cents each used to sit above the handful of
+ * patterns holding six figures. `SECTION_RANK` below makes this list the queue's primary
+ * sort key, so the first thing on screen is the most valuable thing to answer.
+ */
 export const REVIEW_SECTIONS: readonly ReviewSection[] = [
-  { id: 'refund_matches', label: 'Refund Matches', chipLabel: 'Refunds to match', candidateTypes: ['refund_match', 'combined_refund_match'] },
-  { id: 'returned_purchases', label: 'Returned Purchases', chipLabel: 'Returned purchases', candidateTypes: ['partial_refund_match'] },
-  { id: 'unknown_card_credits', label: 'Unknown Card Credits', chipLabel: 'Unknown card credits', candidateTypes: ['unknown_card_credit'] },
-  { id: 'duplicate_charges', label: 'Possible Duplicate Charges', chipLabel: 'Possible duplicate charges', candidateTypes: ['immediate_duplicate_charge'] },
-  { id: 'duplicate_subscriptions', label: 'Possible Duplicate Subscriptions', chipLabel: 'Duplicate subscriptions', candidateTypes: ['duplicate_subscription', 'subscription_overlap'] },
-  { id: 'continued_charges', label: 'Continued Charges After Cancellation', chipLabel: 'Charges after cancelling', candidateTypes: ['continued_charge_after_cancellation'] },
-  { id: 'unknown_deposits', label: 'Unknown Deposits', chipLabel: 'Unknown deposits', candidateTypes: [] },
-  // MAP-001. Ranked FIRST in the chip strip is not implied by list order — §4.5's sort
-  // is what orders items — but a group answers many rows at once, so it earns its own
-  // section rather than being 205 more rows in the one above.
-  { id: 'unmapped_groups', label: 'Patterns To Map', chipLabel: 'Patterns to map', candidateTypes: [] },
+  // MAP-001. A group answers many rows at once, which is why it earns its own section
+  // rather than being 205 more rows in one of the ones below — and why it leads.
+  {
+    id: 'unmapped_groups',
+    label: 'Patterns To Map',
+    chipLabel: 'Patterns to map',
+    candidateTypes: [],
+    what: 'Money the app can see but cannot name, grouped so that one answer covers every row that looks the same. Nearly all of your unexplained money is here.',
+    after: 'Those rows stop being unknown everywhere at once — Flow, budgets and your totals all use the name you give them. Nothing is deleted, and naming money never invents income.',
+  },
+  {
+    id: 'unknown_deposits',
+    label: 'Unknown Deposits',
+    chipLabel: 'Unknown deposits',
+    candidateTypes: [],
+    what: 'Money that arrived and does not match any income source you approved. Until you say what it is, the app refuses to count it as income.',
+    after: 'Your answer is recorded on that deposit. It only starts counting as income if you say it is income you earned.',
+  },
+  {
+    id: 'unknown_card_credits',
+    label: 'Unknown Card Credits',
+    chipLabel: 'Unknown card credits',
+    candidateTypes: ['unknown_card_credit'],
+    what: 'A credit landed on a card and nothing in your data explains it yet — it could be a refund, a reward, a payment you made, or a reversed charge.',
+    after: 'The credit gets filed as what you say it is. A card credit is never counted as income, whichever answer you pick.',
+  },
+  {
+    id: 'continued_charges',
+    label: 'Continued Charges After Cancellation',
+    chipLabel: 'Charges after cancelling',
+    candidateTypes: ['continued_charge_after_cancellation'],
+    what: 'A merchant charged you after the date you told us you cancelled.',
+    after: 'Your answer is recorded and the app stops asking. No money comes back on its own — this is a prompt to go and claim it.',
+  },
+  {
+    id: 'duplicate_subscriptions',
+    label: 'Possible Duplicate Subscriptions',
+    chipLabel: 'Duplicate subscriptions',
+    candidateTypes: ['duplicate_subscription', 'subscription_overlap'],
+    what: 'The same service looks like it is billing two of your accounts.',
+    after: 'No total moves — both charges stay counted in your spending. What you get is a straight answer about what you could cancel.',
+  },
+  {
+    id: 'duplicate_charges',
+    label: 'Possible Duplicate Charges',
+    chipLabel: 'Possible duplicate charges',
+    candidateTypes: ['immediate_duplicate_charge'],
+    what: 'A merchant charged the same amount twice within a day or two.',
+    after: 'No total moves — both charges stay counted. Your answer records whether the second one was real, and the app stops asking.',
+  },
+  {
+    id: 'refund_matches',
+    label: 'Refund Matches',
+    chipLabel: 'Refunds to match',
+    candidateTypes: ['refund_match', 'combined_refund_match'],
+    what: 'A credit that exactly matches something you bought. The app is confident and only needs you to agree the two belong together.',
+    after: 'That purchase’s category total drops by the refund. Both rows stay in your history at their full amounts.',
+  },
+  {
+    id: 'returned_purchases',
+    label: 'Returned Purchases',
+    chipLabel: 'Returned purchases',
+    candidateTypes: ['partial_refund_match'],
+    what: 'A credit that covers only PART of a purchase — a partial return, or a price adjustment.',
+    after: 'The purchase starts showing its net cost: what you paid minus what came back. Nothing is deleted.',
+  },
 ];
+
+/** §4.5's new primary sort key — the index of a section in the list above. */
+const SECTION_RANK = new Map(REVIEW_SECTIONS.map((s, i) => [s.id, i] as const));
 
 const SECTION_OF_TYPE = new Map<CandidateType, SectionId>(
   REVIEW_SECTIONS.flatMap((s) => s.candidateTypes.map((t) => [t, s.id] as [CandidateType, SectionId]))
@@ -290,13 +360,91 @@ const inflowHeadline = (item: InflowReviewItem, ctx: QueueContext): string => {
 };
 
 // ---------------------------------------------------------------------------
+// "Explain this" — the same question the owner would have had to type
+// ---------------------------------------------------------------------------
+
+/**
+ * The choices the card for this item actually offers, word for word.
+ *
+ * The chat is grounded on the ledger, not on the UI, so it cannot name a button it has
+ * never seen. Sending the real labels is the difference between "here are your options"
+ * and a plausible invention.
+ *
+ * ponytail: the duplicate and refund lists are copied from those two cards' buttons and
+ * can drift. Lift them into a shared list if a third surface ever needs them.
+ */
+export function optionLabels(item: ReviewQueueItem): string[] {
+  if (item.source === 'group' && item.group) return groupMeanings(item.group.direction).map((m) => m.label);
+
+  const type = item.candidate?.candidateType;
+  if (item.source === 'transaction' || type === 'unknown_card_credit') return Object.values(CARD_CREDIT_MEANING);
+
+  if (type === 'immediate_duplicate_charge' || type === 'duplicate_subscription'
+    || type === 'subscription_overlap' || type === 'continued_charge_after_cancellation') {
+    return ['Yes, a duplicate', 'Both intentional', 'Different owners', 'Business vs personal', 'Already cancelled', 'Dismiss'];
+  }
+  return ['Confirm links', 'Adjust allocation', 'Mark as reward', 'Mark as card payment', 'Mark as chargeback', 'Keep unclassified'];
+}
+
+/**
+ * Everything the owner is looking at, phrased as a question — the rows, how often they
+ * arrive, why the app flagged them, the exact options, and what the app says each answer
+ * will do. Without the options and the after-effects the model would answer about the
+ * money and stay silent on the decision, which is the half the owner was stuck on.
+ */
+export function askAboutItem(item: ReviewQueueItem, ctx: QueueContext): string {
+  const index = byId(ctx.transactions);
+  const rows = item.transactionIds.map((id) => index.get(id)).filter(Boolean) as Transaction[];
+  const section = REVIEW_SECTIONS.find((s) => s.id === item.sectionId);
+  const g = item.group;
+  const shown = rows.slice(0, 8);
+
+  const parts: (string | null)[] = [
+    `My money review queue is asking me about this, under "${section?.label ?? 'review'}":`,
+    item.headline,
+    '',
+    section ? `The app describes this kind of item as: ${section.what}` : null,
+    g
+      ? `This pattern is ${g.rowCount} ${g.rowCount === 1 ? 'row' : 'rows'} totalling ${money(g.totalCents)}, `
+        + `${g.firstDate} to ${g.lastDate}${g.cadence ? `, arriving ${g.cadence}` : ''}, `
+        + `${g.direction === 'inflow' ? 'money coming in' : 'money going out'}.`
+      : null,
+    g?.suggestion?.why ? `The app's own evidence: ${g.suggestion.why}.` : null,
+    item.reasonCodes.length && !g ? `Why it was flagged: ${reasonSentence(item.reasonCodes)}` : null,
+    shown.length ? '' : null,
+    shown.length
+      ? `The transactions${rows.length > shown.length ? ` (first ${shown.length} of ${rows.length})` : ''}:`
+      : null,
+    ...shown.map(
+      (t) =>
+        `- ${day(t.date)} · ${rowLabel(t)} · ${money(toCents(t.amount))}`
+        + `${t.sourceCategory ? ` · my export files it as ${t.sourceCategory}` : ''}`
+    ),
+    '',
+    `The options the app gives me are: ${optionLabels(item).map((o) => `"${o}"`).join(', ')}.`,
+    section ? `The app says that after I answer: ${section.after}` : null,
+    '',
+    'Explain in plain English what this money most likely is, which option you would pick and why, '
+      + 'and what will actually look different on my Dashboard and Flow once I answer. '
+      + 'If you need something from me to be sure, ask me one question at a time.',
+  ];
+
+  return parts.filter((l) => l !== null).join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // Building the queue — §4.5's deterministic order
 // ---------------------------------------------------------------------------
 
 /**
+ * SECTION first (see `REVIEW_SECTIONS` — money-weighted, not count-weighted), then
  * `needs_attention` → `unreviewed` → `suggested` → `needs_more_information`, then score
  * descending, then `generatedAt` ascending, then key ascending. Fully deterministic, so
  * the list cannot reshuffle between renders (test Q4).
+ *
+ * Section leads because state cannot see value: a $0.45 Amazon refund and a $120,562
+ * pattern are both `unreviewed`, and sorting on state alone buried every decision worth
+ * making under four hundred that were not.
  */
 export function buildReviewQueue(ctx: QueueContext): ReviewQueueItem[] {
   const items: ReviewQueueItem[] = [];
@@ -361,6 +509,7 @@ export function buildReviewQueue(ctx: QueueContext): ReviewQueueItem[] {
 
   return items.sort(
     (a, b) =>
+      (SECTION_RANK.get(a.sectionId) ?? 0) - (SECTION_RANK.get(b.sectionId) ?? 0) ||
       a.rank - b.rank ||
       b.score - a.score ||
       a.generatedAt.localeCompare(b.generatedAt) ||

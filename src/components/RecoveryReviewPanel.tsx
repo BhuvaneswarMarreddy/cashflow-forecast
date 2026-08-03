@@ -17,8 +17,11 @@ import {
   REVIEW_SECTIONS,
   ReviewQueueItem,
   SectionId,
+  askAboutItem,
   recoveryTotals,
 } from '@/lib/review-queue';
+import { askAbout } from '@/lib/ask';
+import { Sparkles } from 'lucide-react';
 
 const money = formatMoneyCents;
 
@@ -102,6 +105,17 @@ function PanelBody({
   const estimateOf = (key: string) => estimates.find((e) => e.identityKey === key);
 
   /**
+   * The section whose explanation is on screen: what the owner has SELECTED, else what
+   * they have FILTERED to, else the first section that has anything in it — which, since
+   * `REVIEW_SECTIONS` is money-ordered, is also the one they should start with.
+   */
+  const activeSectionId =
+    selected?.sectionId
+    ?? sectionFilter
+    ?? REVIEW_SECTIONS.find((s) => items.some((i) => i.sectionId === s.id))?.id;
+  const activeSection = REVIEW_SECTIONS.find((s) => s.id === activeSectionId);
+
+  /**
    * §4.4 — two candidates within the ambiguity band are ALTERNATIVES for the same credit.
    * The card shows them as a labelled choice with no pre-selection; here we just find them.
    */
@@ -163,6 +177,16 @@ function PanelBody({
         <p className="text-[var(--foreground-muted)]">Nothing to review.</p>
       ) : (
         <>
+          {/* The owner opened this panel and could not tell what it wanted from them.
+              Three facts fix that: these are questions, they are ordered by what the
+              answer is worth, and nothing happens until a button is pressed. */}
+          <p className="text-sm text-[var(--foreground-secondary)]">
+            These are the questions the app cannot answer on its own. They are ordered by how
+            much money the answer is worth, so <strong>start at the top and work down</strong> —
+            you do not have to finish. Nothing changes until you press a button, and nothing here
+            deletes a transaction.
+          </p>
+
           <div role="group" aria-label="Filter review by kind" className="flex flex-wrap gap-1">
             <button
               className={`${ACTION_BTN} ${sectionFilter === null ? 'bg-[var(--background-tertiary)]' : ''}`}
@@ -186,6 +210,21 @@ function PanelBody({
               );
             })}
           </div>
+
+          {/* What this kind of item IS and what answering it does — both before the
+              decision. The owner should never have to click Confirm to find out. */}
+          {activeSection && (
+            <section
+              aria-label={`About ${activeSection.label}`}
+              className="rounded-lg bg-[var(--background-tertiary)] p-3 text-sm space-y-1"
+            >
+              <p className="font-medium text-[var(--foreground)]">{activeSection.label}</p>
+              <p className="text-[var(--foreground-secondary)]">{activeSection.what}</p>
+              <p className="text-[var(--foreground-muted)]">
+                <strong>After you answer:</strong> {activeSection.after}
+              </p>
+            </section>
+          )}
 
           <ul className="space-y-1 max-h-72 overflow-y-auto">
             {visible.map((item) => (
@@ -224,6 +263,19 @@ function PanelBody({
                   Next
                 </button>
               </div>
+
+              {/* The way out when none of the above helps. One button for all four card
+                  types: it carries the rows, the cadence, the app's own evidence, the
+                  exact options and what each one does, so the chat can talk the owner
+                  through a decision instead of being handed a headline. */}
+              <button
+                type="button"
+                onClick={() => askAbout(askAboutItem(selected, ctx))}
+                className={`${ACTION_BTN} flex items-center gap-1.5`}
+              >
+                <Sparkles className="w-4 h-4" aria-hidden="true" />
+                I don&apos;t understand this — explain it
+              </button>
 
               {renderCard()}
             </>

@@ -10,7 +10,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import MappingGroupCard from '@/components/MappingGroupCard';
 import { GroupDecision, buildMappingGroups } from '@/lib/mapping-suggestions';
-import { buildReviewQueue, queueCounts } from '@/lib/review-queue';
+import { REVIEW_SECTIONS, askAboutItem, buildReviewQueue, queueCounts } from '@/lib/review-queue';
 import { PaymentAccount, Transaction } from '@/types';
 
 const accounts: PaymentAccount[] = [
@@ -160,5 +160,58 @@ describe('G4 a group replaces its rows in the ONE queue', () => {
 
   it('leaves the queue exactly as it was when no groups are supplied', () => {
     expect(buildReviewQueue(ctx)).toEqual(buildReviewQueue({ ...ctx, groups: [] }));
+  });
+
+  /**
+   * The owner opened the queue and could not use it: 400-odd cent-sized refund matches
+   * sat above the handful of patterns holding six figures, because the sort could only
+   * see review STATE and state cannot see value. The stray row below is deliberately
+   * `needs_attention` — the highest-ranking state there is — so it outranks the group on
+   * every key except the section one. Delete the section key from `buildReviewQueue` and
+   * this goes red.
+   */
+  it('puts Patterns To Map above everything, even a higher-priority state', () => {
+    expect(REVIEW_SECTIONS[0].id).toBe('unmapped_groups');
+    expect(REVIEW_SECTIONS[REVIEW_SECTIONS.length - 1].id).toBe('returned_purchases');
+
+    const stray = tx({ id: 'demo-in-stray', date: '2026-05-09' });
+    const queue = buildReviewQueue({
+      ...ctx,
+      transactions: [...ROWS, stray],
+      // Built from ROWS only, so `stray` stays an ungrouped Unknown Deposit.
+      groups: buildMappingGroups({ transactions: ROWS, accounts }),
+      inflowItems: [
+        {
+          transactionId: stray.id, date: stray.date, amountCents: 25000, accountId: stray.accountId,
+          meaning: 'unknown_inflow' as const, state: 'needs_attention' as const, reasons: [],
+          candidateSourceIds: [], reason: 'no approved source matched',
+        },
+      ],
+    });
+
+    expect(queue.map((i) => i.sectionId)).toEqual(['unmapped_groups', 'unknown_deposits']);
+    // …and the whole list stays monotonic in section rank, not just its first item.
+    const ranks = queue.map((i) => REVIEW_SECTIONS.findIndex((s) => s.id === i.sectionId));
+    expect(ranks).toEqual([...ranks].sort((a, b) => a - b));
+  });
+
+  it('"explain it" hands the chat the rows, the options and what answering does', () => {
+    const item = buildReviewQueue({ ...ctx, groups: [group()] }).find((i) => i.source === 'group')!;
+    const q = askAboutItem(item, { ...ctx, groups: [group()] });
+
+    // The rows themselves — a headline alone would have the model answering about a
+    // different set of transactions than the one on screen.
+    expect(q).toContain('2026-01-09');
+    expect(q).toContain('DEMO SOLSTICE FUND');
+    expect(q).toContain('$250.00');
+    expect(q).toContain('4 rows totalling $1,000.00');
+
+    // The choices, word for word, because the chat cannot see the buttons.
+    expect(q).toContain('"Income I earned"');
+    expect(q).toContain('"Money moving between my own accounts"');
+
+    // And the consequence, before the decision rather than after it.
+    expect(q).toContain('after I answer');
+    expect(q).toContain('naming money never invents income');
   });
 });

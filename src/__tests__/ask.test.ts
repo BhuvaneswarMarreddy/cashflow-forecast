@@ -4,7 +4,7 @@
  * keyed differently — and quietly answers about a DIFFERENT set of rows than the ones
  * on screen. These pin the facts into the sentence.
  */
-import { askAboutNode, askAboutUnmapped } from '@/lib/ask';
+import { askAboutNode } from '@/lib/ask';
 
 const row = (o: Partial<Parameters<typeof askAboutNode>[1][number]>) => ({
   date: '2026-03-01', amount: 100, ...o,
@@ -44,21 +44,5 @@ describe('askAboutNode', () => {
     const q = askAboutNode('X', [row({ date: '', amount: Number.NaN }), row({ amount: 5 })]);
     expect(q).not.toMatch(/NaN/);
     expect(q).toContain('$5.00');
-  });
-});
-
-describe('askAboutUnmapped', () => {
-  it('carries the app\'s own evidence and asks whether it is right', () => {
-    const q = askAboutUnmapped('ACME', 4, 12345, 'nothing has ever come back from this counterparty');
-    expect(q).toContain('4 transactions totalling $123.45');
-    expect(q).toContain('nothing has ever come back');
-    expect(q).toContain('Do you agree');
-  });
-
-  it('admits when there is no evidence instead of inviting a guess', () => {
-    const q = askAboutUnmapped('ACME', 1, 500);
-    expect(q).toContain('no evidence');
-    expect(q).toContain('one question at a time');
-    expect(q).not.toContain('Do you agree');
   });
 });

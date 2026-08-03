@@ -75,17 +75,7 @@ export function askAboutNode(label: string, rows: AskableRow[]): string {
   ].filter(Boolean).join(' ').replace(/\s+([,.])/g, '$1');
 }
 
-/**
- * Same idea for a group in the review queue that the app could not explain.
- * `evidence` is the app's own reason, or empty when it honestly has none — say so
- * rather than inviting a guess.
+/*
+ * The review queue's own phraser is `askAboutItem()` in `review-queue.ts`, not here: it
+ * needs the section copy, the candidate and the option labels, all of which live there.
  */
-export function askAboutUnmapped(label: string, count: number, totalCents: number, evidence?: string): string {
-  return [
-    `In my review queue there is a group called "${label}":`,
-    `${count} transaction${count === 1 ? '' : 's'} totalling ${usd(totalCents / 100)}.`,
-    evidence
-      ? `The app suggests: ${evidence}. Do you agree, and what should I do with it?`
-      : 'The app has no evidence for what it is. Ask me what you need to know to classify it, one question at a time.',
-  ].join(' ');
-}
