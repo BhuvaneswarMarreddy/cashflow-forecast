@@ -33,6 +33,13 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# Firebase service-account keys. A committed key is a permanent grant to the whole
+# project — rotating it is the only remedy, and git remembers it either way. The MCP
+# server's key belongs OUTSIDE the repo entirely (~/.config/cashflow/); these two
+# patterns exist to catch the copy that lands here by accident.
+*service-account*.json
+*.serviceaccount.json
+
 # vercel
 .vercel
 
