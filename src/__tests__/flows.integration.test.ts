@@ -168,6 +168,27 @@ maybe('audit replay over the real CSVs', () => {
     }
   });
 
+  it('every dollar entering the graph also leaves it — the tiles are a subset', () => {
+    // The owner read the four story tiles and asked why they do not add up. They do
+    // not because they are 4 lanes out of 14, and because "Money came in" bundled
+    // money received FROM people with paychecks while money sent TO people had its
+    // own tile — one side of each relationship hidden, the other headlined.
+    // Nothing is lost: sources and sinks balance to the cent. Pinned so a new lane
+    // that leaks money fails here.
+    const hasIn = new Set(g.links.map((l) => l.target));
+    const hasOut = new Set(g.links.map((l) => l.source));
+    const sources = g.links.filter((l) => !hasIn.has(l.source)).reduce((s, l) => s + l.cents, 0);
+    const sinks = g.links.filter((l) => !hasOut.has(l.target)).reduce((s, l) => s + l.cents, 0);
+    expect(sources).toBe(sinks);
+
+    // And the two halves of "Money came in" are both real, so naming them on the
+    // tile cannot be dropped as cosmetic.
+    const earned = g.links.filter((l) => l.source.startsWith('inc:')).reduce((s, l) => s + l.cents, 0);
+    const fromPeople = g.links.filter((l) => l.source.startsWith('person-in:')).reduce((s, l) => s + l.cents, 0);
+    expect(earned).toBeGreaterThan(0);
+    expect(fromPeople).toBeGreaterThan(0);
+  });
+
   it('reproduces the audited recurring anchors', () => {
     const items = detectRecurring(transactions, accounts, '2026-07-22');
     const by = new Map(items.map((i) => [i.merchant, i]));

@@ -536,7 +536,13 @@ export default function FlowPage() {
   const story = (() => {
     const sum = (pred: (l: { source: string; target: string; cents: number }) => boolean) =>
       graph.links.filter(pred).reduce((s, l) => s + l.cents, 0);
-    const moneyIn = sum((l) => l.source.startsWith('inc:') || l.source.startsWith('person-in:'));
+    // Split, because bundling these made the tiles impossible to reconcile by eye:
+    // money received FROM people sat silently inside "Money came in" while money sent
+    // TO people had a tile of its own, so one side of every person relationship was
+    // hidden and the other was headlined.
+    const earnedIn = sum((l) => l.source.startsWith('inc:'));
+    const fromPeople = sum((l) => l.source.startsWith('person-in:'));
+    const moneyIn = earnedIn + fromPeople;
     const moneyBack = sum((l) => MONEY_BACK_LANE_IDS.includes(l.source));
     // `cat:` links already carry the CONFIRMED netting the graph applied. Money paid
     // to a NAMED PERSON is routed by recipient and never reaches a cat: node, so
@@ -547,7 +553,7 @@ export default function FlowPage() {
     const spending = sum((l) => l.target.startsWith('cat:')) + graph.personExpenseCents;
     const toPeople = sum((l) => l.target.startsWith('person-out:'));
     return {
-      moneyIn, spending, toPeople, moneyBack,
+      moneyIn, earnedIn, fromPeople, spending, toPeople, moneyBack,
       netted: graph.nettedRefundCents,
       // The overlap is real and stated rather than hidden: these rows are a cost AND
       // they went to a person, so they belong in both tiles.
@@ -1216,7 +1222,15 @@ export default function FlowPage() {
         {/* The story in plain language — same links as the chart, to the cent */}
         <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
           {[
-            { label: 'Money came in', cents: story.moneyIn, sub: 'paychecks & money received — refunds, rewards and card charges are not income' },
+            {
+              label: 'Money came in',
+              cents: story.moneyIn,
+              // Naming both halves is what lets the tiles be reconciled by eye:
+              // the money-from-people half is the mirror of "Sent to people" below.
+              sub: story.fromPeople > 0
+                ? `${money(story.earnedIn)} earned + ${money(story.fromPeople)} received from people — refunds, rewards and card credits are counted separately below`
+                : 'paychecks & money received — refunds, rewards and card charges are not income',
+            },
             {
               label: 'Spent on living',
               cents: story.spending,
@@ -1240,8 +1254,8 @@ export default function FlowPage() {
               // cost and a payment to a person. Saying so beats two tiles that look
               // additive and are not.
               sub: story.personExpense > 0
-                ? `Zelle + Remitly — ${money(story.personExpense)} of this is also counted in spending`
-                : 'Zelle + Remitly to India — money moved, not yet classified as a cost',
+                ? `Zelle + Remitly. ${money(story.personExpense)} of this is also counted in spending; ${money(story.fromPeople)} came back from people and is inside "Money came in"`
+                : `Zelle + Remitly — money moved, not yet a cost. ${money(story.fromPeople)} came back from people and is inside "Money came in"`,
             },
             { label: gapTotal > 0 ? '⚠ Not yet in the data' : 'Data complete', cents: gapTotal, sub: gapTotal > 0 ? 'export gaps — shown in the chart, being re-exported' : 'every dollar accounted for' },
           ].map((t) => (
