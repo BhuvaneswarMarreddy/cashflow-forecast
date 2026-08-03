@@ -51,6 +51,15 @@ jobs:
         with:
           python-version: '3.12'
 
+      # The Firestore emulator is a Java program and firebase-tools refuses any JDK
+      # below 21. ubuntu-latest ships 17 by default, so the rules step failed here on
+      # its first real run while passing locally on a JDK 26 laptop — precisely the
+      # class of break this pipeline exists to catch.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
       # ---------------------------------------------------------------------
       # 1. Dependencies
       # ---------------------------------------------------------------------
