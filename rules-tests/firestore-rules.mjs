@@ -64,18 +64,14 @@ const profile = (uid) => ({
   metadata: { isOnboarded: false, lastLoginAt: T0, signUpMethod: 'password' },
 });
 
-/** The shape firestore.rules DEMANDS of an account. Note `balance`. */
-const accountPerRules = (over = {}) => ({
-  name: 'Synthetic Checking',
-  type: 'bank_account',
-  provider: 'other',
-  balance: 0,
-  isActive: true,
-  color: '#000000',
-  ...over,
-});
-
-/** The shape the APP actually writes — src/lib/firestore.ts `FirestoreAccount`. */
+/**
+ * The shape the APP writes — src/lib/firestore.ts `FirestoreAccount`.
+ *
+ * There used to be a second helper here, `accountPerRules`, carrying a `balance` key,
+ * because the rules demanded a field the app has never written. Fixing the rule
+ * collapsed the two shapes into one; a second fixture would now only be able to
+ * describe a payload nothing produces.
+ */
 const accountPerApp = (over = {}) => ({
   name: 'Synthetic Checking',
   type: 'bank_account',
@@ -158,7 +154,7 @@ const family = (over = {}) => ({
 
 /** Every document path the rules file names, seeded under Alice. */
 const ALICE_DOCS = [
-  ['accounts/acc1', ['users', ALICE, 'accounts', 'acc1'], accountPerRules],
+  ['accounts/acc1', ['users', ALICE, 'accounts', 'acc1'], accountPerApp],
   ['income/inc1', ['users', ALICE, 'income', 'inc1'], income],
   ['transactions/txnSynthA', ['users', ALICE, 'transactions', 'txnSynthA'], txn],
   ['rules/rule1', ['users', ALICE, 'rules', 'rule1'], mappingRule],
@@ -187,10 +183,12 @@ async function seed() {
     await setDoc(doc(db, 'users', ALICE), profile(ALICE));
     await setDoc(doc(db, 'users', BOB), profile(BOB));
     for (const [, path, make] of ALICE_DOCS) await setDoc(doc(db, ...path), make());
-    // Live app collections that the rules file never mentions (see BUG C).
+    // Live app collections the rules file used to omit entirely, so the deny-all
+    // caught them and the app's own writes failed in production (was BUG C).
     await setDoc(doc(db, 'users', ALICE, 'plannedTransactions', 'pt1'), {
       title: 'Synthetic Planned',
       amount: 1,
+      dueDate: '2026-01-01',
       status: 'pending',
     });
   });
@@ -479,42 +477,69 @@ describe('4. legitimate owner operations', () => {
     await assertSucceeds(setDoc(doc(asAlice(), 'users', ALICE, 'budgets', 'b2'), { monthlyLimit: 1 }));
   });
 
-  // ---- Legitimate operations the rules WRONGLY refuse -----------------------
+  // ---- Operations the rules used to refuse, and must now allow --------------
+  // These four asserted the BROKEN behaviour when the suite was written. They are
+  // inverted here as the proof the fix landed: what the app actually writes is now
+  // what the rules actually accept.
 
-  it('BUG A: the account payload the app actually writes is REJECTED', async () => {
-    // src/lib/firestore.ts FirestoreAccount has `openingBalance`; the rule demands a
-    // `balance` key that NOTHING in the codebase ever writes. Every account create
-    // in the app is denied by these rules.
-    await assertFails(setDoc(doc(asAlice(), 'users', ALICE, 'accounts', 'accNew'), accountPerApp()));
+  it('BUG A fixed: the account payload the app really writes is ACCEPTED', async () => {
+    // PaymentAccount carries `openingBalance`; there is no `balance` field anywhere
+    // in the codebase. The old rule demanded one, so every hand-created account was
+    // denied — masked in production because the Python sync uses the Admin SDK.
+    await assertSucceeds(setDoc(doc(asAlice(), 'users', ALICE, 'accounts', 'accNew'), accountPerApp()));
   });
 
-  it('BUG B: a personal_loan account is REJECTED even with the rules-shaped payload', async () => {
-    // AccountType includes 'personal_loan' and src/app/onboarding/page.tsx creates one.
-    // The rule's type allowlist omits it.
-    await assertFails(
-      setDoc(doc(asAlice(), 'users', ALICE, 'accounts', 'accLoan'), accountPerRules({ type: 'personal_loan' }))
+  it('BUG A fixed: an account WITHOUT openingBalance is still rejected', async () => {
+    // The fix must not have loosened the rule into accepting anything.
+    const { openingBalance, ...noBalance } = accountPerApp();
+    await assertFails(setDoc(doc(asAlice(), 'users', ALICE, 'accounts', 'accBad'), noBalance));
+  });
+
+  it('BUG B fixed: a personal_loan account is ACCEPTED', async () => {
+    // AccountType's fifth member; onboarding creates one.
+    await assertSucceeds(
+      setDoc(doc(asAlice(), 'users', ALICE, 'accounts', 'accLoan'), accountPerApp({ type: 'personal_loan' }))
     );
   });
 
-  it('BUG C: plannedTransactions is unreachable — no match block, deny-all catches it', async () => {
-    // src/components/PlannedPaymentsPanel.tsx reads and writes this collection.
-    await assertFails(getDocs(collection(asAlice(), 'users', ALICE, 'plannedTransactions')));
-    await assertFails(getDoc(doc(asAlice(), 'users', ALICE, 'plannedTransactions', 'pt1')));
+  it('BUG B fixed: an invented account type is still rejected', async () => {
     await assertFails(
-      setDoc(doc(asAlice(), 'users', ALICE, 'plannedTransactions', 'pt2'), { title: 'Synthetic Planned', amount: 1, status: 'pending' })
+      setDoc(doc(asAlice(), 'users', ALICE, 'accounts', 'accJunk'), accountPerApp({ type: 'not_a_type' }))
     );
   });
 
-  it('BUG C: goals and reminders are unreachable too (deleteAllUserData sweeps them)', async () => {
+  it('BUG C fixed: plannedTransactions is reachable — the panel writes it live', async () => {
+    await assertSucceeds(getDocs(collection(asAlice(), 'users', ALICE, 'plannedTransactions')));
+    await assertSucceeds(
+      setDoc(doc(asAlice(), 'users', ALICE, 'plannedTransactions', 'pt2'),
+        { title: 'Synthetic Planned', amount: 1, dueDate: '2026-01-01', status: 'pending' })
+    );
+  });
+
+  it('BUG C fixed: a planned transaction with a negative amount is rejected', async () => {
+    await assertFails(
+      setDoc(doc(asAlice(), 'users', ALICE, 'plannedTransactions', 'ptNeg'),
+        { title: 'Synthetic Planned', amount: -5, dueDate: '2026-01-01' })
+    );
+  });
+
+  it('BUG C fixed: goals and reminders are reachable (deleteAllUserData sweeps them)', async () => {
     for (const c of ['goals', 'reminders']) {
-      await assertFails(getDocs(collection(asAlice(), 'users', ALICE, c)));
-      await assertFails(setDoc(doc(asAlice(), 'users', ALICE, c, 'x'), { name: 'Synthetic' }));
+      await assertSucceeds(getDocs(collection(asAlice(), 'users', ALICE, c)));
+      await assertSucceeds(setDoc(doc(asAlice(), 'users', ALICE, c, 'x'), { name: 'Synthetic' }));
+    }
+  });
+
+  it('BUG C fixed: Bob still cannot touch any of the newly-opened collections', async () => {
+    // Opening a collection must not open it to everyone.
+    for (const c of ['plannedTransactions', 'goals', 'reminders']) {
+      await assertFails(getDocs(collection(asBob(), 'users', ALICE, c)));
+      await assertFails(setDoc(doc(asBob(), 'users', ALICE, c, 'x'), { name: 'Synthetic' }));
     }
   });
 
   it('an account create DOES succeed with the shape the rules demand', async () => {
-    // Proves the rest of the account rule is sane, and isolates BUG A to the key name.
-    await assertSucceeds(setDoc(doc(asAlice(), 'users', ALICE, 'accounts', 'accOk'), accountPerRules()));
+    await assertSucceeds(setDoc(doc(asAlice(), 'users', ALICE, 'accounts', 'accOk'), accountPerApp()));
   });
 });
 
@@ -543,28 +568,28 @@ describe('5b. account invariants', () => {
   const at = (id) => doc(asAlice(), 'users', ALICE, 'accounts', id);
 
   it('refuses a missing required key', async () => {
-    const { isActive, ...missing } = accountPerRules();
+    const { isActive, ...missing } = accountPerApp();
     await assertFails(setDoc(at('a1'), missing));
   });
 
   it('refuses an unknown type', async () => {
-    await assertFails(setDoc(at('a2'), accountPerRules({ type: 'crypto_wallet' })));
+    await assertFails(setDoc(at('a2'), accountPerApp({ type: 'crypto_wallet' })));
   });
 
   it('refuses an empty name', async () => {
-    await assertFails(setDoc(at('a3'), accountPerRules({ name: '' })));
+    await assertFails(setDoc(at('a3'), accountPerApp({ name: '' })));
   });
 
   it('refuses a name over 100 chars', async () => {
-    await assertFails(setDoc(at('a4'), accountPerRules({ name: 'S'.repeat(101) })));
+    await assertFails(setDoc(at('a4'), accountPerApp({ name: 'S'.repeat(101) })));
   });
 
   it('refuses a non-numeric balance', async () => {
-    await assertFails(setDoc(at('a5'), accountPerRules({ balance: '0' })));
+    await assertFails(setDoc(at('a5'), accountPerApp({ openingBalance: '0' })));
   });
 
   it('accepts a negative balance (debt is owed, not invalid)', async () => {
-    await assertSucceeds(setDoc(at('a6'), accountPerRules({ balance: -100 })));
+    await assertSucceeds(setDoc(at('a6'), accountPerApp({ openingBalance: -100 })));
   });
 });
 
@@ -617,12 +642,17 @@ describe('5d. transaction invariants', () => {
     await assertFails(setDoc(at('t6'), txn({ amount: '12.34' })));
   });
 
-  it('HOLE: update re-validates nothing — a negative amount lands via update', async () => {
-    // `allow update: if isOwner(userId)` only. The create-time amount >= 0 invariant,
-    // the type allowlist and the title bound are all bypassable in one write.
-    await assertSucceeds(
-      updateDoc(at('txnSynthA'), { amount: -999999, type: 'not_a_type', title: 'S'.repeat(5000) })
-    );
+  it('HOLE fixed: update re-validates — a negative amount cannot land via update', async () => {
+    // Was `allow update: if isOwner(userId)` alone, which made every create-time
+    // invariant bypassable in one write.
+    await assertFails(updateDoc(at('txnSynthA'), { amount: -999999 }));
+    await assertFails(updateDoc(at('txnSynthA'), { type: 'not_a_type' }));
+    await assertFails(updateDoc(at('txnSynthA'), { title: 'S'.repeat(5000) }));
+  });
+
+  it('HOLE fixed: a legitimate edit still succeeds', async () => {
+    // The point is to re-validate, not to freeze the document.
+    await assertSucceeds(updateDoc(at('txnSynthA'), { amount: 42.5, title: 'Renamed Synthetic' }));
   });
 });
 
@@ -654,10 +684,14 @@ describe('5e. mapping rule invariants', () => {
     await assertFails(setDoc(at('r6'), mappingRule({ enabled: 'yes' })));
   });
 
-  it('HOLE: update re-validates nothing — an empty needle lands via update', async () => {
-    await assertSucceeds(
+  it('HOLE fixed: update re-validates — an empty needle cannot land via update', async () => {
+    await assertFails(
       updateDoc(at('rule1'), { match: { field: 'merchant', op: 'contains', value: '' } })
     );
+  });
+
+  it('HOLE fixed: enable/disable, the real update the UI performs, still succeeds', async () => {
+    await assertSucceeds(updateDoc(at('rule1'), { enabled: false }));
   });
 });
 

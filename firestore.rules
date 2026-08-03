@@ -47,6 +47,36 @@ service cloud.firestore {
     function isValidNumber(field, min, max) {
       return field is number && field >= min && field <= max;
     }
+
+    // ---------------------------------------------------------------
+    // Shape checks shared by create AND update.
+    //
+    // These exist as functions because `allow update: if isOwner(userId)` alone made
+    // the create-time validation decorative: one updateDoc could set amount to
+    // -999999, type to garbage, or blank a mapping rule's needle — the empty needle
+    // that create explicitly guards against because it would rewrite every row the
+    // user owns. `links` already re-asserted its invariants on update; these did not.
+    // ---------------------------------------------------------------
+
+    function isValidTransactionShape(d) {
+      return d.keys().hasAll(['title', 'amount', 'type', 'category', 'paymentMethod', 'date']) &&
+        isValidString(d.title, 1, 200) &&
+        d.amount is number &&
+        // >= 0: real exports contain $0.00 rows (fee reversals, balance adjustments)
+        // and one rejected row fails its entire write batch.
+        d.amount >= 0 &&
+        d.type in ['expense', 'income', 'transfer'];
+    }
+
+    function isValidMappingRuleShape(d) {
+      return d.keys().hasAll(['match', 'set', 'createdAt', 'enabled']) &&
+        // Bracket-indexed, not dotted: `match` is a keyword in the rules language.
+        d['match']['field'] in ['merchant', 'title', 'description'] &&
+        d['match']['op'] in ['contains', 'equals'] &&
+        // Non-empty: an empty needle would match and rewrite every row the user owns.
+        isValidString(d['match']['value'], 1, 200) &&
+        d.enabled is bool;
+    }
     
     // =========================================
     // User Profile Rules
@@ -77,12 +107,20 @@ service cloud.firestore {
         // Users can read their own accounts
         allow read: if isOwner(userId);
         
-        // Users can create accounts with required fields
+        // Users can create accounts with required fields.
+        //
+        // `openingBalance`, NOT `balance`: PaymentAccount (src/types/index.ts) has no
+        // field called `balance` and never has. The old rule demanded one, so every
+        // hand-created account was denied — invisible in production only because the
+        // Python sync functions use the Admin SDK and bypass rules entirely.
+        //
+        // `personal_loan` is the fifth AccountType (onboarding creates one). Omitting
+        // it denied every loan account for the same silent reason.
         allow create: if isOwner(userId) &&
-          request.resource.data.keys().hasAll(['name', 'type', 'provider', 'balance', 'isActive']) &&
+          request.resource.data.keys().hasAll(['name', 'type', 'provider', 'openingBalance', 'isActive']) &&
           isValidString(request.resource.data.name, 1, 100) &&
-          request.resource.data.type in ['credit_card', 'debit_card', 'bank_account', 'cash'] &&
-          request.resource.data.balance is number;
+          request.resource.data.type in ['credit_card', 'debit_card', 'bank_account', 'cash', 'personal_loan'] &&
+          request.resource.data.openingBalance is number;
         
         // Users can update their accounts
         allow update: if isOwner(userId);
@@ -123,16 +161,11 @@ service cloud.firestore {
         
         // Users can create transactions with required fields
         allow create: if isOwner(userId) &&
-          request.resource.data.keys().hasAll(['title', 'amount', 'type', 'category', 'paymentMethod', 'date']) &&
-          isValidString(request.resource.data.title, 1, 200) &&
-          request.resource.data.amount is number &&
-          // >= 0: real exports contain $0.00 rows (fee reversals, balance adjustments)
-          // and one rejected row fails its entire write batch.
-          request.resource.data.amount >= 0 &&
-          request.resource.data.type in ['expense', 'income', 'transfer'];
-        
-        // Users can update their transactions
-        allow update: if isOwner(userId);
+          isValidTransactionShape(request.resource.data);
+
+        // Same shape on update — an edit cannot land what a create could not.
+        allow update: if isOwner(userId) &&
+          isValidTransactionShape(request.resource.data);
         
         // Users can delete their transactions
         allow delete: if isOwner(userId);
@@ -151,16 +184,12 @@ service cloud.firestore {
 
         // Users can create rules with a well-formed matcher
         allow create: if isOwner(userId) &&
-          request.resource.data.keys().hasAll(['match', 'set', 'createdAt', 'enabled']) &&
-          // Bracket-indexed, not dotted: `match` is a keyword in the rules language.
-          request.resource.data['match']['field'] in ['merchant', 'title', 'description'] &&
-          request.resource.data['match']['op'] in ['contains', 'equals'] &&
-          // Non-empty: an empty needle would match and rewrite every row the user owns.
-          isValidString(request.resource.data['match']['value'], 1, 200) &&
-          request.resource.data.enabled is bool;
+          isValidMappingRuleShape(request.resource.data);
 
-        // Users can update their rules (enable/disable)
-        allow update: if isOwner(userId);
+        // Enable/disable is an update, so the matcher must survive one. Without this
+        // a toggle could also blank the needle.
+        allow update: if isOwner(userId) &&
+          isValidMappingRuleShape(request.resource.data);
 
         // Users can delete their rules
         allow delete: if isOwner(userId);
@@ -309,6 +338,39 @@ service cloud.firestore {
       // =========================================
 
       match /budgets/{budgetId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // =========================================
+      // Planned Transactions, Goals, Reminders
+      // =========================================
+      // These had NO match block, so the deny-all at the bottom of this file caught
+      // them and the app's own writes were rejected in production. The planned-payments
+      // panel (src/components/PlannedPaymentsPanel.tsx) reads and writes
+      // plannedTransactions live; goals and reminders are reachable from
+      // deleteAllUserData, which would also have failed part-way.
+
+      match /plannedTransactions/{plannedId} {
+        allow read: if isOwner(userId);
+
+        // Carries money, so it gets the same shape treatment as a transaction:
+        // an amount that is a number and not negative, on create and on update.
+        allow create, update: if isOwner(userId) &&
+          request.resource.data.keys().hasAll(['title', 'amount', 'dueDate']) &&
+          isValidString(request.resource.data.title, 1, 200) &&
+          request.resource.data.amount is number &&
+          request.resource.data.amount >= 0;
+
+        allow delete: if isOwner(userId);
+      }
+
+      // Owner-only, no shape check — same posture as budgets above. Neither holds a
+      // value any calculation depends on; tighten if that changes.
+      match /goals/{goalId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /reminders/{reminderId} {
         allow read, write: if isOwner(userId);
       }
     }
