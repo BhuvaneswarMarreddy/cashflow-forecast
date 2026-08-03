@@ -1,0 +1,111 @@
+# Deploy pipeline (OPS-CD-001) — push to main, it ships.
+#
+# Replaces running `npm run deploy` from a laptop. The same gate runs every time:
+# deploy cannot start until validate.yml passes in full, and validate.yml is reused
+# here rather than copied so the two can never drift.
+#
+# ONE-TIME SETUP — two minutes, see docs/ci/DEPLOY-PIPELINE.md
+#   1. firebase login:ci          → prints a token
+#   2. GitHub → Settings → Secrets → Actions → new secret FIREBASE_TOKEN
+#
+# WHAT SHIPS
+#   functions:api  — aiChat, aiDecision, parseReceipt
+#   hosting        — the Next.js app and its SSR function
+#
+# WHAT DELIBERATELY DOES NOT
+#   firestore.rules — a bad ruleset locks you out of your own financial data and the
+#     rollback is a console visit, not a git revert. The 180-test emulator suite runs
+#     in validate.yml so drift is caught; publishing stays a human act.
+#     Change your mind: add `,firestore:rules` to --only below.
+#   functions:sync  — the Python codebase holding your bank sync credentials. Never
+#     deployed from CI; this is not the change that should prove it works.
+name: deploy
+
+on:
+  push:
+    branches: [main]
+    # Docs don't ship. Skips a ~9 minute run — worth it on a private repo's
+    # 2,000 free Actions minutes a month.
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deploy at a time. Two overlapping `firebase deploy` runs against one project is
+# how a half-published function meets a half-published hosting release. No
+# cancel-in-progress: a deploy that has started must be allowed to finish.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  # The gate. Reused, not duplicated — and called WITHOUT `secrets: inherit`, so the
+  # validation job still has no path to production.
+  validate:
+    uses: ./.github/workflows/validate.yml
+
+  deploy:
+    name: deploy
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # nodejs24 is what ssrmarreddycashflow runs. The web-frameworks integration
+          # picks the SSR runtime from the DEPLOYING machine's Node major, so this pin
+          # is what stops a laptop on a different version from silently moving it.
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --prefix functions
+
+      - name: Deploy functions and hosting
+        env:
+          # The CLI reads this itself — nothing to write to disk, nothing to clean up.
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          if [ -z "$FIREBASE_TOKEN" ]; then
+            echo "::error::FIREBASE_TOKEN secret is not set. Run 'firebase login:ci' and add it. See docs/ci/DEPLOY-PIPELINE.md."
+            exit 1
+          fi
+          npx firebase-tools deploy \
+            --only functions:api,hosting \
+            --project marreddy-cashflow \
+            --non-interactive \
+            --force
+
+      # Deploying is not the same as working. Hit the real site and go red if what just
+      # shipped does not serve — otherwise a green tick only means "uploaded".
+      - name: Smoke test the live site
+        run: |
+          FAILED=0
+          for path in / /dashboard /flow /accounts /forecast; do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "https://marreddy-cashflow.web.app$path")
+            echo "  $path -> $CODE"
+            [ "$CODE" = "200" ] || FAILED=1
+          done
+          # The AI proxy routes were removed for being unauthenticated (SEC-001). If one
+          # ever answers again, the deploy that resurrected it should go red.
+          for path in /api/ai/decision /api/parse-receipt; do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "https://marreddy-cashflow.web.app$path")
+            echo "  $path -> $CODE (expect 404)"
+            [ "$CODE" = "404" ] || FAILED=1
+          done
+          if [ "$FAILED" != "0" ]; then
+            echo "::error::Live smoke test failed. Roll back with: npx firebase-tools hosting:rollback"
+            exit 1
+          fi
+          echo "live smoke test: PASS"

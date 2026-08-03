@@ -8,12 +8,16 @@
 # excluded, and why.
 name: validate
 
-# pull_request + workflow_dispatch ONLY.
-# Deliberately NOT on push, NOT on tags, NOT on release — deployment stays manual
-# and local via `npm run deploy` (scripts/predeploy.sh + firebase deploy).
+# pull_request + workflow_dispatch, plus workflow_call so deploy.yml can gate on this
+# exact job rather than keeping a second copy of it that drifts.
+#
+# Still never deploys and still never reads a secret. `workflow_call` here does NOT
+# inherit secrets — the caller passes none, so this job cannot reach production even
+# when it runs as part of a deploy.
 on:
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 # Least privilege: the job reads the checkout and nothing else. No `secrets` context
 # is referenced anywhere in this file.
@@ -103,6 +107,17 @@ jobs:
 
       - name: Python SimpleFIN/sync tests
         run: python -m pytest functions-sync -q
+
+      # firestore.rules IS the access-control layer — the browser reads Firestore
+      # directly, with no API in front of it. Runs against the emulator on project id
+      # `demo-cashflow-rules`; the `demo-` prefix makes the Firebase tooling refuse a
+      # real backend, so this stays offline like everything else here.
+      #
+      # Worth the ~30s emulator download: the live rules were found to be an OLDER
+      # revision than this file, missing six collections the app writes, and nothing
+      # in the pipeline could have told anyone. Java is preinstalled on ubuntu-latest.
+      - name: Firestore rules tests
+        run: npm run test:rules
 
       # ---------------------------------------------------------------------
       # 4. Production build
