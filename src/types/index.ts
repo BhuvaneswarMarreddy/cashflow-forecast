@@ -264,6 +264,18 @@ export const FINANCIAL_MEANINGS = [
   'shared_expense_reimbursement',
   'receivable_repayment',
   'sale_proceeds',
+  /**
+   * MAP-002, added ADDITIVELY. Borrowed money arriving — a loan disbursement.
+   *
+   * It needs its own value because it is the only credit that CREATES A LIABILITY. A
+   * refund gives back money already spent, a gift is kept, a sale converts an asset;
+   * loan proceeds arrive with an obligation to send them back, so treating them as
+   * either income or "other credit" tells the owner something untrue about their
+   * position. `countsAsEarnedIncome()` stays false for it (borrowing is not earning) and
+   * `personalCostSign()` is 0 — the borrowing itself is neither a cost nor a cost
+   * returning; the repayments that follow are the cost, and they are their own rows.
+   */
+  'loan_proceeds',
   'gift_or_personal_transfer',
   'other_non_income_credit',
   'unknown_inflow',

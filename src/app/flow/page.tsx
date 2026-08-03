@@ -162,7 +162,7 @@ interface UndoRecord {
 export default function FlowPage() {
   const { isAuthenticated, isLoading: authLoading, user } = useAuth();
   const { transactions, rules, addRule } = useTransactions();
-  const { profile, reconcileAccount, incomeContext, setInflowReview } = useUserProfile();
+  const { profile, reconcileAccount, incomeContext, setInflowReview, addIncomeSource } = useUserProfile();
 
   const [reconcileFor, setReconcileFor] = useState<{ accountId: string; name: string; derived: number } | null>(null);
   const router = useRouter();
@@ -819,11 +819,14 @@ export default function FlowPage() {
   const groups: MappingGroup[] = useMemo(
     () => (recoveryLoaded
       ? buildMappingGroups({
+          // MAP-002 — FIN-REFUND-001's run, computed above for the recovery queue and
+          // handed over rather than run a second time. One refund matcher, one result.
           transactions, accounts, inflowItems, unpairedLegIds, rules,
+          refundCandidates: refundRun?.candidates ?? [],
           income: incomeContext, todayISO,
         })
       : []),
-    [recoveryLoaded, transactions, accounts, inflowItems, unpairedLegIds, rules, incomeContext, todayISO]
+    [recoveryLoaded, transactions, accounts, inflowItems, unpairedLegIds, rules, incomeContext, todayISO, refundRun]
   );
 
   const queueCtx: QueueContext = useMemo(
@@ -1108,6 +1111,12 @@ export default function FlowPage() {
         );
       }
       if (decision.rule) void addRule(decision.rule).catch(() => {});
+      // MAP-002 — the derived income source, present only when the owner ticked the offer.
+      if (decision.incomeSourceOffer) {
+        void addIncomeSource(decision.incomeSourceOffer).catch(() =>
+          setAnnouncement('That income source could not be saved. Please try again.')
+        );
+      }
 
       // Counts, scope and confidence only — never a merchant, a counterparty or an amount.
       emit({
@@ -1124,6 +1133,8 @@ export default function FlowPage() {
           suggestionEvidence: group.suggestion?.evidence ?? 'none',
           suggestionConfidence: group.suggestion?.confidence ?? 0,
           ruleCreated: !!decision.rule,
+          incomeSourceCreated: !!decision.incomeSourceOffer,
+          findingCount: group.findings.length,
         },
       });
       if (decision.rule) {
@@ -1146,7 +1157,7 @@ export default function FlowPage() {
       );
       setSelectedKey(null);
     },
-    [setInflowReview, addRule]
+    [setInflowReview, addRule, addIncomeSource]
   );
 
   const reviewPanelProps = {

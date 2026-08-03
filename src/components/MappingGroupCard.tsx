@@ -44,6 +44,9 @@ export default function MappingGroupCard({
   const [meaning, setMeaning] = useState<string>('');
   const [scope, setScope] = useState<GroupScope>('only_this_group');
   const [acknowledged, setAcknowledged] = useState(false);
+  // MAP-002 — OFF by default. A derived income source is a proposal until the owner ticks
+  // it, and an unticked box is the difference between suggesting and applying.
+  const [createSource, setCreateSource] = useState(false);
 
   const scopes = useMemo(() => groupScopes(group), [group]);
   const set = meaning ? ruleSetForMeaning(meaning as never) : null;
@@ -59,6 +62,7 @@ export default function MappingGroupCard({
     [group, rule, transactions, accounts]
   );
 
+  const offer = group.suggestion?.incomeSourceOffer;
   const blocked = !meaning || (!!preview?.needsExtraConfirmation && !acknowledged);
   const spanLabel = group.firstDate === group.lastDate ? group.firstDate : `${group.firstDate} to ${group.lastDate}`;
 
@@ -97,6 +101,34 @@ export default function MappingGroupCard({
         </section>
       )}
 
+      {/* MAP-002 — what the ledger says ABOUT these rows. There is nothing to confirm
+          here, so there is no button: it is a fact, not a question. */}
+      {group.findings.length > 0 && (
+        <section aria-label="What your data also shows" className="rounded-lg bg-[var(--background-tertiary)] p-3 text-sm space-y-1">
+          {group.findings.map((f) => (
+            <p key={f} className="text-[var(--foreground-secondary)]">{f}.</p>
+          ))}
+        </section>
+      )}
+
+      {/* The pre-filled income source, offered only once the owner has chosen the meaning
+          it belongs to. Every field below is read off these rows. */}
+      {offer && meaning === group.suggestion?.meaning && (
+        <section aria-label="Create an income source from these rows" className="rounded-lg bg-[var(--background-tertiary)] p-3 text-sm space-y-1">
+          <label className="flex items-start gap-2 min-h-[44px] cursor-pointer">
+            <input type="checkbox" checked={createSource} onChange={(e) => setCreateSource(e.target.checked)} />
+            <span>
+              Also save &ldquo;{offer.name}&rdquo; as an income source — {money(Math.round(offer.amount * 100))}{' '}
+              {offer.frequency}
+              {offer.endDate
+                ? `, ending ${offer.endDate}, because nothing has arrived from this payer since then`
+                : ', still running'}
+              .
+            </span>
+          </label>
+        </section>
+      )}
+
       <fieldset className="space-y-1">
         <legend className="text-sm text-[var(--foreground-secondary)]">
           What are these {group.rowCount === 1 ? 'row' : 'rows'}?
@@ -108,7 +140,7 @@ export default function MappingGroupCard({
               name={`meaning-${group.key}`}
               value={m.value}
               checked={meaning === m.value}
-              onChange={() => { setMeaning(m.value); setAcknowledged(false); }}
+              onChange={() => { setMeaning(m.value); setAcknowledged(false); setCreateSource(false); }}
             />
             {m.label}
           </label>
@@ -188,6 +220,11 @@ export default function MappingGroupCard({
                 meaning === group.suggestion?.meaning ? group.suggestion?.incomeSourceId : undefined,
               scope: rule ? scope : 'only_this_group',
               ...(rule ? { rule } : {}),
+              // Only when the box is ticked AND the answer is the one the offer was
+              // derived for. Deriving a source and creating one are two different events.
+              ...(offer && createSource && meaning === group.suggestion?.meaning
+                ? { incomeSourceOffer: offer }
+                : {}),
             })
           }
         >

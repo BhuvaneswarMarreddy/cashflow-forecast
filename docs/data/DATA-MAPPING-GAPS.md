@@ -41,6 +41,10 @@ this repo's own selector produces collapse to **50 groups**. In the shipped impa
 by row count alone it is **16**. Every row still needs an answer eventually — but it is now
 50 questions, not 229.
 
+**And 32 of those 50 questions now arrive with an answer.** MAP-002 added four derived
+evidence detectors (§10). Measured the same way: suggestions went from **5 of 50 to 32 of
+50** for unknown inflows, and **17 of 80 to 46 of 80** across all groups.
+
 ---
 
 ## 2. Unpaired transfer legs — 103 rows
@@ -144,6 +148,11 @@ Ranked by how much of the picture each unlocks.
 
 | Gap | Closed by | Commit |
 |---|---|---|
+| `same_day_opposite_leg` called SALARY an internal transfer at 0.9 | both legs must now be accounts the owner HOLDS (the rung never read the account list at all), and a payer who pays on a cadence is refused outright | MAP-002 |
+| 45 of 50 unknown-inflow groups said "no evidence, you decide" | four derived detectors — refund proposals, payroll shape, loan proceeds, owned-counterparty transfer; 5/50 -> **32/50** | MAP-002 |
+| The owner had to GUESS when an income stream ended | `endDate` derived from the last occurrence of a stopped series, using `detectRecurring()`'s own 1.5-cycle staleness rule against the ledger's last day | MAP-002 |
+| Nothing told the owner their import had holes in it | missing-period findings on a detected payer series — informational, no button, nothing to confirm | MAP-002 |
+| Borrowed money had no meaning and read as a windfall | `loan_proceeds` added additively; `countsAsEarnedIncome` false, `personalCostSign` 0 | MAP-002 |
 | 205 + 103 individual answers was not a workable ask | pattern grouping — 332 rows into 80 groups, one decision each | MAP-001 |
 | The queue had no terminal "I can't classify this" | `markGroupUnknown()` -> `dismissed` + `group_marked_unknown` on the existing review record; suppresses the pattern, not just the row | MAP-001 |
 | A rule could not be scoped to a direction, an account or future rows | three OPTIONAL fields on `MappingRule.match` (`direction`, `accountId`, `onOrAfter`); every pre-existing rule unchanged | MAP-001 |
@@ -188,9 +197,58 @@ Ranked by how much of the picture each unlocks.
 
 ## 9. Still open
 
+- **18 of the 50 unknown-inflow groups still have no evidence at all**, and that is the
+  correct answer for them: two of the larger ones have a median gap inside a `BANDS` band
+  but fail `detectRecurring()`'s 60%-in-band rule, so their payments are irregular rather
+  than cadenced. Irregular is not a cadence, and a wrong suggestion is worse than none.
+- **A government/tax-refund detector is NOT possible without a name list** and has been
+  left out deliberately. An annual cadence needs three occurrences under this app's own
+  rule set — three years of data, where the export spans about two — and even then nothing
+  separates a tax refund from an annual bonus or an insurance dividend except the agency's
+  name. See MAP-002-COMPLETION §2.6.
 - **The 39 smaller categories in the spending residual** are named but not eliminated (§4).
   MAP-001 covers unknown INFLOWS and unpaired LEGS; vague-category *spending* rows
   (measured: 55 rows, 52 of them spending, in 23 merchant groups) are not in the queue and
   would be a straightforward third `UnmappedKind` on the same machinery.
 - **Rules still have no management surface** (§5): MAP-001 creates them with a preview but
   they still cannot be listed, edited, reordered or disabled after the fact.
+
+---
+
+## 10. MAP-002 — the evidence the ledger already carried
+
+Every number here is measured on the owner's real export, read-only, 2026-08-02. No
+merchant, amount, description or account identifier is recorded.
+
+**The measure of the task:** unknown-inflow groups carrying a suggestion went from
+**5 of 50 to 32 of 50**; all 80 groups, **17 to 46**.
+
+| Evidence | Inflow groups | Leg groups | What it reads |
+|---|---|---|---|
+| `refund_candidate` | 25 | 3 | `generateRefundCandidates()`'s own proposals and score — no second matcher |
+| `payroll_shape` | 3 | 0 | one payer · `detectRecurring()`'s cadence rules · a deposit account · 2+ months |
+| `same_day_opposite_leg` | 3 | 11 | equal, opposite, same day, **both accounts owned**, payer not cadenced |
+| `loan_proceeds` | 1 | 0 | an owned loan account of the same name, or later cadenced repayments ≥ 3× smaller |
+| none | 18 | 16 | the honest answer |
+
+**The three payer series found**, with the end date each one derives:
+
+| rows | window | cadence | endDate | missing periods |
+|---|---|---|---|---|
+| 18 | 2024-05-31 → 2025-05-30 | monthly | **2025-05-30** | 1 (`2025-01`) |
+| 21 | 2025-06-19 → 2026-03-06 | biweekly | 2026-03-06 | 1 (`2026-01`) |
+| 7 | 2026-04-07 → 2026-07-07 | biweekly | *still running* | 0 |
+
+The first is the employer the owner remembered as ending *"about April 2025"*.
+
+**Two measurements that corrected the hand analysis.**
+
+- The hand analysis read the 2024→2025 employer as semi-monthly with ~5 missing paychecks.
+  Measured over the whole ledger, that payer has **18 rows on 14 unique days, median gap
+  29 days** — monthly, with exactly **1** absent period, `2025-01` (one of the three months
+  the hand analysis flagged). The semi-monthly payer with 21 unmapped rows is a
+  **different, later employer**.
+- `detectRecurring()`'s 25%-of-median amount rule **rejects real payroll**: the owner's
+  salary series scatters **44%** around its median, because small extra payments from the
+  same employer share the merchant group. The rule survives as a confidence signal, not a
+  gate — see MAP-002-COMPLETION §2.1.

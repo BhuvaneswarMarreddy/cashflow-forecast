@@ -141,7 +141,15 @@ describe('M1 grouping collapses many rows into one decision', () => {
 
 describe('M2 suggestions come from evidence already in the ledger', () => {
   it('suggests nothing when the ledger holds no evidence at all', () => {
-    const g = buildMappingGroups({ transactions: deposits(3), accounts: ACCOUNTS })[0];
+    // MAP-002 note: three deposits a month apart are no longer "no evidence" — that is a
+    // payer series and the app now says so. Evidence-free means what it says: irregular
+    // dates, unrelated amounts, no counterpart, no rule and no prior answer.
+    const rows = [
+      tx({ date: '2025-01-03', amount: 37 }),
+      tx({ date: '2025-02-19', amount: 900 }),
+      tx({ date: '2025-08-27', amount: 12 }),
+    ];
+    const g = buildMappingGroups({ transactions: rows, accounts: ACCOUNTS })[0];
     expect(g.suggestion).toBeNull();
   });
 
@@ -188,12 +196,19 @@ describe('M2 suggestions come from evidence already in the ledger', () => {
       id: 's1', name: 'Contract Retainer', amount: 2000, frequency: 'monthly' as const,
       isActive: true, userApproved: true,
     }];
-    // Without the source: no suggestion. With it: earned income, explainable.
-    expect(buildMappingGroups({ transactions: rows, accounts: ACCOUNTS })[0].suggestion).toBeNull();
+    // MAP-002 changed the "without" half deliberately. Three equal monthly deposits from
+    // one payer into a checking account ARE evidence, so the app no longer stays silent —
+    // it says "payroll shape" and scores it low, because a shape is inference. What has
+    // NOT changed is which evidence wins: the source the owner approved outranks it.
+    const withoutSource = buildMappingGroups({ transactions: rows, accounts: ACCOUNTS })[0];
+    expect(withoutSource.suggestion?.evidence).toBe('payroll_shape');
+    expect(withoutSource.suggestion!.confidence).toBeLessThan(0.9);
+
     const g = buildMappingGroups({ transactions: rows, accounts: ACCOUNTS, income: { sources, reviews: {} } })[0];
     expect(g.suggestion?.evidence).toBe('approved_income_source');
     expect(g.suggestion?.meaning).toBe('earned_income');
     expect(g.suggestion?.why).toMatch(/monthly/i);
+    expect(g.suggestion!.confidence).toBeGreaterThan(withoutSource.suggestion!.confidence);
   });
 
   it('suggests an internal transfer when the opposite leg is in another owned account that day', () => {
@@ -227,7 +242,9 @@ describe('M2 suggestions come from evidence already in the ledger', () => {
       'APPLE', 'GOOGLE', 'MICROSOFT', 'ADOBE', 'DROPBOX', 'WALMART', 'TARGET', 'COSTCO',
       'STARBUCKS', 'UBER', 'LYFT', 'VENMO', 'PAYPAL', 'CHASE', 'WELLS FARGO', 'ANTHROPIC',
     ];
-    for (const vendor of vendors) expect(upper).not.toContain(vendor);
+    // Word boundaries, not substrings: "PURCHASE" contains "CHASE" and "FIRST" contains
+    // "IRS", and a test that cannot tell a bank from a purchase is a test nobody trusts.
+    for (const vendor of vendors) expect(upper).not.toMatch(new RegExp(`\\b${vendor}\\b`));
     expect(source).not.toMatch(/KNOWN_MERCHANTS|VENDOR_LIST|MERCHANT_REGISTRY|MERCHANT_CATALOGUE|SEED_MERCHANTS/);
     // Every category a suggestion can propose comes from a row or a rule, never a literal.
     expect(source).not.toMatch(/category:\s*'(?!\$)/);
