@@ -8,6 +8,7 @@ import * as path from 'path';
 import * as XLSX from 'xlsx';
 import { Transaction, PaymentAccount } from '@/types';
 import { buildFlowGraph, detectRecurring, toCents } from '@/lib/flows';
+import { classifyTransaction } from '@/lib/classify';
 
 const DIR = path.join(process.cwd(), 'transactionsbyaccount');
 const maybe = fs.existsSync(DIR) ? describe : describe.skip;
@@ -146,6 +147,25 @@ maybe('audit replay over the real CSVs', () => {
       .filter((n) => n.id.startsWith('person-out:') && n.id !== 'person-out:REMITLY')
       .map((n) => linkSum(n.id, 'target'));
     expect(peopleOut.filter((c) => Math.abs(c - toCents(18612)) <= 100)).toHaveLength(1);
+  });
+
+  it('the Flow page and the chat answer "what did I spend" with the SAME number', () => {
+    // They disagreed on identical rows — /flow summed only cat: links and lost the
+    // 6 expense rows paid to named people ($6,893.25 of 2026), which the Sankey
+    // routes by recipient. The owner saw $46,447.36 on one surface and $53,340.61 on
+    // another and had no way to tell which was true. Pinned per year, so a new lane
+    // that swallows spending fails here rather than in a screenshot.
+    for (const year of ['2024', '2025', '2026']) {
+      const rows = transactions.filter((t) => t.date.startsWith(year));
+      const g2 = buildFlowGraph(rows, accounts);
+      const flowSpending =
+        g2.links.filter((l) => l.target.startsWith('cat:')).reduce((s, l) => s + l.cents, 0)
+        + g2.personExpenseCents;
+      const classifierSpending = rows
+        .filter((t) => classifyTransaction(t, accounts) === 'expense')
+        .reduce((s, t) => s + toCents(t.amount), 0);
+      expect({ year, cents: flowSpending }).toEqual({ year, cents: classifierSpending });
+    }
   });
 
   it('reproduces the audited recurring anchors', () => {

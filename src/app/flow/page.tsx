@@ -540,10 +540,21 @@ export default function FlowPage() {
       graph.links.filter(pred).reduce((s, l) => s + l.cents, 0);
     const moneyIn = sum((l) => l.source.startsWith('inc:') || l.source.startsWith('person-in:'));
     const moneyBack = sum((l) => MONEY_BACK_LANE_IDS.includes(l.source));
-    // `cat:` links already carry the CONFIRMED netting the graph applied.
-    const spending = sum((l) => l.target.startsWith('cat:'));
+    // `cat:` links already carry the CONFIRMED netting the graph applied. Money paid
+    // to a NAMED PERSON is routed by recipient and never reaches a cat: node, so
+    // summing cat: alone under-reported spending and made this page disagree with
+    // every other surface: /flow said $46,447.36 for 2026 where the chat said
+    // $53,340.61, on identical rows. Adding the person-out rows the classifier calls
+    // an expense closes it exactly — the two figures now reconcile to the cent.
+    const spending = sum((l) => l.target.startsWith('cat:')) + graph.personExpenseCents;
     const toPeople = sum((l) => l.target.startsWith('person-out:'));
-    return { moneyIn, spending, toPeople, moneyBack, netted: graph.nettedRefundCents };
+    return {
+      moneyIn, spending, toPeople, moneyBack,
+      netted: graph.nettedRefundCents,
+      // The overlap is real and stated rather than hidden: these rows are a cost AND
+      // they went to a person, so they belong in both tiles.
+      personExpense: graph.personExpenseCents,
+    };
   })();
 
   // Sink buckets (nodes money ends at) — feed the treemap and the waterfall.
@@ -1211,16 +1222,29 @@ export default function FlowPage() {
             {
               label: 'Spent on living',
               cents: story.spending,
-              sub: story.netted > 0
-                ? `all categories, net of ${money(story.netted)} you confirmed as refunded`
-                : 'all categories, gross — nothing netted until you confirm a refund',
+              sub: [
+                'all categories',
+                story.personExpense > 0 ? `plus ${money(story.personExpense)} paid to people` : null,
+                story.netted > 0
+                  ? `net of ${money(story.netted)} you confirmed as refunded`
+                  : 'gross — nothing netted until you confirm a refund',
+              ].filter(Boolean).join(', '),
             },
             {
               label: 'Money back (not income)',
               cents: story.moneyBack,
               sub: 'refunds, cashback and card credits waiting to be matched to a purchase',
             },
-            { label: 'Sent to people & family', cents: story.toPeople, sub: 'Zelle + Remitly to India' },
+            {
+              label: 'Sent to people & family',
+              cents: story.toPeople,
+              // Deliberately overlapping with "Spent on living": a row can be both a
+              // cost and a payment to a person. Saying so beats two tiles that look
+              // additive and are not.
+              sub: story.personExpense > 0
+                ? `Zelle + Remitly — ${money(story.personExpense)} of this is also counted in spending`
+                : 'Zelle + Remitly to India — money moved, not yet classified as a cost',
+            },
             { label: gapTotal > 0 ? '⚠ Not yet in the data' : 'Data complete', cents: gapTotal, sub: gapTotal > 0 ? 'export gaps — shown in the chart, being re-exported' : 'every dollar accounted for' },
           ].map((t) => (
             <div key={t.label} className="rounded-xl border border-[var(--border-color)] bg-[var(--background-secondary)] p-4">

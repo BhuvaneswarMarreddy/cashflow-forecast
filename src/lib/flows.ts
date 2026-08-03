@@ -70,6 +70,17 @@ export interface FlowGraph {
    * toggle does exactly that), or read the rows in the drill-down, which never change.
    */
   nettedRefundCents: number;
+  /**
+   * Money in the `person-out:` lanes that the classifier calls an EXPENSE — a real
+   * cost that happens to be paid to a named person rather than a merchant.
+   *
+   * The Sankey routes those rows by recipient, so they never reach a `cat:` node.
+   * A page summing only `cat:` links therefore under-reports spending: measured on
+   * the owner's 2026 rows, 6 of 559 expense rows worth $6,893.25 were invisible,
+   * which is exactly why "what did I spend" answered $46,447.36 on /flow and
+   * $53,340.61 in chat. cat-links + this === the classifier's expense total.
+   */
+  personExpenseCents: number;
 }
 
 const TOP_PEOPLE = 5;
@@ -413,12 +424,28 @@ export function buildFlowGraph(
     },
   });
 
+  // Rows routed to a person by recipient that are nonetheless a COST. Counted here,
+  // once, from the same node map the drill-down uses — so the figure and the rows
+  // behind it can never disagree. Deduped: a row can tag more than one person node.
+  const personExpenseIds = new Set<string>();
+  for (const [nodeId, ids] of nodeTxns) {
+    if (!nodeId.startsWith('person-out:')) continue;
+    for (const id of ids) personExpenseIds.add(id);
+  }
+  const txnById = new Map(transactions.map((t) => [t.id, t]));
+  let personExpenseCents = 0;
+  for (const id of personExpenseIds) {
+    const t = txnById.get(id);
+    if (t && classifyTransaction(t, accounts) === 'expense') personExpenseCents += toCents(t.amount);
+  }
+
   return {
     nodes: [...nodes.values()].filter((n) => used.has(n.id)),
     links: [...links.values()],
     reconciliation, between,
     nodeTxnIds: Object.fromEntries(nodeTxns),
     nettedRefundCents,
+    personExpenseCents,
   };
 }
 
