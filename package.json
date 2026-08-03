@@ -10,7 +10,7 @@
     "test": "jest",
     "test:ci": "jest --ci --testPathIgnorePatterns \"/node_modules/\" \"/\\.next/\" \"/functions/\" \"/e2e/\" \"/src/__tests__/flows\\.integration\\.test\\.ts$\"",
     "test:watch": "jest --watch",
-    "test:rules": "PATH=\"/opt/homebrew/opt/openjdk/bin:$PATH\" npx --yes firebase-tools emulators:exec --only firestore --project demo-cashflow-rules \"node --test rules-tests/firestore-rules.mjs\"",
+    "test:rules": "PATH=\"/opt/homebrew/opt/openjdk/bin:$PATH\" FIREBASE_CLI_EXPERIMENTS=webframeworks npx --yes firebase-tools emulators:exec --only firestore --project demo-cashflow-rules \"node --test rules-tests/firestore-rules.mjs\"",
     "test:coverage": "jest --coverage",
     "deploy": "sh scripts/predeploy.sh && firebase deploy --only hosting",
     "test:e2e": "playwright test",
