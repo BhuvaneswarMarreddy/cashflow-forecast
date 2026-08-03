@@ -15,6 +15,8 @@ import {
   ruleSetForMeaning,
 } from '@/lib/mapping-suggestions';
 import { ACTION_BTN, maskedAccount } from '@/lib/review-queue';
+import { askAbout, askAboutUnmapped } from '@/lib/ask';
+import { Sparkles } from 'lucide-react';
 
 const money = formatMoneyCents;
 
@@ -100,6 +102,19 @@ export default function MappingGroupCard({
           )}
         </section>
       )}
+
+      {/* Talk it through. Carries the app's own evidence, or its absence — a group
+          with nothing behind it asks the owner a question instead of guessing. */}
+      <button
+        type="button"
+        onClick={() => askAbout(askAboutUnmapped(
+          group.label, group.rowCount, group.totalCents, group.suggestion?.why
+        ))}
+        className="self-start min-h-[36px] flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border-color)] text-xs font-medium text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)] transition-colors"
+      >
+        <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
+        {group.suggestion ? 'Discuss this' : 'Help me classify this'}
+      </button>
 
       {/* MAP-002 — what the ledger says ABOUT these rows. There is nothing to confirm
           here, so there is no button: it is a fact, not a question. */}

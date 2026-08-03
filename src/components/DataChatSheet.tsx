@@ -1,8 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Send, Sparkles } from 'lucide-react';
-import Sheet from '@/components/Sheet';
+import { Loader2, Send, Sparkles, X } from 'lucide-react';
 import { aiChat, callableErrorMessage } from '@/lib/callables';
 import { parseChatAction, buildChatContext, explanationOf } from '@/lib/chat-actions';
 import { describeRule, rulePreview, MappingRule, NewMappingRule } from '@/lib/mapping-rules';
@@ -37,7 +36,12 @@ interface ChatMessage {
   status?: 'pending' | 'applied';
 }
 
-export default function DataChatSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+export default function DataChatSheet({ open, onClose, seed }: {
+  open: boolean;
+  onClose: () => void;
+  /** A question to ask on open — set when the owner clicked a specific node or group. */
+  seed?: string;
+}) {
   const { transactions, addRule } = useTransactions();
   const { profile } = useUserProfile();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -56,6 +60,27 @@ export default function DataChatSheet({ open, onClose }: { open: boolean; onClos
   useEffect(() => {
     endRef.current?.scrollIntoView?.({ block: 'end' });
   }, [messages, busy]);
+
+  // <dialog> gave Esc for free; a docked panel has to ask.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  // A seeded question — the owner clicked a specific thing (a Sankey node, an
+  // unmapped group) and the caller phrased the question for them. Asked once per
+  // distinct seed, so re-opening the panel does not re-ask and burn a call.
+  const askedSeed = useRef<string | null>(null);
+  useEffect(() => {
+    if (!open || !seed || askedSeed.current === seed) return;
+    askedSeed.current = seed;
+    setMessages([]);
+    void send(seed);
+    // `send` is recreated every render; depending on it would re-fire the seed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, seed]);
 
   const money = (n: number) => formatMoney(n, profile?.currency);
   const mk = (role: ChatMessage['role'], text: string, extra?: Partial<ChatMessage>): ChatMessage =>
@@ -109,16 +134,36 @@ export default function DataChatSheet({ open, onClose }: { open: boolean; onClos
   const dismiss = (id: string) =>
     setMessages((prev) => prev.map((x) => (x.id === id ? { ...x, rule: undefined, status: undefined } : x)));
 
+  if (!open) return null;
+
   return (
-    // max-h + min-h-0 on the list is what makes the input row stay pinned while
-    // only the transcript scrolls (the dialog itself is height:auto).
-    <Sheet open={open} onClose={onClose} ariaLabel="Ask about your data" maxWidth="42rem" className="flex flex-col max-h-[75vh] min-h-[22rem] p-4 sm:p-6 gap-3">
-      <div className="flex items-center gap-3 shrink-0">
-        <Sparkles className="w-5 h-5 text-[var(--accent-primary)]" aria-hidden="true" />
-        <div>
+    // Docked, NOT a modal: the owner keeps reading the page they asked about while
+    // the answer arrives, so this deliberately does not use Sheet's <dialog>. No
+    // focus trap and no body-scroll lock for the same reason — both would fight the
+    // "keep working alongside it" behaviour. Esc still closes (handler above).
+    // Right rail >=640px, bottom sheet below it.
+    <aside
+      role="complementary"
+      aria-label="Ask about your data"
+      className="fixed z-40 flex flex-col bg-[var(--background-secondary)] border-[var(--border-color)] shadow-2xl
+                 inset-x-0 bottom-0 h-[75vh] border-t rounded-t-2xl
+                 sm:inset-y-0 sm:left-auto sm:right-0 sm:h-full sm:w-[26rem] sm:rounded-t-none sm:border-t-0 sm:border-l
+                 p-4 sm:p-5 gap-3"
+    >
+      <div className="flex items-start gap-3 shrink-0">
+        <Sparkles className="w-5 h-5 text-[var(--accent-primary)] mt-0.5" aria-hidden="true" />
+        <div className="flex-1 min-w-0">
           <h2 className="text-lg font-semibold text-[var(--foreground)]">Ask about your data</h2>
           <p className="text-xs text-[var(--foreground-muted)]">Ask a question, or say how something should be categorised.</p>
         </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close chat"
+          className="shrink-0 w-11 h-11 -mt-1 -mr-1 flex items-center justify-center rounded-lg text-[var(--foreground-muted)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)] transition-colors"
+        >
+          <X className="w-5 h-5" aria-hidden="true" />
+        </button>
       </div>
 
       <div role="log" aria-live="polite" aria-label="Conversation" className="flex-1 min-h-0 overflow-y-auto space-y-3 pr-1">
@@ -185,7 +230,7 @@ export default function DataChatSheet({ open, onClose }: { open: boolean; onClos
           {busy ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Send className="w-4 h-4" aria-hidden="true" />}
         </button>
       </div>
-    </Sheet>
+    </aside>
   );
 }
 

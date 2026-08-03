@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import LogoMark from '@/components/LogoMark';
@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { NAV_ITEMS } from '@/lib/nav';
 import DataChatSheet from '@/components/DataChatSheet';
+import { onAsk } from '@/lib/ask';
 
 export default function Navbar() {
   const { user, logout } = useAuth();
@@ -31,6 +32,13 @@ export default function Navbar() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
+  // Set when something on the page asked on the owner's behalf; cleared when they
+  // open the chat themselves, so the old question is not re-asked.
+  const [chatSeed, setChatSeed] = useState<string | undefined>(undefined);
+
+  // Anything on the page can ask on the owner's behalf — a Sankey node, an unmapped
+  // group. The chat panel lives here, so the listener does too.
+  useEffect(() => onAsk((question) => { setChatSeed(question); setIsChatOpen(true); }), []);
 
   // Single source of truth (src/lib/nav.ts) — BottomNav consumes the same list.
   const navItems = NAV_ITEMS;
@@ -97,7 +105,7 @@ export default function Navbar() {
           {/* Right Side - User Menu */}
           <div className="hidden md:flex items-center gap-4">
             <button
-              onClick={() => setIsChatOpen(true)}
+              onClick={() => { setChatSeed(undefined); setIsChatOpen(true); }}
               aria-label="Ask about your data"
               className="w-11 h-11 flex items-center justify-center rounded-lg text-[var(--foreground-secondary)] hover:text-[var(--accent-primary)] hover:bg-[var(--background-tertiary)] transition-colors"
             >
@@ -185,7 +193,7 @@ export default function Navbar() {
           {/* Mobile: chat + menu */}
           <div className="md:hidden flex items-center gap-1">
             <button
-              onClick={() => setIsChatOpen(true)}
+              onClick={() => { setChatSeed(undefined); setIsChatOpen(true); }}
               aria-label="Ask about your data"
               className="w-11 h-11 flex items-center justify-center rounded-lg text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]"
             >
@@ -263,7 +271,7 @@ export default function Navbar() {
         </div>
       )}
 
-      <DataChatSheet open={isChatOpen} onClose={() => setIsChatOpen(false)} />
+      <DataChatSheet open={isChatOpen} seed={chatSeed} onClose={() => setIsChatOpen(false)} />
     </nav>
   );
 }

@@ -1,12 +1,15 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { SECONDARY_ITEMS } from '@/lib/nav';
+import { askAbout, askAboutNode } from '@/lib/ask';
 import {
   ResponsiveContainer, Sankey, Tooltip, LineChart, Line, XAxis, YAxis, CartesianGrid,
   Treemap, BarChart, Bar, Cell,
 } from 'recharts';
-import { Maximize2, Minimize2 } from 'lucide-react';
+import { Maximize2, Minimize2, Sparkles } from 'lucide-react';
 import Navbar from '@/components/Navbar';
 import ReconcileSheet from '@/components/ReconcileSheet';
 import RecoveryReviewPanel from '@/components/RecoveryReviewPanel';
@@ -1323,8 +1326,21 @@ export default function FlowPage() {
             {/* Drill-down: the actual transactions behind the pinned node */}
             {pinnedTxns && pinnedTxns.length > 0 && (
               <div className="mt-3 rounded-xl border border-[var(--accent-primary)]/40 overflow-hidden">
-                <div className="px-3 py-2 bg-[var(--background-tertiary)] text-sm font-medium text-[var(--foreground)]">
-                  {pinnedTxns.length} transaction{pinnedTxns.length > 1 ? 's' : ''} behind “{effectivePin}”
+                <div className="px-3 py-2 bg-[var(--background-tertiary)] flex items-center gap-3 flex-wrap">
+                  <span className="text-sm font-medium text-[var(--foreground)] flex-1 min-w-0">
+                    {pinnedTxns.length} transaction{pinnedTxns.length > 1 ? 's' : ''} behind “{effectivePin}”
+                  </span>
+                  {/* The owner is already looking at these rows — asking about them
+                      should not mean retyping what the app can see. The question is
+                      phrased from the pinned node and its own totals. */}
+                  <button
+                    type="button"
+                    onClick={() => askAbout(askAboutNode(effectivePin!, pinnedTxns))}
+                    className="shrink-0 min-h-[36px] flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--background-secondary)] text-xs font-medium text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background)] transition-colors"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
+                    Ask about this
+                  </button>
                 </div>
                 <div className="max-h-64 overflow-y-auto">
                   <table className="w-full text-sm">
@@ -1590,6 +1606,24 @@ export default function FlowPage() {
             </ResponsiveContainer>
           </div>
         </section>
+
+        {/* The four screens that left the nav bar (UX-IA-001). Flow owns the past
+            ledger, so this is where the other views of it are reached from. */}
+        <nav aria-label="Other views of this data" className="mt-8 pt-6 border-t border-[var(--border-color)]">
+          <h2 className="text-sm font-medium text-[var(--foreground-muted)] mb-3">Other views of this data</h2>
+          <div className="flex flex-wrap gap-2">
+            {SECONDARY_ITEMS.map(({ href, label, icon: Icon }) => (
+              <Link
+                key={href}
+                href={href}
+                className="min-h-[44px] flex items-center gap-2 px-4 py-2 rounded-xl border border-[var(--border-color)] bg-[var(--background-secondary)] text-sm text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)] transition-colors"
+              >
+                <Icon className="w-4 h-4" aria-hidden="true" />
+                {label}
+              </Link>
+            ))}
+          </div>
+        </nav>
 
         {reviewOpen && !isDesktop && <RecoveryReviewPanel {...reviewPanelProps} variant="sheet" />}
 
