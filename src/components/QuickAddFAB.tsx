@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Plus, Camera, X, DollarSign } from 'lucide-react';
+import { LayoutGrid, Camera, X, DollarSign } from 'lucide-react';
 import AddTransactionModal from './AddTransactionModal';
 import ReceiptScannerModal from './ReceiptScannerModal';
 import { SECONDARY_ITEMS } from '@/lib/nav';
@@ -88,15 +88,17 @@ export default function QuickAddFAB() {
           aria-label={isOpen ? 'Close menu' : 'Add a transaction, scan a receipt, or open another view'}
           aria-expanded={isOpen}
           className={`w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 ${
-            isOpen 
-              ? 'bg-[var(--background-tertiary)] border border-[var(--border-color)] rotate-45' 
+            isOpen
+              ? 'bg-[var(--background-tertiary)] border border-[var(--border-color)]'
               : 'bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] shadow-[var(--accent-primary)]/30'
           }`}
         >
+          {/* Not a plus: this menu navigates as well as adds, and a + promises only
+              the second. A grid reads as "the other things", which is what it holds. */}
           {isOpen ? (
             <X className="w-6 h-6 text-[var(--foreground)]" />
           ) : (
-            <Plus className="w-6 h-6 text-white" />
+            <LayoutGrid className="w-6 h-6 text-white" />
           )}
         </button>
       </div>
