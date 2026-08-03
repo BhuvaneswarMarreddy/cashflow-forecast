@@ -61,3 +61,7 @@ scripts/backups/
 functions-sync/venv/
 **/__pycache__/
 *.py[cod]
+
+# firebase emulator
+firebase-debug.log
+firestore-debug.log
