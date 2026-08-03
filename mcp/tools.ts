@@ -13,9 +13,10 @@ import { Transaction } from '@/types';
 import { buildLedgerSummary } from '@/lib/chat-summary';
 import { classifyTransaction } from '@/lib/classify';
 import { displayPerson, personFrom } from '@/lib/counterparty';
-import { day, detectRecurring, normalizeMerchant, toCents } from '@/lib/flows';
+import { buildFlowGraph, counterpartyRowIds, day, detectRecurring, normalizeMerchant, toCents } from '@/lib/flows';
 import { detectCounterpartyLedger } from '@/lib/mapping-evidence';
 import { rowDirection } from '@/lib/mapping-rules';
+import { UNPAIRED_LEG_LANE_IDS, buildMappingGroups, decisionsToCover } from '@/lib/mapping-suggestions';
 import { Ledger } from './load';
 
 // ---------------------------------------------------------------------------
@@ -56,6 +57,13 @@ export const TOOL_DESCRIPTIONS = {
     'seen within ~1.5 of its own cycle length — so a stale export makes a healthy subscription read as lapsed; ' +
     'check the ledger span before trusting a lapse. monthlyTotalActiveCents sums the detector\'s own ' +
     'monthlyCents over active items only.',
+  list_unmapped:
+    'The money the app cannot yet classify — unknown inflows, unpaired transfer legs and counterparty lines — ' +
+    'grouped by the same engine the in-app mapping queue uses, biggest impact first. All amounts are INTEGER ' +
+    'CENTS. A group may carry a suggestion {evidence, meaning, confidence, why} derived from facts the ledger ' +
+    'already contains, plus informational findings; decisionsFor80Percent says how many groups the owner must ' +
+    'answer to clear 80% of the unmapped rows. This tool is STRICTLY READ-ONLY: it changes nothing and decides ' +
+    'nothing — classification only ever happens with an explicit in-app confirmation by the owner, never from here.',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -231,4 +239,58 @@ export function getRecurring(
     .filter((i) => i.active)
     .reduce((s, i) => s + i.monthlyCents, 0);
   return { ...envelope(ledger), items, monthlyTotalActiveCents };
+}
+
+// ---------------------------------------------------------------------------
+// list_unmapped
+// ---------------------------------------------------------------------------
+
+export const listUnmappedShape = {
+  limit: z.number().int().min(1).describe('Groups to return, biggest impact first (default 20)').optional(),
+};
+const UnmappedArgs = z.object(listUnmappedShape);
+
+export function listUnmapped(ledger: Ledger, args: z.input<typeof UnmappedArgs> = {}) {
+  const a = UnmappedArgs.parse(args);
+  const limit = a.limit ?? 20;
+  const { transactions, accounts } = ledger;
+  // Wiring exactly as /flow does it: the graph first, then the queue reads the graph's
+  // OWN lanes — so what this tool reports is precisely what the chart drew.
+  const g = buildFlowGraph(transactions, accounts);
+  const groups = buildMappingGroups({
+    transactions,
+    accounts,
+    unpairedLegIds: UNPAIRED_LEG_LANE_IDS.flatMap((id) => g.nodeTxnIds[id] ?? []),
+    counterpartyRowIds: counterpartyRowIds(g),
+    income: ledger.income,
+  });
+  return {
+    ...envelope(ledger),
+    groupCount: groups.length,
+    rowCount: groups.reduce((s, grp) => s + grp.rowCount, 0),
+    decisionsFor80Percent: decisionsToCover(groups, 0.8),
+    // transactionIds dropped: ids are drill-down plumbing, not an answer.
+    groups: groups.slice(0, limit).map((grp) => ({
+      kind: grp.kind,
+      label: grp.label,
+      direction: grp.direction,
+      rowCount: grp.rowCount,
+      totalCents: grp.totalCents,
+      minCents: grp.minCents,
+      maxCents: grp.maxCents,
+      firstDate: grp.firstDate,
+      lastDate: grp.lastDate,
+      cadence: grp.cadence,
+      sourceCategories: grp.sourceCategories,
+      suggestion: grp.suggestion
+        ? {
+            evidence: grp.suggestion.evidence,
+            meaning: grp.suggestion.meaning,
+            confidence: grp.suggestion.confidence,
+            why: grp.suggestion.why,
+          }
+        : null,
+      findings: grp.findings,
+    })),
+  };
 }

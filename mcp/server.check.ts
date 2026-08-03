@@ -3,12 +3,22 @@
  * no test/spec segment ON PURPOSE: jest's testMatch must never collect this file, so
  * the app's jest baseline stays byte-identical.
  */
+// Keep the obs console sink out of the TAP stream (same reason server.ts sets it).
+process.env.NEXT_PUBLIC_OBS_LEVEL ??= 'off';
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
+import { findSecrets, redactString } from '@/lib/obs/redact';
 import { loadFromCsvDir } from './load-csv';
-import { Ledger } from './load';
-import { explainCounterparty, findTransactions, getLedgerSummary, getRecurring } from './tools';
+import { Ledger, loadLedger, resetLedgerCache } from './load';
+import { buildServer } from './server';
+import {
+  TOOL_DESCRIPTIONS,
+  explainCounterparty, findTransactions, getLedgerSummary, getRecurring, listUnmapped,
+} from './tools';
 
 const FIXTURES = path.join(process.cwd(), 'mcp', 'fixtures');
 
@@ -189,4 +199,217 @@ test('loader: id is file:rowIndex and text columns map verbatim', () => {
   assert.equal(first.description, 'ACME GROCERIES #100 SPRINGFIELD');
   assert.equal(first.sourceCategory, 'Groceries');
   assert.equal(first.date, '2026-07-01');
+});
+
+// ---------------------------------------------------------------------------
+// STEP 5 — list_unmapped
+// ---------------------------------------------------------------------------
+
+test('list_unmapped: groups drop transactionIds and the counterparty line reaches the queue', () => {
+  const r = listUnmapped(fixtureLedger(), {});
+  assert.ok(r.groupCount >= 1);
+  assert.equal(r.groups.length, Math.min(r.groupCount, 20));
+  assert.equal(typeof r.decisionsFor80Percent, 'number');
+  assert.ok(r.rowCount >= r.groupCount);
+  for (const g of r.groups) {
+    assert.ok(!('transactionIds' in g));
+    assert.ok(['unknown_inflow', 'unpaired_leg', 'counterparty_line'].includes(g.kind));
+    assert.equal(typeof g.totalCents, 'number');
+  }
+  // FIN-SETTLEMENT-003: the person lanes must not be terminal.
+  assert.ok(r.groups.some((g) => g.kind === 'counterparty_line' && g.label === 'JOHN DOE'));
+  // limit caps the group list only — the counts still describe the whole queue.
+  const limited = listUnmapped(fixtureLedger(), { limit: 1 });
+  assert.equal(limited.groups.length, 1);
+  assert.equal(limited.groupCount, r.groupCount);
+});
+
+// ---------------------------------------------------------------------------
+// STEP 5 — the five descriptions (key phrases, not snapshots)
+// ---------------------------------------------------------------------------
+
+test('descriptions: all five tools exist and every one states its units', () => {
+  assert.deepEqual(Object.keys(TOOL_DESCRIPTIONS).sort(), [
+    'explain_counterparty', 'find_transactions', 'get_ledger_summary', 'get_recurring', 'list_unmapped',
+  ]);
+  for (const d of Object.values(TOOL_DESCRIPTIONS)) assert.ok(/DOLLARS|INTEGER CENTS/.test(d));
+});
+
+test('descriptions: get_ledger_summary routes statement-text payees and defines SENT', () => {
+  const d = TOOL_DESCRIPTIONS.get_ledger_summary;
+  assert.ok(d.includes('explain_counterparty'));
+  assert.ok(d.includes('statement text'));
+  assert.ok(d.includes('spending + transferred'));
+  assert.ok(d.includes('SENT'));
+});
+
+test('descriptions: find_transactions — classifier kind, card payment is a transfer, use cents totals', () => {
+  const d = TOOL_DESCRIPTIONS.find_transactions;
+  assert.ok(d.includes('classifier'));
+  assert.ok(/card payment is a transfer/.test(d));
+  assert.ok(d.includes('cents totals rather than adding'));
+});
+
+test('descriptions: explain_counterparty — signFlips semantics and netCents sign', () => {
+  const d = TOOL_DESCRIPTIONS.explain_counterparty;
+  assert.ok(d.includes('signFlips'));
+  assert.ok(/0-1 flips is loan-shaped/.test(d));
+  assert.ok(/running tab/.test(d));
+  assert.ok(d.includes('netCents'));
+  assert.ok(/positive means the owner has SENT more/.test(d));
+});
+
+test('descriptions: list_unmapped — strictly read-only, in-app confirmation only', () => {
+  const d = TOOL_DESCRIPTIONS.list_unmapped;
+  assert.ok(d.includes('STRICTLY READ-ONLY'));
+  assert.ok(d.includes('in-app confirmation'));
+});
+
+test('descriptions: get_recurring — 3+ occurrences >= $5, today-relative active, detected cadence', () => {
+  const d = TOOL_DESCRIPTIONS.get_recurring;
+  assert.ok(/at least 3 occurrences/.test(d));
+  assert.ok(d.includes('$5'));
+  assert.ok(d.includes('today'));
+  assert.ok(d.includes('lapsed'));
+  assert.ok(/never guessed from the merchant name/.test(d));
+});
+
+// ---------------------------------------------------------------------------
+// STEP 5 — error contract: exact messages, isError shape, no stack
+// ---------------------------------------------------------------------------
+
+const withEnv = async (env: Record<string, string | undefined>, run: () => Promise<void>) => {
+  const saved: Record<string, string | undefined> = {};
+  for (const [k, v] of Object.entries(env)) {
+    saved[k] = process.env[k];
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+  resetLedgerCache();
+  try {
+    await run();
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    resetLedgerCache();
+  }
+};
+
+const expectError = async (text: string) => {
+  const r = await loadLedger();
+  assert.equal(r.ok, false);
+  if (r.ok) return;
+  assert.equal(r.error.isError, true);
+  assert.equal(r.error.content.length, 1);
+  assert.equal(r.error.content[0].type, 'text');
+  assert.equal(r.error.content[0].text, text); // exact, verbatim
+  assert.ok(!r.error.content[0].text.includes('    at ')); // never a stack
+};
+
+test('error contract: CSV folder not found', () =>
+  withEnv({ CASHFLOW_CSV_DIR: '/nonexistent-cf-ledger-check', CASHFLOW_FIRESTORE_KEY: undefined }, () =>
+    expectError(
+      'CSV folder not found at /nonexistent-cf-ledger-check. Export your transactions from Monarch ' +
+      '(Settings -> Data -> Download transactions), unzip into transactionsbyaccount/ at the repo root, or set ' +
+      'CASHFLOW_FIRESTORE_KEY=/path/to/service-account.json to read live data instead.'
+    )));
+
+test('error contract: folder exists but holds no CSVs', async () => {
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-ledger-empty-'));
+  try {
+    await withEnv({ CASHFLOW_CSV_DIR: empty, CASHFLOW_FIRESTORE_KEY: undefined }, () =>
+      expectError(`No .csv files in ${empty}. The Monarch export is one CSV per account; place them directly in this folder.`));
+  } finally {
+    fs.rmdirSync(empty);
+  }
+});
+
+test('error contract: unreadable Firestore key carries the errno', () =>
+  withEnv({ CASHFLOW_FIRESTORE_KEY: '/nonexistent/key.json' }, () =>
+    expectError(
+      'CASHFLOW_FIRESTORE_KEY points to /nonexistent/key.json but it cannot be read: ENOENT. ' +
+      'Check the path, or unset it to fall back to the CSV export.'
+    )));
+
+test('error contract: readable key but no uid', () =>
+  withEnv(
+    { CASHFLOW_FIRESTORE_KEY: path.join(FIXTURES, 'acme-checking.csv'), CASHFLOW_FIRESTORE_UID: undefined },
+    () =>
+      expectError(
+        'CASHFLOW_FIRESTORE_UID is not set. It must be the Firebase Auth uid whose ledger to read ' +
+        '(Firebase console -> Authentication -> Users).'
+      )));
+
+// ---------------------------------------------------------------------------
+// STEP 5 — redaction: the wrapper's exact pass over every tool's output
+// ---------------------------------------------------------------------------
+
+test('redaction: every tool output over the planted-secret fixture yields zero findSecrets hits', () => {
+  const l = fixtureLedger();
+  const outputs: Record<string, string> = {
+    get_ledger_summary: redactString(JSON.stringify(getLedgerSummary(l))),
+    find_transactions: redactString(JSON.stringify(findTransactions(l))),
+    explain_counterparty: redactString(JSON.stringify(explainCounterparty(l, { name: 'John Doe' }))),
+    get_recurring: redactString(JSON.stringify(getRecurring(l, {}, '2026-07-20'))),
+    list_unmapped: redactString(JSON.stringify(listUnmapped(l, {}))),
+  };
+  for (const [tool, text] of Object.entries(outputs)) {
+    assert.deepEqual(findSecrets(text), [], `findSecrets hit in ${tool} output`);
+    assert.ok(!text.includes('4111111111111111'), `raw PAN leaked from ${tool}`);
+    assert.ok(!text.includes('sometoken'), `credential URL leaked from ${tool}`);
+  }
+  // The planted card number survives only as ****-masked digits.
+  const coffee = redactString(JSON.stringify(findTransactions(l, { query: 'coffee' })));
+  assert.ok(coffee.includes('****1111'));
+  assert.deepEqual(findSecrets(coffee), []);
+});
+
+// ---------------------------------------------------------------------------
+// STEP 5 — read-only: no write-shaped call anywhere in the mcp sources
+// ---------------------------------------------------------------------------
+
+test('read-only: mcp/*.ts sources contain no write-shaped calls', () => {
+  // Needles assembled at runtime so this file cannot match itself.
+  const dot = (m: string) => '.' + m + '(';
+  const needles = [dot('set'), dot('update'), dot('delete'), dot('add'), 'write' + 'Batch', 'batch' + '('];
+  const dir = path.join(process.cwd(), 'mcp');
+  const sources = fs.readdirSync(dir).filter((f) => f.endsWith('.ts'));
+  assert.ok(sources.length >= 4);
+  for (const f of sources) {
+    const text = fs.readFileSync(path.join(dir, f), 'utf8');
+    for (const needle of needles) {
+      assert.ok(!text.includes(needle), `${f} contains "${needle}"`);
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// STEP 5 — wiring smoke over InMemoryTransport
+// ---------------------------------------------------------------------------
+
+test('wiring: listTools returns exactly the five tools and a call round-trips', async () => {
+  await withEnv({ CASHFLOW_CSV_DIR: FIXTURES, CASHFLOW_FIRESTORE_KEY: undefined }, async () => {
+    const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js');
+    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+    const server = buildServer();
+    const client = new Client({ name: 'server-check', version: '0.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    try {
+      const names = (await client.listTools()).tools.map((t) => t.name).sort();
+      assert.deepEqual(names, [
+        'explain_counterparty', 'find_transactions', 'get_ledger_summary', 'get_recurring', 'list_unmapped',
+      ]);
+      const res = await client.callTool({ name: 'get_recurring', arguments: {} });
+      const body = JSON.parse((res.content as Array<{ type: string; text: string }>)[0].text);
+      assert.equal(body.source, 'csv');
+      assert.equal(body.span.transactions, 15);
+      assert.ok(Array.isArray(body.items));
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
 });

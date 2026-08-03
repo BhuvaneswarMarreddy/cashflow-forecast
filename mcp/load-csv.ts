@@ -27,8 +27,8 @@ export function loadFromCsvDir(dir: string): { transactions: Transaction[]; acco
     id: `a${i}`, name, type, openingBalance: balance, openingDate: '2000-01-01',
     provider: 'other', color: '#000', isActive: true,
   } as PaymentAccount));
-  // Plain object, not a Map — mcp/ sources must stay clean of `.set(`-shaped calls
-  // for the read-only grep gate, and a Record does the same job.
+  // Plain object, not a Map — mcp/ sources must stay clean of write-shaped method
+  // calls for the read-only grep gate, and a Record does the same job.
   const idByName: Record<string, string> = Object.fromEntries(accounts.map((a) => [a.name, a.id]));
 
   const transactions: Transaction[] = [];

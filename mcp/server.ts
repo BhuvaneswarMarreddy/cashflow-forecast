@@ -3,6 +3,11 @@
  * owns the transport, load-dispatch, JSON serialization, the redaction pass and the
  * error contract — the handlers never see fs, firebase or the SDK.
  */
+// Silence the app's obs layer before any tool can emit: in 'development' its console
+// sink writes '[obs] …' lines via console.debug — i.e. to STDOUT, which the stdio
+// transport owns. One stray line there corrupts the JSON-RPC stream.
+process.env.NEXT_PUBLIC_OBS_LEVEL ??= 'off';
+
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 // redactString, NOT redact(): the object walker caps arrays at 50 and destroys keys
@@ -15,6 +20,7 @@ import {
   findTransactions, findTransactionsShape,
   getLedgerSummary,
   getRecurring, getRecurringShape,
+  listUnmapped, listUnmappedShape,
 } from './tools';
 
 /**
@@ -52,6 +58,10 @@ export function buildServer(): McpServer {
   server.registerTool('get_recurring',
     { description: TOOL_DESCRIPTIONS.get_recurring, inputSchema: getRecurringShape },
     wrap(getRecurring));
+
+  server.registerTool('list_unmapped',
+    { description: TOOL_DESCRIPTIONS.list_unmapped, inputSchema: listUnmappedShape },
+    wrap(listUnmapped));
 
   return server;
 }
