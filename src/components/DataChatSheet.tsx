@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Loader2, Send, Sparkles, X } from 'lucide-react';
 import { aiChat, callableErrorMessage } from '@/lib/callables';
 import { parseChatAction, buildChatContext, explanationOf } from '@/lib/chat-actions';
@@ -136,19 +137,20 @@ export default function DataChatSheet({ open, onClose, seed }: {
 
   if (!open) return null;
 
-  return (
+  return createPortal(
     // Docked, NOT a modal: the owner keeps reading the page they asked about while
     // the answer arrives, so this deliberately does not use Sheet's <dialog>. No
     // focus trap and no body-scroll lock for the same reason — both would fight the
     // "keep working alongside it" behaviour. Esc still closes (handler above).
-    // Right rail >=640px, bottom sheet below it.
+    //
+    // PORTALED to <body>, load-bearing: this component mounts inside Navbar, whose
+    // backdrop-filter makes the nav the containing block for position:fixed
+    // descendants — rendered in place, the rail pins itself INSIDE the 64px bar.
+    // Layout lives in .chat-rail (globals.css): right rail >=640px, bottom sheet below.
     <aside
       role="complementary"
       aria-label="Ask about your data"
-      className="fixed z-40 flex flex-col bg-[var(--background-secondary)] border-[var(--border-color)] shadow-2xl
-                 inset-x-0 bottom-0 h-[75vh] border-t rounded-t-2xl
-                 sm:inset-y-0 sm:left-auto sm:right-0 sm:h-full sm:w-[26rem] sm:rounded-t-none sm:border-t-0 sm:border-l
-                 p-4 sm:p-5 gap-3"
+      className="chat-rail p-4 sm:p-5 gap-3"
     >
       <div className="flex items-start gap-3 shrink-0">
         <Sparkles className="w-5 h-5 text-[var(--accent-primary)] mt-0.5" aria-hidden="true" />
@@ -230,7 +232,8 @@ export default function DataChatSheet({ open, onClose, seed }: {
           {busy ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Send className="w-4 h-4" aria-hidden="true" />}
         </button>
       </div>
-    </aside>
+    </aside>,
+    document.body
   );
 }
 

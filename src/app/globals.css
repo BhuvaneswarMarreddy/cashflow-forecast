@@ -680,6 +680,46 @@ dialog.sheet::backdrop {
   }
 }
 
+/* Docked data-chat rail. Portaled to <body> — it must NOT render under the navbar:
+   the nav's backdrop-filter makes it the containing block for fixed descendants,
+   which pinned the rail inside the 64px bar with its contents spilling out
+   transparently (that shipped). Mobile: bottom sheet, same motion as dialog.sheet.
+   Desktop: full-height right rail below the navbar, sliding in from the right. */
+.chat-rail {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  background: var(--background-secondary);
+  color: var(--foreground);
+  inset: auto 0 0 0;
+  height: 75dvh;
+  border-top: 1px solid var(--border-color);
+  border-radius: 20px 20px 0 0;
+  padding-bottom: env(safe-area-inset-bottom);
+  box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.35);
+  animation: sheetUp 0.25s ease-out;
+}
+
+@media (min-width: 640px) {
+  .chat-rail {
+    inset: 4rem 0 0 auto; /* 4rem = the navbar's h-16; the rail starts under it */
+    height: auto;
+    width: min(26rem, 92vw);
+    border-radius: 0;
+    border-top: 0;
+    border-left: 1px solid var(--border-color);
+    padding-bottom: 0;
+    box-shadow: -8px 0 40px rgba(0, 0, 0, 0.35);
+    animation: railIn 0.25s ease-out;
+  }
+}
+
+@keyframes railIn {
+  from { transform: translateX(16px); opacity: 0.6; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
 /* Delete confirmation modal */
 .delete-confirm-modal {
   background: var(--background-secondary);

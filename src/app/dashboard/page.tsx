@@ -505,7 +505,7 @@ export default function DashboardPage() {
               </div>
             </div>
             <p className="text-3xl font-bold text-[var(--accent-primary)]">
-              ${monthlyIncome.toLocaleString()}
+              ${Math.round(monthlyIncome).toLocaleString()}
             </p>
             <p className="text-[var(--foreground-muted)] text-sm mt-1">
               {incomeFromSources > 0 ? 'Expected per month' : 'Avg / month (from transactions)'}
@@ -520,7 +520,7 @@ export default function DashboardPage() {
               </div>
             </div>
             <p className={`text-3xl font-bold ${budgetRemaining >= 0 ? 'text-[var(--accent-success)]' : 'text-[var(--accent-danger)]'}`}>
-              ${Math.abs(budgetRemaining).toLocaleString()}
+              ${Math.round(Math.abs(budgetRemaining)).toLocaleString()}
             </p>
             {effectiveBudget > 0 && (
               <div className="mt-2">
@@ -534,7 +534,7 @@ export default function DashboardPage() {
                   />
                 </div>
                 <p className="text-xs text-[var(--foreground-muted)] mt-1">
-                  {Math.round(budgetPercentage)}% of ${effectiveBudget.toLocaleString()} used
+                  {Math.round(budgetPercentage)}% of ${Math.round(effectiveBudget).toLocaleString()} used
                   {budgetIsDerived && ' (typical spend)'}
                 </p>
               </div>

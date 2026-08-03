@@ -62,6 +62,19 @@ const send = (text: string) => {
 };
 
 describe('DataChatSheet', () => {
+  it('portals the rail to <body> — inside the navbar it pins to the 64px bar', () => {
+    // The nav has backdrop-filter, which makes it the containing block for
+    // position:fixed descendants. Rendered in place, the rail anchored itself
+    // INSIDE the bar with its contents spilling out transparently. That shipped;
+    // this is the assertable half of the fix (jsdom cannot see layout).
+    const { container } = render(<div style={{ backdropFilter: 'blur(4px)' }}>
+      <DataChatSheet open onClose={() => {}} />
+    </div>);
+    const rail = screen.getByRole('complementary', { name: 'Ask about your data' });
+    expect(rail.parentElement).toBe(document.body);
+    expect(container.querySelector('aside')).toBeNull();
+  });
+
   it('previews a proposed rule with a match count and writes NOTHING until Apply', async () => {
     aiChat.mockResolvedValue(RULE_REPLY);
     addRule.mockResolvedValue({
