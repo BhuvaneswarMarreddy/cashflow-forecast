@@ -24,6 +24,7 @@ import { formatMoneyCents } from './money';
 import { PurchaseEconomics, RefundEconomics, purchaseEconomics, refundEconomics } from './refunds';
 import { LinkStatus, REFUND_SOURCE_TYPES, TransactionLink } from './relations';
 import { getAllCategorySpending } from './budgets';
+import { MappingGroup } from './mapping-suggestions';
 
 // ---------------------------------------------------------------------------
 // §2.3 — ONE state vocabulary, aligned once, with no translation layer
@@ -87,7 +88,8 @@ export type SectionId =
   | 'duplicate_charges'
   | 'duplicate_subscriptions'
   | 'continued_charges'
-  | 'unknown_deposits';
+  | 'unknown_deposits'
+  | 'unmapped_groups';
 
 export interface ReviewSection {
   id: SectionId;
@@ -105,6 +107,10 @@ export const REVIEW_SECTIONS: readonly ReviewSection[] = [
   { id: 'duplicate_subscriptions', label: 'Possible Duplicate Subscriptions', chipLabel: 'Duplicate subscriptions', candidateTypes: ['duplicate_subscription', 'subscription_overlap'] },
   { id: 'continued_charges', label: 'Continued Charges After Cancellation', chipLabel: 'Charges after cancelling', candidateTypes: ['continued_charge_after_cancellation'] },
   { id: 'unknown_deposits', label: 'Unknown Deposits', chipLabel: 'Unknown deposits', candidateTypes: [] },
+  // MAP-001. Ranked FIRST in the chip strip is not implied by list order — §4.5's sort
+  // is what orders items — but a group answers many rows at once, so it earns its own
+  // section rather than being 205 more rows in the one above.
+  { id: 'unmapped_groups', label: 'Patterns To Map', chipLabel: 'Patterns to map', candidateTypes: [] },
 ];
 
 const SECTION_OF_TYPE = new Map<CandidateType, SectionId>(
@@ -118,8 +124,8 @@ export const sectionOfCandidateType = (t: CandidateType): SectionId => SECTION_O
 // ---------------------------------------------------------------------------
 
 export interface ReviewQueueItem {
-  key: string; // review record id (= transaction id) OR candidate identityKey
-  source: 'transaction' | 'candidate';
+  key: string; // review record id (= transaction id) OR candidate identityKey OR group key
+  source: 'transaction' | 'candidate' | 'group';
   sectionId: SectionId;
   transactionIds: string[]; // 1 for a transaction item, 2..13 for a candidate
   headline: string; // plain language, built locally from the ledger
@@ -130,6 +136,8 @@ export interface ReviewQueueItem {
   generatedAt: string;
   /** Present iff `source === 'candidate'`. The card renders from this. */
   candidate?: ReviewCandidate;
+  /** Present iff `source === 'group'`. */
+  group?: MappingGroup;
 }
 
 export interface QueueContext {
@@ -140,6 +148,12 @@ export interface QueueContext {
   /** FIN-REVIEW-002's item source. Composes as one section; absent is fine. */
   inflowItems?: readonly InflowReviewItem[];
   estimates?: readonly DuplicateCostEstimate[];
+  /**
+   * MAP-001's item source. When present, a grouped row is asked ONCE as its group
+   * instead of once per row — that is the entire point. Absent is fine and leaves the
+   * queue exactly as it was.
+   */
+  groups?: readonly MappingGroup[];
 }
 
 const byId = (transactions: readonly Transaction[]) => new Map(transactions.map((t) => [t.id, t]));
@@ -261,6 +275,15 @@ export function headlineOf(candidate: ReviewCandidate, ctx: QueueContext): strin
   }
 }
 
+/**
+ * A group's headline says how many rows one answer covers, because that number IS the
+ * reason the owner should spend attention here rather than on the row below it.
+ */
+export const groupHeadline = (group: MappingGroup): string =>
+  `${group.label} — ${group.rowCount} ${group.rowCount === 1 ? 'row' : 'rows'}, ${money(
+    group.totalCents
+  )}, one answer`;
+
 const inflowHeadline = (item: InflowReviewItem, ctx: QueueContext): string => {
   const t = byId(ctx.transactions).get(item.transactionId);
   return `${money(item.amountCents)} arrived from ${merchantOf(t)} — we do not know what it is`;
@@ -296,7 +319,30 @@ export function buildReviewQueue(ctx: QueueContext): ReviewQueueItem[] {
     });
   }
 
+  // MAP-001: a row that belongs to a group is asked as its GROUP, not on its own. This
+  // is where 205 individual questions become the handful of patterns behind them.
+  const grouped = new Set((ctx.groups ?? []).flatMap((g) => g.transactionIds));
+
+  for (const group of ctx.groups ?? []) {
+    items.push({
+      key: group.key,
+      source: 'group',
+      sectionId: 'unmapped_groups',
+      transactionIds: group.transactionIds,
+      headline: groupHeadline(group),
+      reasonCodes: group.suggestion ? [group.suggestion.evidence] : [],
+      state: group.suggestion ? 'suggested' : 'unreviewed',
+      rank: QUEUE_STATES.indexOf(group.suggestion ? 'suggested' : 'unreviewed'),
+      // Impact ranks the groups against each other; normalised so it cannot outrank a
+      // candidate's 0..1 score by sheer magnitude.
+      score: Math.min(1, group.rowCount / 100),
+      generatedAt: group.firstDate,
+      group,
+    });
+  }
+
   for (const inflow of ctx.inflowItems ?? []) {
+    if (grouped.has(inflow.transactionId)) continue;
     const state = queueStateOfReview(inflow.state);
     if (!state) continue;
     items.push({
