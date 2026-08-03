@@ -4,12 +4,12 @@ import React, { useMemo, useState } from 'react';
 import { PaymentAccount, Transaction } from '@/types';
 import { formatMoneyCents } from '@/lib/money';
 import {
-  GROUP_MEANINGS,
   GroupDecision,
   GroupScope,
   MappingGroup,
   SCOPE_LABEL,
   buildGroupRule,
+  groupMeanings,
   groupPreview,
   groupScopes,
   ruleSetForMeaning,
@@ -133,7 +133,10 @@ export default function MappingGroupCard({
         <legend className="text-sm text-[var(--foreground-secondary)]">
           What are these {group.rowCount === 1 ? 'row' : 'rows'}?
         </legend>
-        {GROUP_MEANINGS.map((m) => (
+        {/* One list per direction: every answer above is a credit, and this queue now
+            also holds debits. Offering "someone paying me back" for money going OUT is
+            a lie the UI should not be able to tell. */}
+        {groupMeanings(group.direction).map((m) => (
           <label key={m.value} className="flex items-center gap-2 min-h-[44px] text-sm cursor-pointer">
             <input
               type="radio"

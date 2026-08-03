@@ -28,36 +28,12 @@ export function balanceAtEndOfDay(
   return signedRealNowCents(a) - later;
 }
 
-// --- person extraction (statement shapes discovered in the real CSVs) ---
-const REMITLY = /rmtly|remitly/i;
-// bac\w{5,}: Chase glues a BACxxxx confirmation token straight after the name.
-const ZELLE = /zelle\s+(?:payment\s+|transfer\s+)?(?:to|from)[:\s]+([a-z .'’-]+?)(?=\s+(?:conf|jpm|bac\w{5,}|for\b|\d)|;|$)/i;
-const BOFA_ALT = /zelle transfer conf# \w+;\s*(.+)$/i;
-
-export function personFrom(text: string | undefined): string | null {
-  if (!text) return null;
-  if (REMITLY.test(text)) return 'REMITLY';
-  const m = ZELLE.exec(text) ?? BOFA_ALT.exec(text);
-  if (!m) return null;
-  let name = m[1]
-    .replace(/\s*for\s*".*$/i, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/[.;'-]+$/, '')
-    .trim()
-    .toUpperCase();
-  const parts = name.split(' ').filter(Boolean);
-  if (parts.length >= 3) name = `${parts[0]} ${parts[parts.length - 1]}`;
-  return name || null;
-}
-
-export const isSelfPerson = (name: string) =>
-  /BHUVANESWAR|MARREDDY/.test(name) || name === 'ME';
-
-export const displayPerson = (name: string) =>
-  name === 'REMITLY'
-    ? 'Sent to India (Remitly)'
-    : name.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+// --- person extraction ---
+// Moved to counterparty.ts so classify.ts can use it without importing this module
+// (flows -> classify already exists; the other direction would be a cycle). Re-exported
+// here so every existing `from '@/lib/flows'` import keeps working unchanged.
+export { personFrom, isSelfPerson, displayPerson, namesExternalCounterparty } from './counterparty';
+import { personFrom, isSelfPerson, displayPerson } from './counterparty';
 
 // ============================================================
 // buildFlowGraph — the Sankey data + reconciliation
@@ -445,6 +421,25 @@ export function buildFlowGraph(
     nettedRefundCents,
   };
 }
+
+/** Every person node this graph makes, named or folded into "Others (people)". */
+const PERSON_NODE_PREFIX = 'person-';
+
+/**
+ * The rows sitting behind the `person-in:` / `person-out:` nodes — FIN-SETTLEMENT-003's
+ * feed into the mapping queue, the exact mirror of `UNPAIRED_LEG_LANE_IDS`.
+ *
+ * Measured before this existed: those lanes were TERMINAL. A counterparty leg is routed
+ * to a person node instead of an unpaired-leg lane, and the queue is fed only by unknown
+ * inflows and unpaired legs — so 7 of 284 counterparty rows reached the queue and 0 of
+ * the 155 outbound ones did. Reading the graph's own `nodeTxnIds` (rather than
+ * re-deriving the set) is what keeps "what /flow drew" and "what the queue asks about"
+ * from drifting apart.
+ */
+export const counterpartyRowIds = (g: Pick<FlowGraph, 'nodeTxnIds'>): string[] =>
+  Object.entries(g.nodeTxnIds)
+    .filter(([id]) => id.startsWith(PERSON_NODE_PREFIX))
+    .flatMap(([, ids]) => ids);
 
 // ============================================================
 // detectRecurring — the four rules exist because each killed a

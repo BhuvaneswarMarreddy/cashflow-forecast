@@ -18,7 +18,7 @@ import { RelationBadgeRow } from '@/components/TransactionRelationBadge';
 import { useAuth } from '@/context/AuthContext';
 import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
-import { buildFlowGraph, detectRecurring, projectNetWorth, day, FlowGraph } from '@/lib/flows';
+import { buildFlowGraph, counterpartyRowIds, detectRecurring, projectNetWorth, day, FlowGraph } from '@/lib/flows';
 import {
   MONEY_BACK_LANE_IDS, NODE_PADDING_PX, fitLabel, labelMaxChars, nodeDepths, sankeyHeightFor,
 } from '@/lib/flow-lanes';
@@ -816,17 +816,21 @@ export default function FlowPage() {
     () => UNPAIRED_LEG_LANE_IDS.flatMap((id) => graph.nodeTxnIds[id] ?? []),
     [graph]
   );
+  // FIN-SETTLEMENT-003 — the rows behind the person nodes, read off the SAME graph, so
+  // what the chart drew and what the queue asks about cannot drift. Before this the
+  // person lanes were terminal: money went in and no question ever came out.
+  const counterpartyIds = useMemo(() => counterpartyRowIds(graph), [graph]);
   const groups: MappingGroup[] = useMemo(
     () => (recoveryLoaded
       ? buildMappingGroups({
           // MAP-002 — FIN-REFUND-001's run, computed above for the recovery queue and
           // handed over rather than run a second time. One refund matcher, one result.
-          transactions, accounts, inflowItems, unpairedLegIds, rules,
+          transactions, accounts, inflowItems, unpairedLegIds, counterpartyRowIds: counterpartyIds, rules,
           refundCandidates: refundRun?.candidates ?? [],
           income: incomeContext, todayISO,
         })
       : []),
-    [recoveryLoaded, transactions, accounts, inflowItems, unpairedLegIds, rules, incomeContext, todayISO, refundRun]
+    [recoveryLoaded, transactions, accounts, inflowItems, unpairedLegIds, counterpartyIds, rules, incomeContext, todayISO, refundRun]
   );
 
   const queueCtx: QueueContext = useMemo(

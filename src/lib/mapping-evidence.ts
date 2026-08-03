@@ -31,6 +31,7 @@
 import { PaymentAccount, Transaction } from '@/types';
 import { ProposedLink, ReviewCandidate, isTerminalCandidateStatus } from './candidates';
 import { BANDS, RecurringItem, day, daysBetween, isDebtAccount, median, normalizeMerchant, toCents } from './flows';
+import { isVagueCategory } from './flow-lanes';
 
 const addDays = (d: string, n: number) =>
   new Date(Date.parse(`${d}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
@@ -265,6 +266,102 @@ export function detectLoanProceeds(
     ...(loanAccount ? { loanAccountName: loanAccount.name } : {}),
     ...(repaid ? { repaymentCount: repaid.occurrences, repaymentCadence: repaid.cadence } : {}),
     confidence: loanAccount && repaid ? 0.85 : loanAccount ? 0.75 : 0.7,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 6. The counterparty ledger — FIN-SETTLEMENT-003
+// ---------------------------------------------------------------------------
+
+export interface CounterpartyLedger {
+  outRows: number;
+  inRows: number;
+  outCents: number;
+  inCents: number;
+  /** Outbound minus inbound. Positive = the owner has sent more than they received. */
+  netCents: number;
+  /**
+   * How many times the running balance with this party changes sign.
+   *
+   * This is the measurement that separates the two relationships, and it is the only
+   * reason this detector exists. 0-1 flips is "one of us fronted money and it came
+   * back" — a loan. 2 or more is a running tab that both sides keep adding to — shared
+   * costs. Measured on the owner's real export: of nine two-way counterparties, seven
+   * flip at most once and one flips four times.
+   */
+  signFlips: number;
+  /** Which way the FIRST row went — who fronted the money. */
+  firstDirection: 'in' | 'out';
+  /** Money in equals money out. The relationship is square; nothing is outstanding. */
+  settled: boolean;
+  spanDays: number;
+  /**
+   * The owner's OWN category words on these rows, minus the structural ones the
+   * importer uses for plumbing. This is the owner telling the app what a row was, in
+   * their own vocabulary, and it is the strongest evidence available for a counterparty
+   * row short of a confirmation. Deduplicated, sorted. Not a vendor list: nothing here
+   * knows what any of these words MEAN, only that the owner typed one.
+   */
+  ownerCategories: string[];
+  /** Rows carrying one of those categories — the support count for that evidence. */
+  ownerCategorisedRows: number;
+}
+
+/**
+ * Monarch's plumbing categories. `Transfer` and `Credit Card Payment` are exactly the
+ * two the importer turns into `type: 'transfer'`, so they carry no owner intent at all;
+ * the vague set is asked of `flow-lanes.ts` rather than re-listed.
+ */
+const STRUCTURAL_CATEGORY = new Set(['transfer', 'credit card payment']);
+
+const isOwnerCategory = (c: string) => {
+  const v = (c ?? '').trim().toLowerCase();
+  return !!v && !STRUCTURAL_CATEGORY.has(v) && !isVagueCategory(v);
+};
+
+/**
+ * The whole two-way relationship with ONE counterparty, as arithmetic.
+ *
+ * The caller guarantees "one counterparty" — a mapping group keyed on counterparty is
+ * exactly that — and supplies the direction predicate, because direction lives with the
+ * accounts and this module is pure. Rows may be in either direction and any order.
+ *
+ * Returns `null` only for no rows. A ONE-WAY line is a legitimate ledger (`signFlips`
+ * 0, `netCents` equal to the whole side) and reporting it is the point: "nothing ever
+ * came back" is a measured fact, not an absence of one.
+ */
+export function detectCounterpartyLedger(
+  rows: readonly Transaction[],
+  direction: (t: Transaction) => 'in' | 'out'
+): CounterpartyLedger | null {
+  if (!rows.length) return null;
+  const sorted = [...rows].sort(
+    (a, b) => day(a.date).localeCompare(day(b.date)) || a.id.localeCompare(b.id)
+  );
+
+  let outRows = 0, inRows = 0, outCents = 0, inCents = 0;
+  let signFlips = 0, balance = 0, lastSign = 0;
+  for (const t of sorted) {
+    const cents = toCents(t.amount);
+    if (direction(t) === 'out') { outRows += 1; outCents += cents; balance += cents; }
+    else { inRows += 1; inCents += cents; balance -= cents; }
+    const sign = Math.sign(balance);
+    // A zero balance is not a flip — it is a settled moment. Only a genuine reversal
+    // from owed-to-owing (or back) counts, which is why `lastSign` skips zeroes.
+    if (sign !== 0 && lastSign !== 0 && sign !== lastSign) signFlips += 1;
+    if (sign !== 0) lastSign = sign;
+  }
+
+  const categorised = sorted.filter((t) => isOwnerCategory(t.sourceCategory ?? ''));
+  return {
+    outRows, inRows, outCents, inCents,
+    netCents: outCents - inCents,
+    signFlips,
+    firstDirection: direction(sorted[0]),
+    settled: outCents === inCents,
+    spanDays: daysBetween(day(sorted[0].date), day(sorted[sorted.length - 1].date)),
+    ownerCategories: [...new Set(categorised.map((t) => (t.sourceCategory ?? '').trim()))].sort(),
+    ownerCategorisedRows: categorised.length,
   };
 }
 

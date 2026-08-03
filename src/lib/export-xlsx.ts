@@ -64,7 +64,7 @@ export function buildExportWorkbook(data: ExportData): XLSX.WorkBook {
     // PENDING: EXCLUDED from these totals (they are the posted accounting truth) but
     // still exported row-by-row below with a Pending column, so nothing is hidden.
     ['Total Income', sumIncomeCents(data.transactions, accounts, income) / 100],
-    ['Total Expenses', sumExpenseCents(data.transactions, accounts) / 100],
+    ['Total Expenses', sumExpenseCents(data.transactions, accounts, income) / 100],
     ['Pending (not in the totals above)', data.transactions.filter(t => t.pending).length],
   ];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryData), 'Summary');

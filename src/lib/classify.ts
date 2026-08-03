@@ -17,6 +17,7 @@ import {
 } from '@/types';
 import { emit } from '@/lib/obs/events';
 import { newTraceId } from '@/lib/obs/trace';
+import { namesExternalCounterparty } from './counterparty';
 
 // A row only needs these fields to be classified, so partial/in-flight rows
 // (e.g. a CSV preview row that has no id yet) can use the same code path.
@@ -404,9 +405,19 @@ export function interpretTransaction(
   // so a review record cannot turn one into income. Everything else the owner may
   // decide for themselves — that is what "or the user explicitly confirms it" means,
   // and it is why review state lives in its own document rather than in `category`.
+  //
+  // FIN-SETTLEMENT-003 narrows that veto by exactly one case, and this is the root
+  // cause it was blocking: a row that NAMES AN EXTERNAL COUNTERPARTY. The provider
+  // category `Transfer` means "money moved"; it does not mean "money moved between
+  // accounts you own", and only a counterparty row can tell those two apart. Measured
+  // on the real export: 261 of 284 counterparty rows ($259,206.71 across 81 distinct
+  // counterparties) are provider-typed `Transfer`, so without this the owner could
+  // confirm an answer and the app would keep calling it an internal transfer. Every
+  // other transfer keeps the veto untouched.
   const review = t.id ? income?.reviews?.[t.id] : undefined;
+  const overridable = type !== 'transfer' || namesExternalCounterparty(t);
   const confirmed =
-    type !== 'transfer' && review?.state === 'confirmed' && review.meaning ? review.meaning : undefined;
+    overridable && review?.state === 'confirmed' && review.meaning ? review.meaning : undefined;
 
   let financialMeaning: FinancialMeaning;
   let incomeSourceId: string | undefined;
@@ -435,11 +446,26 @@ export function interpretTransaction(
   const held = pending === 'pending';
   if (held) reason += '; pending hold, excluded from posted totals';
 
+  // A CONFIRMED meaning decides its own treatment; a DERIVED one still defers to the
+  // classifier's type. Without this split the override above would change the label and
+  // not the number: `type` stays `transfer` forever (it is never re-derived), so
+  // confirming "this money is gone" left it counted as neither income nor spending.
+  // The predicates are the existing ones — `countsAsEarnedIncome` and `personalCostSign`
+  // — so there is still exactly one place that decides what a meaning costs.
+  const settledAsTransfer = confirmed
+    ? financialMeaning === 'internal_transfer' || financialMeaning === 'card_payment'
+    : type === 'transfer';
+
   // The ONE earned-income gate. `type === 'income'` alone used to be enough, which is
   // how refunds, reimbursements and one-off deposits became salary.
   const incomeTreatment: Treatment =
-    !held && type === 'income' && countsAsEarnedIncome(financialMeaning) ? 'counted' : 'excluded';
-  const expense: Treatment = !held && type === 'expense' ? 'counted' : 'excluded';
+    !held && (confirmed ? true : type === 'income') && countsAsEarnedIncome(financialMeaning)
+      ? 'counted'
+      : 'excluded';
+  const expense: Treatment =
+    !held && (confirmed ? personalCostSign(financialMeaning) === 1 : type === 'expense')
+      ? 'counted'
+      : 'excluded';
 
   return {
     type,
@@ -451,7 +477,7 @@ export function interpretTransaction(
     expense,
     transfer: type !== 'transfer' ? 'none' : settlement ? 'card_settlement' : 'internal_leg',
     pending,
-    forecast: !held && type !== 'transfer' ? 'counted' : 'excluded',
+    forecast: !held && !settledAsTransfer ? 'counted' : 'excluded',
     budget: expense,
     confidence,
     reason,
@@ -486,9 +512,15 @@ const sumBy = (
 export const sumIncomeCents = (ts: Summable[], accounts?: PaymentAccount[], income?: IncomeContext) =>
   sumBy(ts, accounts, 'income', income);
 
-/** Total money out, INTEGER CENTS, posted rows only. The one spending total. */
-export const sumExpenseCents = (ts: Summable[], accounts?: PaymentAccount[]) =>
-  sumBy(ts, accounts, 'expense');
+/**
+ * Total money out, INTEGER CENTS, posted rows only. The one spending total.
+ *
+ * `income` is optional and carries the REVIEW RECORDS, not just income sources: without
+ * it this function cannot see a confirmation, so a row the owner has confirmed as
+ * spending would be silently left out. Callers that hold the context pass it.
+ */
+export const sumExpenseCents = (ts: Summable[], accounts?: PaymentAccount[], income?: IncomeContext) =>
+  sumBy(ts, accounts, 'expense', income);
 
 // ----------------------------------------------------------------------------
 // The unknown-inflow review queue (FIN-INCOME-001 §6)

@@ -411,6 +411,62 @@ Every other transfer keeps the existing gate untouched.
 
 ---
 
+## 6b. Phase 2 — what shipped, and what it measures on the real export
+
+The owner answered the two blocking questions: **Remitly is "gone — it's an expense"**, and
+the one-way named lines are **"ask me per person"**. Neither answer was applied. Both set
+the DEFAULT a proposal carries; the owner still confirms, one group at a time.
+
+Built exactly as §6 proposed, plus three guards the real data forced (below).
+
+| | before | after |
+|---|---|---|
+| counterparty rows reaching the queue | 7 of 284 | **284 of 284** |
+| outbound counterparty rows reaching the queue | **0 of 155** | **155 of 155** |
+| counterparty money with a question attached | $6,163.00 | **$274,627.64** |
+| groups in the queue | 80 | 165 |
+
+**What the owner sees:** **85 `counterparty_line` groups** (277 rows, $274,627.64) alongside
+the 7 that already arrived as unknown inflows. **18 carry a suggestion; 67 honestly carry
+none.**
+
+| | groups | amount | evidence |
+|---|---|---|---|
+| outflow | 41 | $187,178.36 | `owner_stated_category` ×9, none ×32 |
+| inflow | 44 | $87,449.28 | `counterparty_settlement` ×8, `payroll_shape` ×1, none ×35 |
+
+That 67-with-nothing figure is the honest one and it matches §3: 20 of the one-way outbound
+keys and 27 of the inbound keys are a single row, and no evidence exists for them. The
+owner's "ask me per person" is satisfied by a per-counterparty group, not by a default.
+
+**Three guards, each fixing the same category error.** Wiring the person lanes in put 85 new
+groups in front of rungs that had never seen a person-to-person row, and each answered with
+something structurally impossible:
+
+| rung | wrong answers it gave | why it is wrong |
+|---|---|---|
+| `refund_candidate` | **30** inflow groups | a refund reverses a *purchase*; both legs of a person row carry the same transport string ("Zelle"), the same collision that cost the FIN-FLOW-001 audit $2,000 |
+| `same_day_opposite_leg` | **5** groups, one of them 10 rows / $11,064 | a row naming an external party is not money between accounts the owner holds — `signalOf()` has already said the opposite |
+| `interpretTransaction()`'s confirm veto | would have ignored **261 of 284** confirmations | the provider's `Transfer` means "money moved", not "money moved between accounts you own" |
+
+`payroll_shape` fires on one inflow group and was **deliberately left alone**: a named
+individual paying on a cadence into a deposit account really is that shape, and
+`earned_income` is a suggestion the owner confirms, not an assertion.
+
+**Confirming the Remitly proposal** (78 rows, $120,562.36, suggested `personal_expense` at
+0.71 confidence from the owner's own category words plus the one-way evidence):
+
+- 73 rows move `internal_transfer` → `personal_expense`; 5 were already `personal_expense`.
+- Lifetime spending **$164,818.03 → $277,766.46** (+$112,948.43, **+68.5%**).
+- **The Flow chart does not move** — links and nodes byte-identical. `buildFlowGraph()`
+  reads `classifyTransaction()`, which never re-derives a provider transfer. Confirming
+  changes totals, budgets and the forecast baseline, not the picture.
+- **Undo is "I can't classify these"**, the terminal answer the card already offers: it
+  writes `dismissed`, which is not `confirmed`, so every row falls back to exactly the
+  derived behaviour. Answering the group back to `internal_transfer` is a *different
+  answer*, not an undo — it also suppresses the 5 rows the importer had already made
+  spending, taking the total to $157,204.10.
+
 ## 7. What this measurement could NOT settle
 
 Stated plainly so nobody later mistakes silence for evidence.
