@@ -4,8 +4,10 @@ import React, { useMemo } from 'react';
 import Sheet from '@/components/Sheet';
 import CardCreditCard from '@/components/CardCreditCard';
 import DuplicateCandidateCard from '@/components/DuplicateCandidateCard';
+import MappingGroupCard from '@/components/MappingGroupCard';
 import RefundCandidateCard from '@/components/RefundCandidateCard';
 import { ReviewCandidate } from '@/lib/candidates';
+import { GroupDecision, decisionsToCover } from '@/lib/mapping-suggestions';
 import { DuplicateCostEstimate } from '@/lib/duplicates';
 import { formatMoneyCents } from '@/lib/money';
 import {
@@ -32,6 +34,9 @@ export interface RecoveryReviewPanelProps {
   onSelect: (key: string | null) => void;
   onSectionFilter: (section: SectionId | null) => void;
   onDecide: (item: ReviewQueueItem, decision: RecoveryDecision, candidate?: ReviewCandidate) => void;
+  /** MAP-001 — one answer for a whole pattern. Absent hides the group cards. */
+  onGroupDecide?: (item: ReviewQueueItem, decision: GroupDecision) => void;
+  todayISO?: string;
   onUndo: () => void;
   onAllocationEdited?: (info: { allocationCount: number; validationRejected: boolean }) => void;
   onClose: () => void;
@@ -74,6 +79,8 @@ function PanelBody({
   onSelect,
   onSectionFilter,
   onDecide,
+  onGroupDecide,
+  todayISO,
   onUndo,
   onAllocationEdited,
   onClose,
@@ -85,6 +92,11 @@ function PanelBody({
   const selected = visible.find((i) => i.key === selectedKey) ?? null;
   const position = selected ? visible.findIndex((i) => i.key === selected.key) : -1;
   const totals = useMemo(() => recoveryTotals({ ...ctx, estimates }), [ctx, estimates]);
+  // The number MAP-001 exists to produce: how little of this the owner actually has to
+  // answer. Shown, not buried in a log.
+  const groups = ctx.groups ?? [];
+  const groupRows = groups.reduce((s, g) => s + g.rowCount, 0);
+  const eighty = groups.length ? decisionsToCover(groups, 0.8) : 0;
 
   const byId = useMemo(() => new Map(ctx.transactions.map((t) => [t.id, t])), [ctx.transactions]);
   const estimateOf = (key: string) => estimates.find((e) => e.identityKey === key);
@@ -118,6 +130,12 @@ function PanelBody({
           <p className="text-sm text-[var(--foreground-secondary)]">
             {totals.matchedCount} refund{totals.matchedCount === 1 ? '' : 's'} matched · {money(totals.returnedCents)} returned
           </p>
+          {groups.length > 0 && (
+            <p className="text-sm text-[var(--foreground-secondary)]">
+              {groupRows} unmapped {groupRows === 1 ? 'row' : 'rows'} in {groups.length}{' '}
+              {groups.length === 1 ? 'pattern' : 'patterns'} · answer {eighty} to clear 80%
+            </p>
+          )}
           {/* Reported separately and NEVER added to the figure above. */}
           {totals.potentialAnnualDuplicateCostCents > 0 && (
             <p className="text-sm text-[var(--foreground-muted)]">
@@ -218,6 +236,18 @@ function PanelBody({
   function renderCard() {
     if (!selected) return null;
     const decide = (decision: RecoveryDecision, candidate?: ReviewCandidate) => onDecide(selected!, decision, candidate);
+
+    if (selected.source === 'group' && selected.group && onGroupDecide) {
+      return (
+        <MappingGroupCard
+          group={selected.group}
+          transactions={ctx.transactions}
+          accounts={ctx.accounts}
+          todayISO={todayISO ?? new Date().toISOString()}
+          onDecide={(decision) => onGroupDecide(selected!, decision)}
+        />
+      );
+    }
 
     if (selected.source === 'transaction' || selected.candidate?.candidateType === 'unknown_card_credit') {
       const creditId =

@@ -34,6 +34,13 @@ it is that **205 is too many to answer by hand**.
 **What would close it.** Pattern grouping (one decision covering N rows), not 205
 individual answers. See §6.
 
+**Status: the ask is closed, the rows are not.** MAP-001 (`src/lib/mapping-suggestions.ts`)
+groups them. Measured on the real export, read-only, 2026-08-02: the 229 unknown inflows
+this repo's own selector produces collapse to **50 groups**. In the shipped impact order
+(rows x amount) **29 groups cover 80% of the rows and 8 cover 80% of the money**; ordered
+by row count alone it is **16**. Every row still needs an answer eventually — but it is now
+50 questions, not 229.
+
 ---
 
 ## 2. Unpaired transfer legs — 103 rows
@@ -57,6 +64,12 @@ loosening it carries real risk for no measured gain.
 
 **What would close it.** Importing the missing accounts, or letting the owner say
 "this leg's counterpart is outside my data" once per pattern so it stops asking.
+
+**Status: the second half is closed.** MAP-001 groups the 103 into **30 groups**, of which
+**13 cover 80% of the rows and 7 cover 80% of the money**, and gives each group a terminal
+"I can't classify these — stop asking" answer that persists to the existing review record
+and suppresses the PATTERN, rows imported later included. `transfers.ts` is untouched and
+the pairing window is unchanged.
 
 ---
 
@@ -131,6 +144,9 @@ Ranked by how much of the picture each unlocks.
 
 | Gap | Closed by | Commit |
 |---|---|---|
+| 205 + 103 individual answers was not a workable ask | pattern grouping — 332 rows into 80 groups, one decision each | MAP-001 |
+| The queue had no terminal "I can't classify this" | `markGroupUnknown()` -> `dismissed` + `group_marked_unknown` on the existing review record; suppresses the pattern, not just the row | MAP-001 |
+| A rule could not be scoped to a direction, an account or future rows | three OPTIONAL fields on `MappingRule.match` (`direction`, `accountId`, `onOrAfter`); every pre-existing rule unchanged | MAP-001 |
 | `sourceCategory === 'Paychecks'` was the income test | approved income sources | `6ca3dd3` |
 | Income source could not match a differently-worded bank line | `matchAliases` + the "Bank description contains" field | `d904e5c` |
 | Card payment counted as both income and expense on some screens | one shared `interpretTransaction()` | `98ed70a` |
@@ -142,10 +158,39 @@ Ranked by how much of the picture each unlocks.
 
 ---
 
-## 8. TO CONFIRM
+## 8. Answered (was TO CONFIRM)
 
-- **Monarch CSV `Tags` column.** `Notes`/`Memo`/`Extended Details` ARE imported
-  (`CSVImportModal.tsx:338` → `description`). Whether a `Tags` column exists in the
-  owner's export and is dropped is unverified. Check: grep the export header row.
-- **Whether any of the 205 unknown deposits are the missing counterparts of the 103
-  unpaired legs.** Not yet cross-referenced; would reduce both numbers at once.
+- **Monarch CSV `Tags` column — CONFIRMED PRESENT, and immaterial.** The export header is
+  `Date,Merchant,Category,Account,Original Statement,Notes,Amount,Tags,Owner,Reviewed`, so
+  `Tags` does exist and the importer does drop it. Measured across all 2,913 rows:
+  **2 rows carry a non-empty tag.** Wiring it up would recover 0.07% of the ledger, so it
+  is recorded as answered and NOT worth an ingest change. Re-measure if the owner starts
+  tagging in Monarch.
+
+- **Are the unknown deposits the missing counterparts of the unpaired legs? MOSTLY NOT.**
+  Measured 2026-08-02, read-only, matching each unknown inflow against an unpaired OUT leg
+  of the same amount in a *different* account:
+
+  | Window | Matches (of 229 unknown inflows / 176 unpaired out legs) |
+  |---|---|
+  | same day (±1d) | **10** |
+  | ±3d | 12 |
+  | ±7d | 12 |
+  | ±30d | 14 |
+  | any date at all | 28 |
+
+  So **at most ~4–6% overlap**, and the "any date" figure is the same coincidence class
+  §2 already documented (6–798 days apart). **This does not justify widening the pairing
+  window** — it confirms §2's conclusion from the other direction. What it DOES justify is
+  surfacing the same-day case as evidence, which MAP-001 does: `same_day_opposite_leg` is
+  one of the four suggestion sources, and on the real export it fires for **17 of the 80
+  groups** (12 of the 30 leg groups). The owner decides; nothing is paired automatically.
+
+## 9. Still open
+
+- **The 39 smaller categories in the spending residual** are named but not eliminated (§4).
+  MAP-001 covers unknown INFLOWS and unpaired LEGS; vague-category *spending* rows
+  (measured: 55 rows, 52 of them spending, in 23 merchant groups) are not in the queue and
+  would be a straightforward third `UnmappedKind` on the same machinery.
+- **Rules still have no management surface** (§5): MAP-001 creates them with a preview but
+  they still cannot be listed, edited, reordered or disabled after the fact.

@@ -12,12 +12,50 @@
 
 import { EXPENSE_CATEGORIES, ExpenseCategory, Transaction, TransactionType } from '@/types';
 
+/**
+ * MAP-001 added three OPTIONAL qualifiers to `match`. Absent — which is every rule
+ * written before they existed — means exactly what it always meant: any direction, any
+ * account, any date. So no stored rule changes behaviour, and `applyMappingRules` keeps
+ * its signature.
+ *
+ * `direction` exists because it was measured to be necessary, not because it was tidy:
+ * on the owner's real export, a `merchant contains ⟨normalized⟩` rule generated from an
+ * unknown-INFLOW group reached 1,104 extra rows across 29 of 43 groups, 604 of them
+ * OUTFLOWS to the same merchant. Without this field the only honest scope would have
+ * been "this group only", i.e. no persistent learning at all.
+ */
+export interface RuleMatch {
+  field: 'merchant' | 'title' | 'description';
+  op: 'contains' | 'equals';
+  value: string;
+  /** Money in or money out. Absent = both, the pre-MAP-001 meaning. */
+  direction?: 'inflow' | 'outflow';
+  /** One account. Absent = every account. */
+  accountId?: string;
+  /** ISO day. Absent = all history; present = rows dated on or after it only. */
+  onOrAfter?: string;
+}
+
 export interface MappingRule {
   id: string;
-  match: { field: 'merchant' | 'title' | 'description'; op: 'contains' | 'equals'; value: string };
+  match: RuleMatch;
   set: { category?: ExpenseCategory; sourceCategory?: string; type?: TransactionType; merchant?: string };
   createdAt: string; // ISO
   enabled: boolean;
+}
+
+/**
+ * Which way the money went, from the row alone — no `accounts`, no `classify` import, so
+ * this module stays the pure leaf it has always been. A stored `transferDirection` is
+ * provider-sourced and wins; otherwise the ingest `type` says it. A row that answers
+ * neither (a transfer with no stored direction) matches no direction-scoped rule, which
+ * is the safe way to be unsure.
+ */
+export function rowDirection(txn: Partial<Transaction>): 'inflow' | 'outflow' | null {
+  if (txn.transferDirection) return txn.transferDirection === 'in' ? 'inflow' : 'outflow';
+  if (txn.type === 'income') return 'inflow';
+  if (txn.type === 'expense') return 'outflow';
+  return null;
 }
 
 /** What a caller hands to addRule — id/createdAt are filled in by the store. */
@@ -39,7 +77,15 @@ function ruleMatches(rule: MappingRule, txn: Partial<Transaction>): boolean {
   if (typeof field !== 'string') return false; // field absent on this row → no match
 
   const haystack = field.toLowerCase();
-  return rule.match.op === 'equals' ? haystack.trim() === needle : haystack.includes(needle);
+  if (rule.match.op === 'equals' ? haystack.trim() !== needle : !haystack.includes(needle)) return false;
+
+  // The optional qualifiers. Each one only ever NARROWS, and an absent one is skipped —
+  // that is what keeps every pre-existing rule matching exactly what it used to.
+  const { direction, accountId, onOrAfter } = rule.match;
+  if (direction && rowDirection(txn) !== direction) return false;
+  if (accountId && txn.accountId !== accountId) return false;
+  if (onOrAfter && (txn.date ?? '').slice(0, 10) < onOrAfter) return false;
+  return true;
 }
 
 /**
@@ -81,7 +127,13 @@ export function rulePreview(
 const categoryLabel = (c: ExpenseCategory): string =>
   EXPENSE_CATEGORIES.find((x) => x.value === c)?.label ?? c;
 
-/** Plain English: `merchant contains "AMZN" → category Shopping`. */
+/**
+ * Plain English: `merchant contains "AMZN" → category Shopping`.
+ *
+ * A qualifier that is set is SAID. A rule whose scope is invisible is the thing
+ * FIN-REVIEW-002 §7.3 exists to prevent, and a silent narrowing is as misleading as a
+ * silent widening.
+ */
 export function describeRule(rule: MappingRule): string {
   const { category, sourceCategory, type, merchant } = rule.set;
   const effects = [
@@ -91,7 +143,14 @@ export function describeRule(rule: MappingRule): string {
     merchant && `merchant "${merchant}"`,
   ].filter(Boolean);
 
-  return `${rule.match.field} ${rule.match.op} "${rule.match.value}" → ${
-    effects.length ? effects.join(', ') : 'no change'
-  }`;
+  const { direction, accountId, onOrAfter } = rule.match;
+  const qualifiers = [
+    direction && (direction === 'inflow' ? 'money in only' : 'money out only'),
+    accountId && 'one account only',
+    onOrAfter && `dated ${onOrAfter} or later`,
+  ].filter(Boolean);
+
+  return `${rule.match.field} ${rule.match.op} "${rule.match.value}"${
+    qualifiers.length ? ` (${qualifiers.join(', ')})` : ''
+  } → ${effects.length ? effects.join(', ') : 'no change'}`;
 }

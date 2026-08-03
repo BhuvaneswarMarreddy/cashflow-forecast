@@ -10,6 +10,10 @@ import { Maximize2, Minimize2 } from 'lucide-react';
 import Navbar from '@/components/Navbar';
 import ReconcileSheet from '@/components/ReconcileSheet';
 import RecoveryReviewPanel from '@/components/RecoveryReviewPanel';
+import {
+  GroupDecision, MappingGroup, UNPAIRED_LEG_LANE_IDS,
+  buildMappingGroups, confirmGroupMeaning, markGroupUnknown,
+} from '@/lib/mapping-suggestions';
 import { RelationBadgeRow } from '@/components/TransactionRelationBadge';
 import { useAuth } from '@/context/AuthContext';
 import { useTransactions } from '@/context/TransactionContext';
@@ -30,6 +34,8 @@ import { LinkDraft, REFUND_SOURCE_TYPES, TransactionLink, buildLink, toTxRef } f
 import { getLinks, getReviewCandidates, recordCandidateDecision, saveLink, saveReviewCandidate } from '@/lib/relations-store';
 import { buildAliasIndex, resolveServiceIdentity } from '@/lib/service-identity';
 import { useRecoveryObservability } from '@/lib/obs/useRecoveryObservability';
+import { emit } from '@/lib/obs/events';
+import { newTraceId } from '@/lib/obs/trace';
 import {
   QueueContext, RecoveryDecision, REVIEW_SECTIONS, ReviewQueueItem, SectionId,
   buildReviewQueue, queueBadgeLabel, queueCounts, relationBadges, rowLabel, supersededLinks,
@@ -155,7 +161,7 @@ interface UndoRecord {
 
 export default function FlowPage() {
   const { isAuthenticated, isLoading: authLoading, user } = useAuth();
-  const { transactions } = useTransactions();
+  const { transactions, rules, addRule } = useTransactions();
   const { profile, reconcileAccount, incomeContext, setInflowReview } = useUserProfile();
 
   const [reconcileFor, setReconcileFor] = useState<{ accountId: string; name: string; derived: number } | null>(null);
@@ -803,9 +809,26 @@ export default function FlowPage() {
     [recoveryLoaded, transactions, accounts, incomeContext]
   );
 
+  // MAP-001 — the unmapped, gathered into patterns. Derived from the ledger the graph
+  // already built, so the unpaired legs are exactly the rows sitting in the four
+  // "other leg not found" lanes and not a second, differently-computed set.
+  const unpairedLegIds = useMemo(
+    () => UNPAIRED_LEG_LANE_IDS.flatMap((id) => graph.nodeTxnIds[id] ?? []),
+    [graph]
+  );
+  const groups: MappingGroup[] = useMemo(
+    () => (recoveryLoaded
+      ? buildMappingGroups({
+          transactions, accounts, inflowItems, unpairedLegIds, rules,
+          income: incomeContext, todayISO,
+        })
+      : []),
+    [recoveryLoaded, transactions, accounts, inflowItems, unpairedLegIds, rules, incomeContext, todayISO]
+  );
+
   const queueCtx: QueueContext = useMemo(
-    () => ({ transactions, accounts, links, candidates, inflowItems, estimates }),
-    [transactions, accounts, links, candidates, inflowItems, estimates]
+    () => ({ transactions, accounts, links, candidates, inflowItems, estimates, groups }),
+    [transactions, accounts, links, candidates, inflowItems, estimates, groups]
   );
   const queue = useMemo(() => buildReviewQueue(queueCtx), [queueCtx]);
   const counts = useMemo(() => queueCounts(queue), [queue]);
@@ -1063,6 +1086,69 @@ export default function FlowPage() {
     setUndoRecord(null);
   }, [undoRecord, user?.id, txRefs, links, obs]);
 
+  /**
+   * ONE answer for a whole pattern. Same store as every other decision on this surface:
+   * a review record per row, plus — only when the owner asked for it and the engine can
+   * express it — one MappingRule. Nothing is written before the Confirm button is pressed.
+   */
+  const onGroupDecide = useCallback(
+    (item: ReviewQueueItem, decision: GroupDecision) => {
+      const group = item.group;
+      if (!group) return;
+      const startedAt = Date.now();
+      const at = new Date().toISOString();
+      const writes =
+        decision.action === 'unknown'
+          ? markGroupUnknown(group, at)
+          : confirmGroupMeaning(group, decision.meaning!, at, decision.incomeSourceId);
+
+      for (const review of writes) {
+        void setInflowReview(review).catch(() =>
+          setAnnouncement('That answer could not be saved. Please try again.')
+        );
+      }
+      if (decision.rule) void addRule(decision.rule).catch(() => {});
+
+      // Counts, scope and confidence only — never a merchant, a counterparty or an amount.
+      emit({
+        eventName: decision.action === 'unknown' ? 'Mapping.MarkedUnknown' : 'Mapping.GroupConfirmed',
+        traceId: newTraceId(),
+        route: '/flow',
+        component: 'FlowPage.onGroupDecide',
+        durationMs: Date.now() - startedAt,
+        recordCount: writes.length,
+        resultStatus: 'ok',
+        metadata: {
+          kind: group.kind,
+          scope: decision.scope,
+          suggestionEvidence: group.suggestion?.evidence ?? 'none',
+          suggestionConfidence: group.suggestion?.confidence ?? 0,
+          ruleCreated: !!decision.rule,
+        },
+      });
+      if (decision.rule) {
+        emit({
+          eventName: 'Mapping.RuleCreated',
+          traceId: newTraceId(),
+          route: '/flow',
+          component: 'FlowPage.onGroupDecide',
+          resultStatus: 'ok',
+          metadata: { scope: decision.scope, hasDirection: !!decision.rule.match.direction },
+        });
+      }
+
+      setAnnouncement(
+        decision.action === 'unknown'
+          ? `Saved — we will stop asking about this pattern. All ${writes.length} rows stay in your history.`
+          : `Saved for ${writes.length} ${writes.length === 1 ? 'row' : 'rows'}.${
+              decision.rule ? ' Future imports will land the same way.' : ''
+            }`
+      );
+      setSelectedKey(null);
+    },
+    [setInflowReview, addRule]
+  );
+
   const reviewPanelProps = {
     items: queue,
     ctx: queueCtx,
@@ -1076,6 +1162,8 @@ export default function FlowPage() {
     onDecide,
     onUndo,
     onAllocationEdited: obs.trackAllocationEdited,
+    onGroupDecide,
+    todayISO,
     onClose: closeReview,
   };
 
