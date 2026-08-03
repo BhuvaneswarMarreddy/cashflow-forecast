@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import * as path from 'path';
 import { loadFromCsvDir } from './load-csv';
 import { Ledger } from './load';
-import { findTransactions, getLedgerSummary } from './tools';
+import { explainCounterparty, findTransactions, getLedgerSummary, getRecurring } from './tools';
 
 const FIXTURES = path.join(process.cwd(), 'mcp', 'fixtures');
 
@@ -131,6 +131,54 @@ test('find_transactions: query, account and amount filters', () => {
   assert.equal(findTransactions(l, { query: 'groceries' }).totalMatches, 1);
   assert.equal(findTransactions(l, { account: 'rewards®' }).totalMatches, 9);
   assert.equal(findTransactions(l, { min_amount: 100, max_amount: 500 }).totalMatches, 6);
+});
+
+// ---------------------------------------------------------------------------
+// STEP 4 — explain_counterparty + get_recurring
+// ---------------------------------------------------------------------------
+
+test('explain_counterparty: resolves a Zelle-shaped description and reports signFlips', () => {
+  const r = explainCounterparty(fixtureLedger(), { name: 'John Doe' });
+  assert.equal(r.name, 'JOHN DOE');
+  assert.equal(r.displayName, 'John Doe');
+  assert.equal(r.matchedBy, 'counterparty'); // personFrom equality, not text fallback
+  // Lend-and-repay: out $200 then in $300 — the balance crosses zero once.
+  assert.equal(r.ledger!.outCents, 20000);
+  assert.equal(r.ledger!.inCents, 30000);
+  assert.equal(r.ledger!.netCents, -10000); // negative: more received than sent
+  assert.equal(r.ledger!.signFlips, 1);
+  assert.equal(r.ledger!.firstDirection, 'out');
+  assert.equal(r.rows.length, 2);
+  assert.equal(r.rows[0].date, '2026-07-15'); // newest first
+});
+
+test('explain_counterparty: text fallback when the extractor has no shape for the name', () => {
+  const r = explainCounterparty(fixtureLedger(), { name: 'ACME GYM' });
+  assert.equal(r.matchedBy, 'text');
+  assert.equal(r.ledger!.outRows, 2);
+  assert.equal(r.ledger!.inRows, 0);
+  assert.equal(r.ledger!.netCents, 5000);
+});
+
+test('get_recurring: finds the planted monthly series and rejects the 2-occurrence one', () => {
+  const r = getRecurring(fixtureLedger(), {}, '2026-07-20');
+  const streaming = r.items.find((i) => i.merchant === 'ACME STREAMING')!;
+  assert.equal(streaming.cadence, 'monthly');
+  assert.equal(streaming.medianCents, 999);
+  assert.equal(streaming.occurrences, 4);
+  assert.equal(streaming.active, true); // last seen 07-10, 10 days before injected today
+  assert.equal(r.items.some((i) => i.merchant === 'ACME GYM'), false); // only 2 occurrences
+  assert.equal(r.monthlyTotalActiveCents, 999);
+});
+
+test('get_recurring: active_only and merchant filters', () => {
+  const l = fixtureLedger();
+  // 200 days after the last charge, the monthly series reads lapsed.
+  const stale = getRecurring(l, { active_only: true }, '2027-01-26');
+  assert.equal(stale.items.length, 0);
+  assert.equal(stale.monthlyTotalActiveCents, 0);
+  const named = getRecurring(l, { merchant: 'streaming' }, '2026-07-20');
+  assert.equal(named.items.length, 1);
 });
 
 test('loader: id is file:rowIndex and text columns map verbatim', () => {

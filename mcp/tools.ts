@@ -12,7 +12,10 @@ import { z } from 'zod';
 import { Transaction } from '@/types';
 import { buildLedgerSummary } from '@/lib/chat-summary';
 import { classifyTransaction } from '@/lib/classify';
-import { day, toCents } from '@/lib/flows';
+import { displayPerson, personFrom } from '@/lib/counterparty';
+import { day, detectRecurring, normalizeMerchant, toCents } from '@/lib/flows';
+import { detectCounterpartyLedger } from '@/lib/mapping-evidence';
+import { rowDirection } from '@/lib/mapping-rules';
 import { Ledger } from './load';
 
 // ---------------------------------------------------------------------------
@@ -36,6 +39,23 @@ export const TOOL_DESCRIPTIONS = {
     'never from the stored type — a credit card payment is a transfer, neither income nor spending. ' +
     '`totals` {incomeCents, expenseCents, transferredCents} are computed over ALL matches even when the row list ' +
     'is truncated: use the cents totals rather than adding the returned rows yourself.',
+  explain_counterparty:
+    'The whole two-way relationship with ONE counterparty — a person or payee named in statement text (a Zelle ' +
+    'recipient, a remittance destination), where the merchant column only names the transport. Matches rows by ' +
+    'the extracted counterparty name first, falling back to a case-insensitive text search over ' +
+    'description/title. Ledger amounts are INTEGER CENTS; row amounts are DOLLARS. `netCents` is outbound minus ' +
+    'inbound — positive means the owner has SENT more than they received. `signFlips` counts how many times the ' +
+    'running balance with this party changes sign, and separates the two relationship kinds: 0-1 flips is ' +
+    'loan-shaped (one side fronted money and it came back), 2 or more is a running tab both sides keep adding ' +
+    'to. Returns up to 25 newest matching rows.',
+  get_recurring:
+    'Recurring charges detected from repetition in the ledger itself. Amounts are INTEGER CENTS (medianCents, ' +
+    'monthlyCents, monthlyTotalActiveCents). Detection requires at least 3 occurrences on distinct days with a ' +
+    'median amount of at least $5 and a stable gap; the cadence (weekly/biweekly/monthly/quarterly/yearly) is ' +
+    'DETECTED from the observed gaps, never guessed from the merchant name. `active` is judged against today — ' +
+    'seen within ~1.5 of its own cycle length — so a stale export makes a healthy subscription read as lapsed; ' +
+    'check the ledger span before trusting a lapse. monthlyTotalActiveCents sums the detector\'s own ' +
+    'monthlyCents over active items only.',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -148,4 +168,67 @@ export function findTransactions(ledger: Ledger, args: z.input<typeof FindArgs> 
     totals,
     rows,
   };
+}
+
+// ---------------------------------------------------------------------------
+// explain_counterparty
+// ---------------------------------------------------------------------------
+
+export const explainCounterpartyShape = {
+  name: z.string().min(1).describe('The counterparty, e.g. "REMITLY" or a person named in Zelle statement text'),
+};
+const ExplainArgs = z.object(explainCounterpartyShape);
+
+export function explainCounterparty(ledger: Ledger, args: z.input<typeof ExplainArgs>) {
+  const { name } = ExplainArgs.parse(args);
+  const target = name.trim().toUpperCase();
+  // Extraction equality first — the same personFrom the flow graph groups by — then a
+  // plain text fallback so a payee the extractor has no shape for is still answerable.
+  const byPerson = ledger.transactions.filter((t) => personFrom(t.description ?? t.title) === target);
+  const q = name.trim().toLowerCase();
+  const rows = byPerson.length
+    ? byPerson
+    : ledger.transactions.filter(
+        (t) => (t.description ?? '').toLowerCase().includes(q) || t.title.toLowerCase().includes(q)
+      );
+  // The same direction predicate mapping-suggestions uses: rowDirection, null -> 'in'.
+  const direction = (t: Transaction): 'in' | 'out' => (rowDirection(t) === 'outflow' ? 'out' : 'in');
+  return {
+    ...envelope(ledger),
+    name: target,
+    displayName: displayPerson(target),
+    matchedBy: (byPerson.length ? 'counterparty' : 'text') as 'counterparty' | 'text',
+    ledger: detectCounterpartyLedger(rows, direction),
+    rows: newestFirst(rows).slice(0, 25).map((t) => rowOf(t, ledger)),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// get_recurring
+// ---------------------------------------------------------------------------
+
+export const getRecurringShape = {
+  active_only: z.boolean().describe('Only items still active against today (default false)').optional(),
+  merchant: z.string().describe('Substring filter on the normalized merchant name').optional(),
+};
+const RecurringArgs = z.object(getRecurringShape);
+
+export function getRecurring(
+  ledger: Ledger,
+  args: z.input<typeof RecurringArgs> = {},
+  // Wall-clock by contract; injectable so the fixture tests are deterministic.
+  todayISO: string = new Date().toISOString().slice(0, 10)
+) {
+  const a = RecurringArgs.parse(args);
+  let items = detectRecurring(ledger.transactions, ledger.accounts, todayISO);
+  if (a.merchant) {
+    const q = normalizeMerchant(a.merchant);
+    items = items.filter((i) => i.merchant.includes(q));
+  }
+  if (a.active_only) items = items.filter((i) => i.active);
+  // Allowed display sum: the lib's own monthlyCents over active items.
+  const monthlyTotalActiveCents = items
+    .filter((i) => i.active)
+    .reduce((s, i) => s + i.monthlyCents, 0);
+  return { ...envelope(ledger), items, monthlyTotalActiveCents };
 }

@@ -11,8 +11,10 @@ import { redactString } from '@/lib/obs/redact';
 import { Ledger, fail, loadLedger } from './load';
 import {
   TOOL_DESCRIPTIONS,
+  explainCounterparty, explainCounterpartyShape,
   findTransactions, findTransactionsShape,
   getLedgerSummary,
+  getRecurring, getRecurringShape,
 } from './tools';
 
 /**
@@ -42,6 +44,14 @@ export function buildServer(): McpServer {
   server.registerTool('find_transactions',
     { description: TOOL_DESCRIPTIONS.find_transactions, inputSchema: findTransactionsShape },
     wrap(findTransactions));
+
+  server.registerTool('explain_counterparty',
+    { description: TOOL_DESCRIPTIONS.explain_counterparty, inputSchema: explainCounterpartyShape },
+    wrap((ledger, args) => explainCounterparty(ledger, args as { name: string })));
+
+  server.registerTool('get_recurring',
+    { description: TOOL_DESCRIPTIONS.get_recurring, inputSchema: getRecurringShape },
+    wrap(getRecurring));
 
   return server;
 }
