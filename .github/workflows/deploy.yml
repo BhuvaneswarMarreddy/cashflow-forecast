@@ -75,7 +75,15 @@ jobs:
       - name: Deploy functions and hosting
         env:
           # The CLI reads this itself — nothing to write to disk, nothing to clean up.
+          # It also prints a deprecation notice: FIREBASE_TOKEN is going away in favour
+          # of GOOGLE_APPLICATION_CREDENTIALS. Still works; the upgrade path is a
+          # datastore-viewer-style service account, documented in DEPLOY-PIPELINE.md.
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          # hosting.source = "." with frameworksBackend makes this a web-framework
+          # deploy, which is still behind an experiment flag. Enabled once on this
+          # laptop years ago and stored in ~/.config/configstore — invisible locally,
+          # absent on every fresh runner. Same root cause as the rules-emulator fix.
+          FIREBASE_CLI_EXPERIMENTS: webframeworks
         run: |
           if [ -z "$FIREBASE_TOKEN" ]; then
             echo "::error::FIREBASE_TOKEN secret is not set. Run 'firebase login:ci' and add it. See docs/ci/DEPLOY-PIPELINE.md."
