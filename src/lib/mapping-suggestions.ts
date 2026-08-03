@@ -24,13 +24,19 @@
  */
 
 import { FinancialMeaning, IncomeSource, InflowReview, PaymentAccount, Transaction } from '@/types';
+import { ReviewCandidate } from './candidates';
 import { IncomeContext, InflowReviewItem, selectInflowReviewQueue } from './classify';
 import { unpairedLegLane } from './flow-lanes';
 import { BANDS, daysBetween, day, isSelfPerson, median, normalizeMerchant, personFrom, toCents } from './flows';
+import {
+  PayerSeries, detectLoanProceeds, detectPayerSeries, isDepositAccount, missingPeriods,
+  refundEvidenceFor, seriesEndDate, sharedTokens,
+} from './mapping-evidence';
 import { MappingRule, NewMappingRule, RuleMatch, describeRule, rowDirection, rulePreview } from './mapping-rules';
 import { formatMoneyCents } from './money';
 import { emit } from './obs/events';
 import { newTraceId } from './obs/trace';
+import { generateRefundCandidates } from './refunds';
 
 // ---------------------------------------------------------------------------
 // What an unmapped row is, and what identifies its group
@@ -70,11 +76,15 @@ export const SCOPE_LABEL: Record<GroupScope, string> = {
   future_only: 'Rows imported from today onwards',
 };
 
-/** The four evidence kinds. Each is a fact the ledger already contains. */
+/** The evidence kinds. Each is a fact the ledger already contains. */
 export type SuggestionEvidence =
   | 'existing_rule'
   | 'prior_confirmation'
   | 'approved_income_source'
+  // --- MAP-002 -------------------------------------------------------------
+  | 'refund_candidate'
+  | 'payroll_shape'
+  | 'loan_proceeds'
   | 'same_day_opposite_leg';
 
 export interface MappingSuggestion {
@@ -85,6 +95,12 @@ export interface MappingSuggestion {
   set?: MappingRule['set'];
   /** The approved source, when that is the evidence. */
   incomeSourceId?: string;
+  /**
+   * MAP-002 — a PRE-FILLED income source the owner may choose to create, derived
+   * entirely from the series that produced this suggestion. It is a proposal in memory
+   * and nothing more: no id, and no write happens until a button is pressed.
+   */
+  incomeSourceOffer?: Omit<IncomeSource, 'id'>;
   /** How many ledger facts back this. Never a model output. */
   supportCount: number;
   /** 0..1, an explainable ladder. */
@@ -114,6 +130,12 @@ export interface MappingGroup {
   /** Present when the group's own dates fall in one of `flows.ts`'s existing bands. */
   cadence?: (typeof BANDS)[number][0];
   suggestion: MappingSuggestion | null;
+  /**
+   * MAP-002 — things the ledger says ABOUT this group that are not an answer to it.
+   * "Five expected payments from this payer are absent" is not a candidate to confirm;
+   * it tells the owner their import may be incomplete. Informational, never actionable.
+   */
+  findings: string[];
   /** rows × dollars — the ranking key, so the biggest question is asked first. */
   impactScore: number;
 }
@@ -127,6 +149,13 @@ export interface UnmappedContext {
   unpairedLegIds?: readonly string[];
   rules?: readonly MappingRule[];
   income?: IncomeContext;
+  /**
+   * MAP-002 — FIN-REFUND-001's OWN output. Pass the run the page already computed; this
+   * module does no refund matching of its own and never will. Absent and with accounts
+   * present, the generator is called here so a caller that has not wired it still gets
+   * the evidence — at the cost of one extra run, which is why /flow passes its own.
+   */
+  refundCandidates?: readonly ReviewCandidate[];
   todayISO?: string;
 }
 
@@ -183,6 +212,29 @@ function cadenceOf(dates: string[]): MappingGroup['cadence'] {
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /**
+ * Everything about a group that more than one rung of the ladder needs, computed ONCE.
+ * `series` in particular is read by three rungs — the payroll offer, the missing-period
+ * finding, and the guard that stops a payer's deposits being called a transfer.
+ */
+interface GroupFacts {
+  signalValue: string;
+  direction: 'inflow' | 'outflow';
+  accountIds: string[];
+  /** Repeated payments from this one payer, on a cadence, in a consistent band. */
+  series: PayerSeries | null;
+  /** The last day ANY row in the ledger falls on — what "has this stopped?" is asked of. */
+  ledgerLastDate: string;
+  /** Later money going back to the same party. Loan repayments look exactly like this. */
+  laterOutflowsToSamePayer: Transaction[];
+}
+
+/** `IncomeSource.frequency` cannot express every band, and an offer it cannot express
+ *  is not made. The suggestion still stands — only the pre-filled source is withheld. */
+const OFFERABLE_FREQUENCY: Partial<Record<PayerSeries['cadence'], IncomeSource['frequency']>> = {
+  weekly: 'weekly', biweekly: 'biweekly', monthly: 'monthly', yearly: 'yearly',
+};
+
+/**
  * The first evidence that holds, in confidence order. `null` is a legitimate and common
  * answer: when the ledger says nothing, this module says nothing. It never fills the gap
  * with a plausible-sounding default, because a plausible default is exactly how a
@@ -190,10 +242,12 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
  */
 function suggestFor(
   rows: Transaction[],
-  signalValue: string,
+  facts: GroupFacts,
   ctx: UnmappedContext,
-  siblings: Transaction[]
+  siblings: Transaction[],
+  refundCandidates: readonly ReviewCandidate[]
 ): MappingSuggestion | null {
+  const signalValue = facts.signalValue;
   // 1. The owner already wrote a rule that catches these rows.
   const hit = (ctx.rules ?? []).find(
     (r) => r.enabled && rulePreview(r, rows as Transaction[]).matches > 0
@@ -250,16 +304,130 @@ function suggestFor(
     };
   }
 
-  // 4. The counterpart is sitting in another account you own, on the same day, for the
-  //    same amount. Nothing is PAIRED here — `transfers.ts` is untouched. This only
-  //    tells the owner what the ledger already shows and lets them decide.
+  // 4. FIN-REFUND-001 has ALREADY proposed a purchase for these credits.
+  //    A group whose rows the refund matcher has matched must say so instead of "you
+  //    decide" — the work is done, it is sitting one screen away, and asking the owner to
+  //    rediscover it is the defect this whole task exists to fix. No matching happens
+  //    here; `refundEvidenceFor()` reads that generator's output and cites its score.
+  const refunds = refundEvidenceFor(rows, refundCandidates);
+  if (refunds) {
+    return {
+      evidence: 'refund_candidate',
+      meaning: 'refund',
+      supportCount: refunds.rowIds.length,
+      // The generator's own ladder, capped below owner-confirmed evidence.
+      confidence: Math.min(0.9, refunds.bestScore),
+      why:
+        `Your refund review already proposes a matching purchase for ${plural(refunds.rowIds.length, 'row')} ` +
+        `here — ${refunds.exact} exact, ${refunds.partial} partial and ${refunds.combined} combined`,
+    };
+  }
+
+  // 5. The PAYROLL SHAPE: one payer, a detectable cadence, a consistent amount band, a
+  //    deposit account, more than one month. Every one of those is a fact on the rows.
+  //
+  //    This suggests `earned_income` and OFFERS the income source — pre-filled with the
+  //    payer's name, the aliases shared by the rows' own text, the median amount, the
+  //    detected frequency and, when the series has stopped, the end date derived from
+  //    its last payment. That end date is the valuable part: the owner remembered "about
+  //    April"; the ledger knows the day.
+  const series = facts.series;
+  const accountsOf = (id: string) => (ctx.accounts ?? []).find((a) => a.id === id);
+  const intoDepositAccount =
+    facts.accountIds.length > 0 && facts.accountIds.every((id) => isDepositAccount(accountsOf(id)));
+  if (series && facts.direction === 'inflow' && signalValue && series.months >= 2 && intoDepositAccount) {
+    const endDate = seriesEndDate(series, facts.ledgerLastDate);
+    const frequency = OFFERABLE_FREQUENCY[series.cadence];
+    return {
+      evidence: 'payroll_shape',
+      meaning: 'earned_income',
+      supportCount: series.occurrences,
+      // Explainable ladder, four independent signals over a base of 0.5. A shape is
+      // inference, so it starts below every rung above it and tops out at 0.85 — it can
+      // never reach the 0.9 the owner's own confirmed answer carries.
+      // ponytail: no size floor — a small regular deposit scores the same as a salary.
+      // Upgrade path if that proves noisy is a floor derived from the ledger's own inflow
+      // distribution, not a hard-coded dollar figure.
+      confidence:
+        0.5 +
+        (series.occurrences >= 6 ? 0.1 : 0) +
+        (series.months >= 6 ? 0.1 : 0) +
+        (series.bandTight ? 0.1 : 0) +
+        (series.inBand >= 0.8 ? 0.05 : 0),
+      ...(frequency
+        ? {
+            incomeSourceOffer: {
+              name: signalValue,
+              amount: series.medianCents / 100,
+              frequency,
+              isActive: !endDate,
+              ...(endDate ? { endDate } : {}),
+              matchAliases: sharedTokens(rows),
+              depositAccountIds: facts.accountIds,
+              amountToleranceCents: series.toleranceCents,
+              // Pressing the button IS the approval; nothing here writes without one.
+              userApproved: true,
+              historicalMatchCount: series.occurrences,
+            },
+          }
+        : {}),
+      why:
+        `${plural(series.occurrences, 'payment')} from "${signalValue}" between ${series.firstDate} and ` +
+        `${series.lastDate}, ${series.cadence}, ` +
+        `${series.bandTight ? 'typically' : 'varying around'} ${formatMoneyCents(series.medianCents)} each, ` +
+        `into an account you deposit into${endDate ? `, and none since ${endDate}` : ''}`,
+    };
+  }
+
+  // 6. BORROWED money. A large one-off credit from a party the owner either holds a loan
+  //    account with, or repaid afterwards on a cadence for far less each time.
+  const loan = detectLoanProceeds(rows, signalValue, facts.laterOutflowsToSamePayer, ctx.accounts ?? []);
+  if (loan) {
+    const parts = [
+      loan.loanAccountName ? `it came from "${signalValue}", which is also the name of a loan account you hold` : '',
+      loan.repaymentCount
+        ? `${plural(loan.repaymentCount, 'payment')} went back to "${signalValue}" afterwards, ` +
+          `${loan.repaymentCadence}, each far smaller than this credit`
+        : '',
+    ].filter(Boolean);
+    return {
+      evidence: 'loan_proceeds',
+      meaning: 'loan_proceeds',
+      supportCount: (loan.repaymentCount ?? 0) + (loan.loanAccountName ? 1 : 0),
+      confidence: loan.confidence,
+      why: `This looks like money you borrowed — ${parts.join(', and ')}`,
+    };
+  }
+
+  // 7. The counterpart is sitting in another account you own, on the same day, for the
+  //    same amount. Nothing is PAIRED here — `transfers.ts` is untouched.
+  //
+  //    THE BUG THIS RUNG SHIPPED WITH: measured on the real export, 21 salary deposits
+  //    over 12 months were offered as an internal transfer at 0.9 confidence, because
+  //    salary lands and is moved on the same day to meet an obligation. The signature is
+  //    identical; the meaning is the opposite. Two guards, both derived from the ledger:
+  //
+  //      (a) BOTH accounts must be ones the owner HOLDS. Before this, the rung never
+  //          consulted the account list at all — any row with any other accountId
+  //          qualified as "another account of yours". An inflow whose counterpart sits
+  //          somewhere the owner does not hold is not a leg of anything.
+  //      (b) A payer who pays on a cadence is an EXTERNAL PAYER. Their money arriving and
+  //          then being spent is two facts, not one movement, so no amount of same-day
+  //          symmetry makes it a transfer. This guard stands on its own rather than
+  //          relying on rung 5 running first, because rung 5 declines for a payer who
+  //          pays into a card or on a band an income source cannot express — and the
+  //          answer there is still "not a transfer", not "probably a transfer".
+  if (facts.series) return null;
+  const owned = new Set((ctx.accounts ?? []).map((a) => a.id));
   const sameDay = rows.filter((t) =>
+    owned.has(t.accountId ?? '') &&
     ctx.transactions.some(
       (o) =>
         o.id !== t.id &&
         o.accountId &&
         t.accountId &&
         o.accountId !== t.accountId &&
+        owned.has(o.accountId) &&
         day(o.date) === day(t.date) &&
         toCents(o.amount) === toCents(t.amount) &&
         directionOf(o) !== directionOf(t)
@@ -272,12 +440,33 @@ function suggestFor(
       supportCount: sameDay.length,
       confidence: sameDay.length === rows.length ? 0.9 : 0.6,
       why:
-        `${plural(sameDay.length, 'row')} of these has the same amount going the other way in ` +
-        'another account of yours on the same day',
+        `${plural(sameDay.length, 'row')} of these has the same amount going the other way on the same day, ` +
+        'in another account you hold',
     };
   }
 
   return null;
+}
+
+/**
+ * What the ledger says ABOUT a group without answering it.
+ *
+ * Today there is one: a payer series with holes in it. The owner's Flow chart carries a
+ * "not in your data yet" plug, and absent paychecks are a plausible part of it — so the
+ * app says which periods are missing rather than leaving the owner to notice. This is
+ * NOT a candidate: there is nothing to confirm, and the honest conclusion is usually
+ * "your import is incomplete", not "you were not paid".
+ */
+function findingsFor(rows: Transaction[], facts: GroupFacts): string[] {
+  if (!facts.series || facts.direction !== 'inflow' || !facts.signalValue) return [];
+  const gaps = missingPeriods(rows, facts.series);
+  if (!gaps.missing) return [];
+  return [
+    `${plural(gaps.missing, 'expected payment')} from this payer ${gaps.missing === 1 ? 'is' : 'are'} absent ` +
+      `between ${facts.series.firstDate} and ${facts.series.lastDate} — the ${facts.series.cadence} cadence ` +
+      `implies ${gaps.expected} payment dates and these rows cover ${facts.series.occurrences}, so your import ` +
+      `may be incomplete (${gaps.months.join(', ')})`,
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -343,6 +532,22 @@ export function buildMappingGroups(ctx: UnmappedContext): MappingGroup[] {
     else buckets.set(key, { kind, signal, value, direction, rows: [t] });
   }
 
+  // FIN-REFUND-001's OWN result, taken from the caller when it already has one — /flow
+  // computes this run for the recovery queue two memos above the one that calls us.
+  const refundCandidates =
+    ctx.refundCandidates ??
+    (ctx.accounts?.length
+      ? generateRefundCandidates(ctx.transactions, ctx.accounts as PaymentAccount[], [], { income: ctx.income })
+          .candidates
+      : []);
+
+  // "Has this stopped?" is asked of the LEDGER's last day, never the wall clock: an
+  // export that ends in May must not make every series look dead.
+  const ledgerLastDate = ctx.transactions.reduce((latest, t) => {
+    const d = day(t.date);
+    return d > latest ? d : latest;
+  }, '');
+
   const groups: MappingGroup[] = [];
   for (const [key, b] of buckets) {
     const rows = [...b.rows].sort((x, y) => day(x.date).localeCompare(day(y.date)) || x.id.localeCompare(y.id));
@@ -356,6 +561,16 @@ export function buildMappingGroups(ctx: UnmappedContext): MappingGroup[] {
       return s.signal === b.signal && s.value === b.value;
     });
     const totalCents = cents.reduce((s, c) => s + c, 0);
+    const facts: GroupFacts = {
+      signalValue: b.value,
+      direction: b.direction,
+      accountIds: [...new Set(rows.map((t) => t.accountId).filter(Boolean) as string[])].sort(),
+      series: detectPayerSeries(rows),
+      ledgerLastDate,
+      laterOutflowsToSamePayer: (siblings as Transaction[]).filter(
+        (t) => directionOf(t) === 'outflow' && day(t.date) > dates[dates.length - 1]
+      ),
+    };
     groups.push({
       key,
       kind: b.kind,
@@ -370,10 +585,11 @@ export function buildMappingGroups(ctx: UnmappedContext): MappingGroup[] {
       maxCents: Math.max(...cents),
       firstDate: dates[0],
       lastDate: dates[dates.length - 1],
-      accountIds: [...new Set(rows.map((t) => t.accountId).filter(Boolean) as string[])].sort(),
+      accountIds: facts.accountIds,
       sourceCategories: [...new Set(rows.map((t) => (t.sourceCategory ?? '').trim()).filter(Boolean))].sort(),
       cadence: cadenceOf(dates),
-      suggestion: suggestFor(rows, b.value, ctx, siblings as Transaction[]),
+      suggestion: suggestFor(rows, facts, ctx, siblings as Transaction[], refundCandidates),
+      findings: findingsFor(rows, facts),
       impactScore: rows.length * Math.abs(totalCents),
     });
   }
@@ -396,6 +612,14 @@ export function buildMappingGroups(ctx: UnmappedContext): MappingGroup[] {
       decisionsFor80Percent: decisionsToCover(groups, 0.8),
       byKind: groups.reduce<Record<string, number>>((a, g) => ({ ...a, [g.kind]: (a[g.kind] ?? 0) + 1 }), {}),
       withSuggestion: groups.filter((g) => g.suggestion).length,
+      // MAP-002 — which evidence carried the day, as counts. An evidence KIND is a
+      // vocabulary word of this module, not anything about the owner's money.
+      byEvidence: groups.reduce<Record<string, number>>(
+        (a, g) => (g.suggestion ? { ...a, [g.suggestion.evidence]: (a[g.suggestion.evidence] ?? 0) + 1 } : a),
+        {}
+      ),
+      withFinding: groups.filter((g) => g.findings.length).length,
+      withIncomeSourceOffer: groups.filter((g) => g.suggestion?.incomeSourceOffer).length,
     },
   });
 
@@ -616,6 +840,12 @@ export interface GroupDecision {
   scope: GroupScope;
   /** Present only when a rule was asked for AND the engine can express the answer. */
   rule?: NewMappingRule;
+  /**
+   * MAP-002 — the derived income source, present ONLY when the owner explicitly ticked
+   * the offer. Absent otherwise, including when the suggestion carried one and the owner
+   * left it alone. Deriving a source and creating one are two different events.
+   */
+  incomeSourceOffer?: Omit<IncomeSource, 'id'>;
 }
 
 /** The meanings a group can be answered with, in the order a person would consider them. */
@@ -627,6 +857,7 @@ export const GROUP_MEANINGS: readonly { value: FinancialMeaning; label: string }
   { value: 'receivable_repayment', label: 'Someone repaying money I lent' },
   { value: 'gift_or_personal_transfer', label: 'A gift or a personal transfer' },
   { value: 'sale_proceeds', label: 'Money from selling something' },
+  { value: 'loan_proceeds', label: 'Money I borrowed — a loan paid out to me' },
   { value: 'earned_income', label: 'Income I earned' },
   { value: 'other_non_income_credit', label: 'Something else — but not income' },
 ];
