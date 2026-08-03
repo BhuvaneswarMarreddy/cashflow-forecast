@@ -195,6 +195,33 @@ Ranked by how much of the picture each unlocks.
   one of the four suggestion sources, and on the real export it fires for **17 of the 80
   groups** (12 of the 30 leg groups). The owner decides; nothing is paired automatically.
 
+## 8b. Counterparty ("people") lines — measured, FIN-SETTLEMENT-003 phase 1
+
+Measured read-only on the real export, 2026-08-02. Full evidence and the window-by-window
+match tables: `docs/features/FIN-SETTLEMENT-003-MEASUREMENT.md`. Aggregates only; no
+counterparty is named.
+
+- **284 rows / $280,790.64 — 24.1% of all gross movement — carry an external counterparty**
+  across 81 distinct keys (9 two-way, 40 inbound-only, 32 outbound-only).
+- **None of it can be asked about.** `buildMappingGroups()` is fed only by the unknown-inflow
+  queue and the unpaired-leg lanes, and a counterparty leg is in neither: `buildFlowGraph()`
+  routes it to a `person-in:`/`person-out:` node instead. **7 of 284 rows reach the queue;
+  0 of the 155 outbound rows do**; by key, 0/32 outbound-only, 6/40 inbound-only, 1/9 two-way.
+  The person lane is terminal.
+- **The app asserts $259,206.71 across 81 counterparties is `internal_transfer`** — money
+  between the owner's own accounts, `personalCostSign` 0. 261 of the 284 rows.
+- **REMITLY ($120,562.36, 78 rows) never returned to any of the 9 accounts.** 0/78 same-day
+  matches, **0 inbound REMITLY rows in the entire ledger**, and against a like-for-like
+  round-amount control REMITLY matches *below* chance (23.8% vs 34.2% at ±7d). Whether the
+  destination is still the owner's is **not in the data** and needs owner intent.
+- **Same-amount round-tripping does not happen at named-person lines either**: 0/77 within
+  ±14 days from the same counterparty; the apparent signal against a naive control was
+  entirely round-number collision.
+- **The brief's `ZELLE ~$10,026 / 11 rows` and `BANK OF AMERICA 12 rows / $1,494.43` do not
+  reproduce.** There is no `ZELLE` or `BANK OF AMERICA` counterparty key. 182 Zelle rows
+  ($166,698.30, 90 out / 92 in, near-balanced) resolve to the OWNER'S OWN NAME via
+  `isSelfPerson()` and belong to the self-transfer lanes, not to any people line.
+
 ## 9. Still open
 
 - **18 of the 50 unknown-inflow groups still have no evidence at all**, and that is the
