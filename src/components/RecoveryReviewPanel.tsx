@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import Sheet from '@/components/Sheet';
 import CardCreditCard from '@/components/CardCreditCard';
 import DuplicateCandidateCard from '@/components/DuplicateCandidateCard';
@@ -39,6 +39,12 @@ export interface RecoveryReviewPanelProps {
   onDecide: (item: ReviewQueueItem, decision: RecoveryDecision, candidate?: ReviewCandidate) => void;
   /** MAP-001 — one answer for a whole pattern. Absent hides the group cards. */
   onGroupDecide?: (item: ReviewQueueItem, decision: GroupDecision) => void;
+  /**
+   * Batch-confirm for EXACT refund matches — the owner's 118-row pile. Only items whose
+   * candidate is a single-purchase exact match and not flagged ambiguous are offered;
+   * partial matches and ambiguous credits genuinely need eyes and stay one-at-a-time.
+   */
+  onBatchConfirm?: (items: ReviewQueueItem[]) => void;
   todayISO?: string;
   onUndo: () => void;
   onAllocationEdited?: (info: { allocationCount: number; validationRejected: boolean }) => void;
@@ -83,11 +89,26 @@ function PanelBody({
   onSectionFilter,
   onDecide,
   onGroupDecide,
+  onBatchConfirm,
   todayISO,
   onUndo,
   onAllocationEdited,
   onClose,
 }: RecoveryReviewPanelProps) {
+  // Batch scope: EXACT matches only. An ambiguous credit has alternatives and a partial
+  // match changes a purchase's net — both need a person. Unticking excludes an item.
+  const exactMatches = useMemo(
+    () => items.filter(
+      (i) => i.candidate?.candidateType === 'refund_match'
+        && !(i.candidate.evidence.reasonCodes ?? []).includes('ambiguous_match')
+    ),
+    [items]
+  );
+  const [unticked, setUnticked] = useState<Set<string>>(new Set());
+  const batchSelection = exactMatches.filter((i) => !unticked.has(i.key));
+  const batchCents = batchSelection.reduce(
+    (s, i) => s + (i.candidate?.proposedLinks ?? []).reduce((a, l) => a + l.allocatedAmountCents, 0), 0
+  );
   const visible = useMemo(
     () => (sectionFilter ? items.filter((i) => i.sectionId === sectionFilter) : items),
     [items, sectionFilter]
@@ -210,6 +231,53 @@ function PanelBody({
               );
             })}
           </div>
+
+          {/* The one-press path out of the refund pile. Every unticked box is an item
+              the press will NOT touch; nothing here bypasses the validator. */}
+          {onBatchConfirm && exactMatches.length >= 2 && (sectionFilter === null || sectionFilter === 'refund_matches') && (
+            <section
+              aria-label="Confirm exact refund matches together"
+              className="rounded-lg border border-[var(--accent-primary)]/40 bg-[var(--background-tertiary)] p-3 text-sm space-y-2"
+            >
+              <p className="font-medium text-[var(--foreground)]">
+                {exactMatches.length} refunds match a purchase exactly — {money(batchCents)} in one press.
+              </p>
+              <p className="text-[var(--foreground-secondary)]">
+                Confirming folds each refund back into the category it came from, so your spending
+                shows what things actually cost. Income does not change. Nothing is deleted.
+              </p>
+              <details>
+                <summary className="cursor-pointer min-h-[44px] flex items-center select-none text-[var(--foreground-secondary)]">
+                  Review the list — untick anything you are not sure about
+                </summary>
+                <ul className="mt-1 space-y-1 max-h-48 overflow-y-auto">
+                  {exactMatches.map((i) => (
+                    <li key={i.key}>
+                      <label className="flex items-start gap-2 min-h-[44px] cursor-pointer text-[var(--foreground-secondary)]">
+                        <input
+                          type="checkbox"
+                          checked={!unticked.has(i.key)}
+                          onChange={(e) => setUnticked((prev) => {
+                            const next = new Set(prev);
+                            if (e.target.checked) next.delete(i.key); else next.add(i.key);
+                            return next;
+                          })}
+                        />
+                        <span>{i.headline}</span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+              <button
+                className={ACTION_BTN}
+                disabled={batchSelection.length === 0}
+                onClick={() => onBatchConfirm(batchSelection)}
+              >
+                Confirm {batchSelection.length} refund{batchSelection.length === 1 ? '' : 's'}
+              </button>
+            </section>
+          )}
 
           {/* What this kind of item IS and what answering it does — both before the
               decision. The owner should never have to click Confirm to find out. */}

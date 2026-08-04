@@ -1080,6 +1080,93 @@ export default function FlowPage() {
     [user?.id, transactions, txRefs, links, setInflowReview, obs]
   );
 
+  /**
+   * Batch-confirm — the 118-row pile as ONE press instead of 118.
+   *
+   * EXACT single-purchase matches only; the panel enforces the same scope. Every draft
+   * still goes through `buildLink`, against a running `accumulated` so two credits
+   * refunding the SAME purchase cannot jointly over-refund it (V4 would pass both if
+   * each validated against the pre-batch links alone). An item that fails validation is
+   * SKIPPED and counted, never force-fitted. No supersede pass: these are unreviewed
+   * credits with no prior allocation; re-allocating goes through the single-item card.
+   * No undo record: a batch is not one step, and a lying Undo button is worse than none
+   * — each confirmation is still individually reversible through its candidate.
+   */
+  const onBatchConfirm = useCallback(
+    (selected: ReviewQueueItem[]) => {
+      const uid = user?.id;
+      const confirmedAt = new Date().toISOString();
+      const accumulated = [...links];
+      const allWritten: TransactionLink[] = [];
+      const docs: CandidateDoc[] = [];
+      let skipped = 0;
+
+      for (const item of selected) {
+        const candidate = item.candidate;
+        if (!candidate || candidate.candidateType !== 'refund_match') { skipped++; continue; }
+        const drafts: LinkDraft[] = candidate.proposedLinks.map((p) => ({
+          linkType: 'refund_of',
+          sourceTransactionId: p.sourceTransactionId,
+          targetTransactionId: p.targetTransactionId,
+          allocatedAmountCents: p.allocatedAmountCents,
+          status: 'confirmed',
+          confirmedAt,
+          confirmedBy: 'user',
+          algorithmVersion: candidate.algorithmVersion,
+          candidateId: candidate.candidateId,
+        }));
+        // Validate the whole candidate before saving any of it.
+        const built = [];
+        let ok = drafts.length > 0;
+        for (const draft of drafts) {
+          const b = buildLink(draft, { transactions: txRefs, links: [...accumulated, ...built.map((x) => x.link)] });
+          if (!b.ok) { ok = false; break; }
+          built.push({ link: b.link, draft });
+        }
+        if (!ok) { skipped++; continue; }
+
+        for (const { link, draft } of built) {
+          accumulated.push(link);
+          allWritten.push(link);
+          if (uid) void saveLink(uid, draft, { transactions: txRefs, links: accumulated }).catch(() => {});
+        }
+        const doc: CandidateDoc = {
+          ...candidate,
+          status: 'confirmed',
+          reviewedBy: 'user',
+          reviewedAt: confirmedAt,
+          linkIds: built.map((x) => x.link.id),
+        };
+        docs.push(doc);
+        if (uid) {
+          void saveReviewCandidate(uid, doc)
+            .then(() => recordCandidateDecision(uid, doc.id, 'confirmed', { linkIds: doc.linkIds }))
+            .catch(() => {});
+        }
+        obs.trackLinkConfirmed({
+          candidateType: candidate.candidateType,
+          allocationCount: built.length,
+          algorithmVersion: candidate.algorithmVersion,
+          durationMs: 0,
+        });
+      }
+
+      setLinks((prev) => [...prev, ...allWritten]);
+      setStoredCandidates((prev) => [
+        ...prev.filter((c) => !docs.some((d) => d.id === c.id)),
+        ...docs,
+      ]);
+      setUndoRecord(null);
+      setSelectedKey(null);
+      const cents = allWritten.reduce((s, l) => s + l.allocatedAmountCents, 0);
+      setAnnouncement(
+        `Confirmed ${docs.length} refund${docs.length === 1 ? '' : 's'} — ${money(cents)} folded back into the categories it came from.`
+        + (skipped ? ` ${skipped} skipped — they no longer validate and stay in the queue.` : '')
+      );
+    },
+    [user?.id, txRefs, links, obs]
+  );
+
   /** One step, panel-scoped. Undo never DELETES a link — FIN-RELATION-001 §6 denies it. */
   const onUndo = useCallback(() => {
     if (!undoRecord) return;
@@ -1196,6 +1283,7 @@ export default function FlowPage() {
     onUndo,
     onAllocationEdited: obs.trackAllocationEdited,
     onGroupDecide,
+    onBatchConfirm,
     todayISO,
     onClose: closeReview,
   };
