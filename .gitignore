@@ -72,3 +72,6 @@ functions-sync/venv/
 # firebase emulator
 firebase-debug.log
 firestore-debug.log
+
+# batch reanalysis artifacts — live data, never committed
+reanalysis-*.local.json
