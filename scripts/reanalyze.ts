@@ -241,7 +241,12 @@ async function main() {
     return existingSources.find((s) => norm(s.name) === norm(SOURCES[key].name))?.id;
   };
 
-  const excluded = new Set((args.find((a) => a.startsWith('--exclude='))?.slice(10) ?? '').split(',').filter(Boolean));
+  // --exclude=<token,...> — a full doc id, or a fragment of the DECODED id (>= 4 chars).
+  // Fragments exist because two same-day same-amount rows share every visible column;
+  // only the statement text inside the id tells them apart.
+  const excludeTokens = (args.find((a) => a.startsWith('--exclude='))?.slice(10) ?? '').split(',').filter(Boolean);
+  const isExcluded = (t: Transaction) =>
+    excludeTokens.some((e) => t.id === e || (e.length >= 4 && norm(decodedId(t)).includes(norm(e))));
   const reviews: (InflowReview & { batchId: string })[] = [];
   const rowsOf = new Map<string, Transaction[]>();
   const tally = new Map<string, { n: number; cents: number }>();
@@ -250,7 +255,7 @@ async function main() {
     const hay = hayOf(t);
     const d = DECISIONS.find((x) => (!x.gated || includeRemitly) && x.test(t, hay));
     if (!d) continue;
-    if (excluded.has(t.id)) continue;
+    if (isExcluded(t)) { console.log(`  excluded by flag: ${day(t.date)} ${money(toCents(t.amount))}`); continue; }
     const prior = existingReviews[t.id];
     if (prior && (prior.state === 'confirmed' || prior.state === 'dismissed')) { skippedTerminal++; continue; }
     reviews.push({
@@ -343,6 +348,17 @@ async function main() {
   }
   fs.writeFileSync('reanalysis-backup.local.json', JSON.stringify({ batchId: BATCH_ID, backedUpAt: NOW, reviews: backup }, null, 2));
   console.log(`backed up ${Object.keys(backup).length} existing reviews to reanalysis-backup.local.json`);
+
+  // --fix-salary: the owner's own source, corrected on their instruction — biweekly
+  // $4,382 computes $9,494/mo (the inflated figure they flagged); their real cadence is
+  // semi-monthly, which the schema cannot express, so monthly $8,660 is the honest fit.
+  if (args.includes('--fix-salary')) {
+    const sal = existingSources.find((x) => x.isActive && (x.matchAliases ?? []).some((a) => norm(a) === 'canton'));
+    if (sal) {
+      await db.doc(`users/${uid}/income/${sal.id}`).set({ amount: 8660, frequency: 'monthly', batchId: BATCH_ID }, { merge: true });
+      console.log(`updated source "${sal.name}": biweekly 4382 -> monthly 8660`);
+    }
+  }
 
   for (const s of newSources) {
     await db.doc(`users/${uid}/income/${s.id}`).set(s.doc);
