@@ -391,3 +391,79 @@ describe('C — label layout', () => {
     for (const count of counts) expect(columnFits(count, height)).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// D. Payroll drawn as "Other" — reported from the owner's live screen
+// ---------------------------------------------------------------------------
+
+describe('D an income row with no provider category is named by its PAYER', () => {
+  // Exactly the shape that reached the owner's chart: real payroll, semi-monthly,
+  // arriving with no provider category at all. `category` defaults to 'other'.
+  const payroll = (id: string, date: string, amount: number): Transaction =>
+    tx({ id, title: 'The Canton Payroll', merchant: 'The Canton Payroll', amount, type: 'income', date, accountId: 'acc-bank' });
+
+  const ROWS = [
+    payroll('pay-1', '2026-06-22', 4326.25),
+    payroll('pay-2', '2026-07-07', 4351.25),
+    payroll('pay-3', '2026-07-22', 4309.93),
+  ];
+
+  // "Other" is in the spending index because uncategorised SPENDING reads as "Other"
+  // too — which is the whole trap.
+  const uncategorisedSpend = tx({ id: 'sp-1', title: 'Corner shop', amount: 40, accountId: 'acc-bank' });
+  const spendingCategories = spendingCategoryIndex([uncategorisedSpend], ACCOUNTS);
+
+  it('has "Other" in the spending index — the condition that caused this', () => {
+    expect(spendingCategories.has('Other')).toBe(true);
+  });
+
+  it('names the lane after the payer, not the expense-category default', () => {
+    const lane = inflowLane(ROWS[0], { accounts: ACCOUNTS, spendingCategories });
+    // Was `inc:Other`, drawn on the chart as a lane literally called "Other".
+    expect(lane.id).toBe('inc:The Canton Payroll');
+    expect(lane.label).toBe('The Canton Payroll');
+    expect(lane.kind).toBe('source');
+  });
+
+  it('does not draw payroll as money coming back', () => {
+    // The second bug on the same line: `displayCategory` substituted "Other", the
+    // spending index contains "Other", so this rung swallowed the row.
+    expect(inflowLane(ROWS[0], { accounts: ACCOUNTS, spendingCategories })).not.toEqual(MONEY_BACK);
+  });
+
+  it('still trusts the provider category when there IS one', () => {
+    // The behaviour this rung was built for must survive: a credit the provider tagged
+    // with a category the owner spends in is money coming back, not an income source.
+    const insuranceRefund = tx({
+      id: 'ins-1', title: 'Trellis Mutual', merchant: 'Trellis Mutual', amount: 154,
+      type: 'income', sourceCategory: 'Insurance', accountId: 'acc-bank',
+    });
+    const spendsInsurance = spendingCategoryIndex(
+      [tx({ id: 'sp-2', title: 'Trellis Mutual', amount: 300, sourceCategory: 'Insurance', accountId: 'acc-bank' })],
+      ACCOUNTS
+    );
+    expect(inflowLane(insuranceRefund, { accounts: ACCOUNTS, spendingCategories: spendsInsurance })).toEqual(MONEY_BACK);
+  });
+
+  it('names it by payer on the APPROVED-SOURCE branch too', () => {
+    // Two call sites build an `inc:` lane — one for money an approved source claims,
+    // one for everything else that survives the ladder. Both were using the expense
+    // category, so fixing only the branch a test happens to hit fixes nothing.
+    const income = {
+      sources: [{
+        id: 'src-canton', name: 'The Canton Payroll', amount: 4330, frequency: 'biweekly' as const,
+        isActive: true, userApproved: true,
+      }],
+    };
+    const lane = inflowLane(ROWS[0], { accounts: ACCOUNTS, spendingCategories, income } as never);
+    expect(lane.id).toBe('inc:The Canton Payroll');
+  });
+
+  it('the three deposits land in ONE payer lane on the chart', () => {
+    const g: FlowGraph = buildFlowGraph([...ROWS, uncategorisedSpend], ACCOUNTS);
+    const inc = g.nodes.filter((n) => n.id.startsWith('inc:'));
+    expect(inc.map((n) => n.label)).toEqual(['The Canton Payroll']);
+    const cents = g.links.filter((l) => l.source === inc[0].id).reduce((s, l) => s + l.cents, 0);
+    expect(cents).toBe(1298743); // $12,987.43 — the figure the owner saw under "Other"
+  });
+});

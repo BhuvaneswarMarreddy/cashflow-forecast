@@ -139,6 +139,25 @@ export function spendingCategoryIndex(
 }
 
 /**
+ * What to call an INCOME lane.
+ *
+ * NOT `displayCategory`. That answers with the row's EXPENSE category when the provider
+ * gave none, and `category` defaults to `'other'` — so three payroll deposits from "The
+ * Canton Payroll" landed in a lane the chart drew as **Other**. The `|| 'Other income'`
+ * guard that was supposed to catch this could never fire, because `"Other"` is a
+ * perfectly truthy string.
+ *
+ * An income lane is a PAYER, not a spending bucket. Provider category first — it is what
+ * produces the good labels already on the chart (Paychecks, Business Income, Interest) —
+ * then whoever actually sent the money, and only then a shrug.
+ */
+const incomeLaneName = (t: Transaction): string =>
+  (t.sourceCategory || '').trim()
+  || (t.merchant || '').trim()
+  || (t.title || '').trim()
+  || 'Other income';
+
+/**
  * The lane a CREDIT belongs in. Rule order is load-bearing.
  *
  *  0. The ten-kind ladder, when a caller resolved it. Its range EXCLUDES `earned_income`,
@@ -168,12 +187,20 @@ export function inflowLane(t: Transaction, ctx: LaneContext): Lane {
   if (financialMeaning === 'refund') return MONEY_BACK;
   if (isReward(named)) return REWARDS;
   if (financialMeaning === 'earned_income') {
-    const c = displayCategory(t) || 'Other income';
+    const c = incomeLaneName(t);
     return { id: `inc:${c}`, label: c, kind: 'source' };
   }
-  if (isRefund(named) || ctx.spendingCategories.has(displayCategory(t))) return MONEY_BACK;
+  // The PROVIDER's category, not `displayCategory`. This rung exists to catch a credit
+  // the provider tagged `Insurance` while `Insurance` is a category you spend in — real
+  // evidence that money came back. `displayCategory` substitutes the row's expense
+  // category when the provider gave none, and since uncategorised SPENDING also reads as
+  // "Other", that index contains "Other" — so every inflow arriving without a provider
+  // category matched this test and was drawn as money coming back. A missing category is
+  // not evidence of anything, so with none this rung simply does not apply.
+  const providerCategory = (t.sourceCategory || '').trim();
+  if (isRefund(named) || (providerCategory && ctx.spendingCategories.has(providerCategory))) return MONEY_BACK;
 
-  const c = displayCategory(t) || 'Other income';
+  const c = incomeLaneName(t);
   return { id: `inc:${c}`, label: c, kind: 'source' };
 }
 

@@ -1391,7 +1391,10 @@ export default function FlowPage() {
                     <tbody>
                       {pinnedTxns.map((t) => (
                         <tr key={t.id} className="border-t border-[var(--border-color)]">
-                          <td className="px-3 py-1.5 whitespace-nowrap">{t.date}</td>
+                          {/* `day()`, not the raw field: a row stores a full ISO
+                              timestamp and this table was printing
+                              "2026-07-22T05:00:00.000Z" at the owner. */}
+                          <td className="px-3 py-1.5 whitespace-nowrap">{day(t.date)}</td>
                           <td className="px-3 py-1.5">{t.merchant || t.title}</td>
                           <td className="px-3 py-1.5 text-right tabular-nums">{money(Math.round(t.amount * 100))}</td>
                           {/* Gross stays on the row. The badge says what happened to it. */}
