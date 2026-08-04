@@ -269,10 +269,10 @@ export const FINANCIAL_MEANINGS = [
    * export: $16,110.00 borrowed on 2024-08-16, $21,622.45 paid back over 21 rows, so
    * $5,512.45 was the actual cost and $16,110.00 was never spending at all.
    *
-   * It is debt settlement, exactly like `card_payment`, and it is treated as such:
-   * neither income nor personal cost. Separating the INTEREST inside these payments from
-   * the principal needs the lender modelled as a `personal_loan` account; this value is
-   * what lets the owner say the true thing in the meantime.
+   * Unlike `card_payment`, it COUNTS AS SPENDING — see `COST_MEANINGS` in `classify.ts`
+   * for why the two differ and what that trades away. The owner's words: "even loan
+   * payment is also spending". In a cash-flow app the money leaving each month is the
+   * thing to plan around, and the interest inside it has nowhere else to land.
    */
   'loan_repayment',
   'refund',

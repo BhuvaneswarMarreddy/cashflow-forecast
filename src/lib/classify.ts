@@ -187,6 +187,21 @@ export const countsAsEarnedIncome = (m: FinancialMeaning): boolean => m === 'ear
 const COST_MEANINGS: readonly FinancialMeaning[] = [
   'personal_expense', 'shared_expense', 'reimbursable_expense', 'business_expense',
   'subscription', 'recurring_bill', 'one_time_expense',
+  /**
+   * A loan repayment IS a cost here, and deliberately unlike `card_payment`.
+   *
+   * A card payment settles spending the ledger already recorded row by row, so counting
+   * it again would count it twice. A loan repayment settles money that arrived as cash
+   * and left as an obligation — in a CASH-FLOW app, the money going out each month is
+   * the thing the owner has to plan around, and the interest inside it is a real cost
+   * that has nowhere else to land.
+   *
+   * The owner asked for this explicitly. The known ceiling: if the borrowed money was
+   * spent on rows that are also in this ledger, those rows and these repayments both
+   * count, and the principal is counted twice. Modelling the lender as a `personal_loan`
+   * account is what separates principal from interest, and is the upgrade path.
+   */
+  'loan_repayment',
 ];
 
 /**
@@ -452,12 +467,13 @@ export function interpretTransaction(
   // confirming "this money is gone" left it counted as neither income nor spending.
   // The predicates are the existing ones — `countsAsEarnedIncome` and `personalCostSign`
   // — so there is still exactly one place that decides what a meaning costs.
+  // `loan_repayment` is deliberately NOT here. It was, on the reasoning that a closed
+  // loan must not keep projecting payments — but that is an argument about a loan that
+  // has ENDED, and it is exactly backwards for one that has not: a forecast that hides
+  // the payment you are contractually committed to makes you look richer than you are.
+  // Recurrence detection is what stops a finished loan projecting, not the meaning.
   const settledAsTransfer = confirmed
-    ? financialMeaning === 'internal_transfer'
-      || financialMeaning === 'card_payment'
-      // Repaying a loan is debt settlement, the same class as paying a card: it is not
-      // consumption, and a closed loan must not keep projecting payments into a forecast.
-      || financialMeaning === 'loan_repayment'
+    ? financialMeaning === 'internal_transfer' || financialMeaning === 'card_payment'
     : type === 'transfer';
 
   // The ONE earned-income gate. `type === 'income'` alone used to be enough, which is

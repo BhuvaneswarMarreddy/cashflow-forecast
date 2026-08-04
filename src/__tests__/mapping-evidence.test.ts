@@ -516,27 +516,34 @@ describe('E6 paying a loan back is debt settlement, not spending', () => {
       .not.toBe('loan_repayment');
   });
 
-  it('is a closed-set meaning that is neither income nor personal cost', () => {
+  it('is a closed-set meaning that is spending but never income', () => {
     expect(isFinancialMeaning('loan_repayment')).toBe(true);
     expect(countsAsEarnedIncome('loan_repayment')).toBe(false);
     expect(FINANCIAL_MEANINGS.filter(countsAsEarnedIncome)).toEqual(['earned_income']);
-    // Settling a debt is not consumption. The INTEREST inside it is the real cost, and
-    // separating that needs the lender modelled as a `personal_loan` account.
-    expect(personalCostSign('loan_repayment')).toBe(0);
+    // It IS spending, unlike `card_payment` — which settles purchases the ledger already
+    // counted row by row, and so must not be counted again.
+    expect(personalCostSign('loan_repayment')).toBe(1);
+    expect(personalCostSign('card_payment')).toBe(0);
     // The gap this fixes: six outflow answers, and the only debt-settlement one was
     // "a payment to one of my cards".
     expect(OUTFLOW_GROUP_MEANINGS.map((m) => m.value)).toContain('loan_repayment');
   });
 
-  it('confirming it takes the payments out of spending AND out of the forecast', () => {
+  it('confirming it keeps the payment in spending and in the forecast', () => {
     const row = tx({ id: 'pay-0', merchant: 'PARAGON CREDIT', title: 'PARAGON CREDIT', amount: 900, type: 'expense', date: '2024-03-05', accountId: 'chk' });
-    const before = interpretTransaction(row, ACCOUNTS);
-    expect({ expense: before.expense, forecast: before.forecast }).toEqual({ expense: 'counted', forecast: 'counted' });
-
     const reviews = { 'pay-0': { transactionId: 'pay-0', state: 'confirmed', meaning: 'loan_repayment', decidedAt: '2026-08-04', reasons: [] } };
     const after = interpretTransaction(row, ACCOUNTS, { reviews } as never);
-    // A closed loan must not keep projecting payments that will never happen again.
+
+    // Money you are contractually committed to paying must stay visible. A forecast that
+    // hides it makes the owner look richer than they are.
     expect({ expense: after.expense, income: after.income, forecast: after.forecast })
-      .toEqual({ expense: 'excluded', income: 'excluded', forecast: 'excluded' });
+      .toEqual({ expense: 'counted', income: 'excluded', forecast: 'counted' });
+
+    // And the contrast that makes the two meanings different rather than synonyms: a
+    // card payment settles spending already counted, so it stays out of both.
+    const card = { 'pay-0': { transactionId: 'pay-0', state: 'confirmed', meaning: 'card_payment', decidedAt: '2026-08-04', reasons: [] } };
+    const asCard = interpretTransaction(row, ACCOUNTS, { reviews: card } as never);
+    expect({ expense: asCard.expense, forecast: asCard.forecast })
+      .toEqual({ expense: 'excluded', forecast: 'excluded' });
   });
 });
