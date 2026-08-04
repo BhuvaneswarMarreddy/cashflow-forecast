@@ -269,6 +269,60 @@ export function detectLoanProceeds(
   };
 }
 
+export interface LoanRepaymentEvidence {
+  loanAccountName?: string;
+  /** The credit that started it, when one is in the ledger. */
+  proceedsCents?: number;
+  proceedsDate?: string;
+  paymentCount: number;
+  confidence: number;
+}
+
+/**
+ * The MIRROR of `detectLoanProceeds`: a run of payments OUT to a party that earlier sent
+ * one large credit in.
+ *
+ * The app already read the borrow side correctly — it grouped a $16,110.00 credit on its
+ * own and said "20 payments went back to this payer afterwards, each far smaller". It
+ * then offered the owner six answers for those twenty payments, none of which was
+ * "repaying that loan". This is the other half of a fact the ledger already contained.
+ *
+ * Same three guards as the borrow side, in reverse: the credit must be large in absolute
+ * terms, several times a single payment, and must land BEFORE the payments start — a
+ * refund arriving mid-series is not a loan, and a party who once sent a big credit does
+ * not turn every later payment into debt.
+ */
+export function detectLoanRepayment(
+  rows: readonly Transaction[],
+  signalValue: string,
+  earlierInflowsFromSamePayee: readonly Transaction[],
+  accounts: readonly PaymentAccount[]
+): LoanRepaymentEvidence | null {
+  if (!signalValue || rows.length < 3) return null;          // a schedule, not a one-off
+  const payee = normalizeMerchant(signalValue);
+  const loanAccount = accounts.find(
+    (a) => a.type === 'personal_loan' && namesAgree(normalizeMerchant(a.name), payee)
+  );
+
+  const firstPayment = rows.map((t) => day(t.date)).sort()[0];
+  const outCents = median(rows.map((t) => toCents(t.amount)));
+  const proceeds = earlierInflowsFromSamePayee
+    .filter((t) => day(t.date) <= firstPayment)
+    .sort((a, b) => toCents(b.amount) - toCents(a.amount))[0];
+  const big =
+    proceeds && toCents(proceeds.amount) >= 100_000 && toCents(proceeds.amount) >= outCents * 3
+      ? proceeds
+      : null;
+
+  if (!loanAccount && !big) return null;
+  return {
+    ...(loanAccount ? { loanAccountName: loanAccount.name } : {}),
+    ...(big ? { proceedsCents: toCents(big.amount), proceedsDate: day(big.date) } : {}),
+    paymentCount: rows.length,
+    confidence: loanAccount && big ? 0.85 : loanAccount ? 0.75 : 0.7,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // 6. The counterparty ledger — FIN-SETTLEMENT-003
 // ---------------------------------------------------------------------------

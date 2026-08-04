@@ -258,6 +258,23 @@ export const FINANCIAL_MEANINGS = [
   // neither direction — money you already had
   'internal_transfer',
   'card_payment',
+  /**
+   * Paying back borrowed money — the missing other half of `loan_proceeds`.
+   *
+   * Added ADDITIVELY, and it had to exist: the outflow answers were six, and the only
+   * debt-settlement one among them was "a payment to one of my cards". An owner repaying
+   * a personal loan could say the money was spent (which double-counts the principal
+   * against the `loan_proceeds` credit that created it) or that it moved between their
+   * own accounts (which is false — the lender is not their account). Measured on the real
+   * export: $16,110.00 borrowed on 2024-08-16, $21,622.45 paid back over 21 rows, so
+   * $5,512.45 was the actual cost and $16,110.00 was never spending at all.
+   *
+   * It is debt settlement, exactly like `card_payment`, and it is treated as such:
+   * neither income nor personal cost. Separating the INTEREST inside these payments from
+   * the principal needs the lender modelled as a `personal_loan` account; this value is
+   * what lets the owner say the true thing in the meantime.
+   */
+  'loan_repayment',
   'refund',
   // inflows
   'earned_income',

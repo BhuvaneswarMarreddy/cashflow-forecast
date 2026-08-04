@@ -29,7 +29,7 @@ import { IncomeContext, InflowReviewItem, selectInflowReviewQueue } from './clas
 import { unpairedLegLane } from './flow-lanes';
 import { BANDS, daysBetween, day, isSelfPerson, median, normalizeMerchant, personFrom, toCents } from './flows';
 import {
-  CounterpartyLedger, PayerSeries, detectCounterpartyLedger, detectLoanProceeds,
+  CounterpartyLedger, PayerSeries, detectCounterpartyLedger, detectLoanProceeds, detectLoanRepayment,
   detectPayerSeries, isDepositAccount, missingPeriods, refundEvidenceFor, seriesEndDate,
   sharedTokens,
 } from './mapping-evidence';
@@ -94,6 +94,8 @@ export type SuggestionEvidence =
   | 'refund_candidate'
   | 'payroll_shape'
   | 'loan_proceeds'
+  /** The other half of `loan_proceeds`: the payments going back out. */
+  | 'loan_repayment'
   | 'same_day_opposite_leg'
   // --- FIN-SETTLEMENT-003 --------------------------------------------------
   /** Money moved BOTH ways with this counterparty. `signFlips` says which kind. */
@@ -247,6 +249,8 @@ interface GroupFacts {
   ledgerLastDate: string;
   /** Later money going back to the same party. Loan repayments look exactly like this. */
   laterOutflowsToSamePayer: Transaction[];
+  /** The mirror: money this party sent EARLIER. A loan disbursement looks like this. */
+  earlierInflowsFromSamePayee: Transaction[];
   /**
    * FIN-SETTLEMENT-003 — the WHOLE relationship with this counterparty, both directions,
    * group rows and siblings together. Present only for a counterparty group: a merchant
@@ -501,6 +505,27 @@ function suggestFor(
     };
   }
 
+  // 6b. REPAYING borrowed money — rung 6 read from the other end. Mutually exclusive
+  //     with it by construction: rung 6 needs at most two rows, this one needs at least
+  //     three, so a group can never satisfy both.
+  const repayment = detectLoanRepayment(rows, signalValue, facts.earlierInflowsFromSamePayee, ctx.accounts ?? []);
+  if (repayment) {
+    const parts = [
+      repayment.proceedsCents
+        ? `${formatMoneyCents(repayment.proceedsCents)} arrived from "${signalValue}" on ${repayment.proceedsDate}, `
+          + `then ${plural(repayment.paymentCount, 'payment')} went back, each far smaller`
+        : '',
+      repayment.loanAccountName ? `"${signalValue}" is also the name of a loan account you hold` : '',
+    ].filter(Boolean);
+    return {
+      evidence: 'loan_repayment',
+      meaning: 'loan_repayment',
+      supportCount: repayment.paymentCount,
+      confidence: repayment.confidence,
+      why: `This looks like you paying back money you borrowed — ${parts.join(', and ')}`,
+    };
+  }
+
   // 7. The counterpart is sitting in another account you own, on the same day, for the
   //    same amount. Nothing is PAIRED here — `transfers.ts` is untouched.
   //
@@ -683,6 +708,11 @@ export function buildMappingGroups(ctx: UnmappedContext): MappingGroup[] {
       laterOutflowsToSamePayer: (siblings as Transaction[]).filter(
         (t) => directionOf(t) === 'outflow' && day(t.date) > dates[dates.length - 1]
       ),
+      // Siblings share the signal but NOT the direction (the group key carries that), so
+      // the credit that started a loan is already here — it just had no rung to read it.
+      // No date filter: "the credit came first" is the DETECTOR's rule, and duplicating
+      // it here left neither copy load-bearing (removing either one changed nothing).
+      earlierInflowsFromSamePayee: (siblings as Transaction[]).filter((t) => directionOf(t) === 'inflow'),
       // The group key carries a DIRECTION, so a two-way counterparty is two groups. The
       // ledger has to see the whole relationship or "money came back" is invisible from
       // either side — hence group rows PLUS siblings, which is every other row sharing
@@ -1004,6 +1034,7 @@ export const OUTFLOW_GROUP_MEANINGS: readonly { value: FinancialMeaning; label: 
   { value: 'personal_expense', label: 'Money I spent — it is gone' },
   { value: 'shared_expense', label: 'A cost I share with this person' },
   { value: 'reimbursable_expense', label: 'Money I expect to get back' },
+  { value: 'loan_repayment', label: 'Paying back money I borrowed' },
   { value: 'gift_or_personal_transfer', label: 'A gift or a personal transfer' },
   { value: 'internal_transfer', label: 'Money moving between my own accounts' },
   { value: 'card_payment', label: 'A payment to one of my cards' },

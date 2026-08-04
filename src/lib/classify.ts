@@ -453,7 +453,11 @@ export function interpretTransaction(
   // The predicates are the existing ones — `countsAsEarnedIncome` and `personalCostSign`
   // — so there is still exactly one place that decides what a meaning costs.
   const settledAsTransfer = confirmed
-    ? financialMeaning === 'internal_transfer' || financialMeaning === 'card_payment'
+    ? financialMeaning === 'internal_transfer'
+      || financialMeaning === 'card_payment'
+      // Repaying a loan is debt settlement, the same class as paying a card: it is not
+      // consumption, and a closed loan must not keep projecting payments into a forecast.
+      || financialMeaning === 'loan_repayment'
     : type === 'transfer';
 
   // The ONE earned-income gate. `type === 'income'` alone used to be enough, which is

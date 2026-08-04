@@ -8,12 +8,12 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { FINANCIAL_MEANINGS, PaymentAccount, Transaction, isFinancialMeaning } from '@/types';
-import { countsAsEarnedIncome, personalCostSign } from '@/lib/classify';
+import { countsAsEarnedIncome, interpretTransaction, personalCostSign } from '@/lib/classify';
 import { generateRefundCandidates } from '@/lib/refunds';
 import {
   detectPayerSeries, missingPeriods, refundEvidenceFor, seriesEndDate, sharedTokens,
 } from '@/lib/mapping-evidence';
-import { GROUP_MEANINGS, MappingGroup, buildMappingGroups } from '@/lib/mapping-suggestions';
+import { GROUP_MEANINGS, MappingGroup, OUTFLOW_GROUP_MEANINGS, buildMappingGroups } from '@/lib/mapping-suggestions';
 
 const ACCOUNTS: PaymentAccount[] = [
   { id: 'chk', name: 'Demo Checking', type: 'bank_account', openingBalance: 0, openingDate: '2020-01-01', provider: 'other', color: '#000', isActive: true },
@@ -462,5 +462,81 @@ describe('E7 the detectors themselves', () => {
     expect(tokens).toContain('PAYROLL');
     expect(tokens).not.toContain('8891'); // the confirmation number differs, so it is not shared
     expect(sharedTokens([rows[0], tx({ merchant: 'NOTHING ALIKE', title: 'NOTHING ALIKE', description: 'NOTHING ALIKE' })])).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Loan REPAYMENT — the other half, which the answer list did not have a word for
+// ---------------------------------------------------------------------------
+
+describe('E6 paying a loan back is debt settlement, not spending', () => {
+  const lender: PaymentAccount = {
+    id: 'loan', name: 'PARAGON CREDIT', type: 'personal_loan', openingBalance: 16110,
+    openingDate: '2024-02-05', provider: 'other', color: '#000', isActive: true,
+  } as PaymentAccount;
+
+  /** Borrow once, then pay it back monthly for far less each time. */
+  const borrowThenRepay = (creditAmount = 16110, paymentAmount = 900, creditDate = '2024-02-05') => [
+    tx({ id: 'draw', merchant: 'PARAGON CREDIT', title: 'PARAGON CREDIT', amount: creditAmount, date: creditDate, accountId: 'chk' }),
+    ...Array.from({ length: 6 }, (_, i) =>
+      tx({ id: `pay-${i}`, merchant: 'PARAGON CREDIT', title: 'PARAGON CREDIT', amount: paymentAmount, type: 'expense', date: addDays('2024-03-05', i * 30), accountId: 'chk' })
+    ),
+  ];
+
+  const outflowGroup = (rows: Transaction[], accounts = ACCOUNTS): MappingGroup | undefined =>
+    buildMappingGroups({
+      transactions: rows, accounts,
+      unpairedLegIds: rows.filter((t) => t.type === 'expense').map((t) => t.id),
+    } as never).find((g) => g.direction === 'outflow' && g.label.includes('PARAGON'));
+
+  it('reads the repayment side of a fact it already read from the other end', () => {
+    const g = outflowGroup(borrowThenRepay())!;
+    expect(g.suggestion?.evidence).toBe('loan_repayment');
+    expect(g.suggestion?.meaning).toBe('loan_repayment');
+    // The actual credit, named — not "this looks like a loan" with nothing behind it.
+    expect(g.suggestion?.why).toMatch(/\$16,110\.00 arrived from "PARAGON CREDIT" on 2024-02-05/);
+    expect(g.suggestion?.confidence).toBeCloseTo(0.7);
+  });
+
+  it('is more confident when the lender is also an account the owner holds', () => {
+    const g = outflowGroup(borrowThenRepay(), [...ACCOUNTS, lender])!;
+    expect(g.suggestion?.confidence).toBeCloseTo(0.85);
+    expect(g.suggestion?.why).toMatch(/loan account you hold/);
+  });
+
+  it('does not call a merchant a lender when the credit is the size of a payment', () => {
+    // $1,500 back and $1,500 a month out is a merchant relationship, not borrowing.
+    expect(outflowGroup(borrowThenRepay(1500, 1500))?.suggestion).toBeNull();
+  });
+
+  it('does not call it borrowing when the credit lands mid-series', () => {
+    // Same amounts, but the credit arrives AFTER the payments start — that is a refund,
+    // and a refund never created the debt the payments are settling.
+    expect(outflowGroup(borrowThenRepay(16110, 900, '2024-06-05'))?.suggestion?.meaning)
+      .not.toBe('loan_repayment');
+  });
+
+  it('is a closed-set meaning that is neither income nor personal cost', () => {
+    expect(isFinancialMeaning('loan_repayment')).toBe(true);
+    expect(countsAsEarnedIncome('loan_repayment')).toBe(false);
+    expect(FINANCIAL_MEANINGS.filter(countsAsEarnedIncome)).toEqual(['earned_income']);
+    // Settling a debt is not consumption. The INTEREST inside it is the real cost, and
+    // separating that needs the lender modelled as a `personal_loan` account.
+    expect(personalCostSign('loan_repayment')).toBe(0);
+    // The gap this fixes: six outflow answers, and the only debt-settlement one was
+    // "a payment to one of my cards".
+    expect(OUTFLOW_GROUP_MEANINGS.map((m) => m.value)).toContain('loan_repayment');
+  });
+
+  it('confirming it takes the payments out of spending AND out of the forecast', () => {
+    const row = tx({ id: 'pay-0', merchant: 'PARAGON CREDIT', title: 'PARAGON CREDIT', amount: 900, type: 'expense', date: '2024-03-05', accountId: 'chk' });
+    const before = interpretTransaction(row, ACCOUNTS);
+    expect({ expense: before.expense, forecast: before.forecast }).toEqual({ expense: 'counted', forecast: 'counted' });
+
+    const reviews = { 'pay-0': { transactionId: 'pay-0', state: 'confirmed', meaning: 'loan_repayment', decidedAt: '2026-08-04', reasons: [] } };
+    const after = interpretTransaction(row, ACCOUNTS, { reviews } as never);
+    // A closed loan must not keep projecting payments that will never happen again.
+    expect({ expense: after.expense, income: after.income, forecast: after.forecast })
+      .toEqual({ expense: 'excluded', income: 'excluded', forecast: 'excluded' });
   });
 });
