@@ -467,3 +467,37 @@ describe('D an income row with no provider category is named by its PAYER', () =
     expect(cents).toBe(1298743); // $12,987.43 — the figure the owner saw under "Other"
   });
 });
+
+// ---------------------------------------------------------------------------
+// E. Confirmed non-income meanings get their OWN lanes — found on the live screen
+// ---------------------------------------------------------------------------
+
+describe('E a confirmed non-income meaning is never drawn as income', () => {
+  // After the owner named their loan, chit pool and tax refunds, the totals excluded
+  // them (the earned-income gate held) but the chart still DREW them in `inc:` lanes:
+  // the tile read $246,998.82 "earned" against a true $211,967.63. A lane the totals
+  // exclude and the chart includes is a lie with an alibi.
+  const inflow = (id: string, meaning: string) => {
+    const t = tx({ id, title: 'DEMO CREDIT', merchant: 'DEMO CREDIT', amount: 500, type: 'income', accountId: 'acc-bank' });
+    const income = { reviews: { [id]: { transactionId: id, state: 'confirmed', meaning, updatedAt: '', source: 'user' } } };
+    return inflowLane(t, { accounts: ACCOUNTS, spendingCategories: new Set<string>(), income } as never);
+  };
+
+  it('routes each confirmed meaning to its own lane, none of them inc:', () => {
+    expect(inflow('l1', 'loan_proceeds').id).toBe('borrowed-in');
+    expect(inflow('c1', 'chit_fund_payout').id).toBe('chit-in');
+    expect(inflow('o1', 'other_non_income_credit').id).toBe('credits-other');
+    expect(inflow('i1', 'internal_transfer').id).toBe('self-ext-in'); // merges with the existing stub
+    expect(inflow('r1', 'receivable_repayment').id).toBe('person-in:others');
+    expect(inflow('s1', 'shared_expense_reimbursement').id).toBe('person-in:others');
+  });
+
+  it('confirmed earned income still lands in an inc: lane', () => {
+    expect(inflow('e1', 'earned_income').id).toMatch(/^inc:/);
+  });
+
+  it('an UNANSWERED inflow keeps the fallback — the honest inc: lane the queue asks about', () => {
+    const t = tx({ id: 'u1', title: 'MYSTERY DEPOSIT', merchant: 'MYSTERY DEPOSIT', amount: 500, type: 'income', accountId: 'acc-bank' });
+    expect(inflowLane(t, { accounts: ACCOUNTS, spendingCategories: new Set<string>() }).id).toMatch(/^inc:/);
+  });
+});

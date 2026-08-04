@@ -59,6 +59,35 @@ export const MONEY_BACK: Lane = { id: 'refunds', label: 'Money back (unreviewed)
 /** Cashback, statement credits, promotional credits. A rebate is not earnings. */
 export const REWARDS: Lane = { id: 'rewards', label: 'Card rewards & cashback', kind: 'credit' };
 
+/**
+ * The owner's CONFIRMED non-income meanings, as lanes of their own.
+ *
+ * Found on the owner's live screen: after the 2026-08-04 batch named the loan, the chit
+ * pool, the tax refunds and the dispute credits, the "Money came in — earned" tile still
+ * read $246,998.82 against a true $211,967.63. Every TOTAL excluded them (the one
+ * earned-income gate held) but this router had no branch for the new meanings, so they
+ * fell through to the `inc:` fallback and were DRAWN as income. A lane the totals
+ * exclude and the chart includes is a lie with an alibi.
+ */
+export const MONEY_BORROWED: Lane = { id: 'borrowed-in', label: 'Money you borrowed', kind: 'card' };
+export const CHIT_PAYOUT: Lane = { id: 'chit-in', label: 'Chit pool payout', kind: 'credit' };
+export const CREDITS_OTHER: Lane = { id: 'credits-other', label: 'Credits — not income', kind: 'credit' };
+/** Merges with the existing unpaired self-transfer stub, so one node, not two. */
+export const SELF_MOVE_IN: Lane = { id: 'self-ext-in', label: 'From your accounts elsewhere', kind: 'stub' };
+/** Counts into the "received from people" half of the story tile, where it belongs. */
+export const FROM_PEOPLE: Lane = { id: 'person-in:others', label: 'Others (people)', kind: 'source' };
+
+const CONFIRMED_MEANING_LANES: Partial<Record<string, Lane>> = {
+  loan_proceeds: MONEY_BORROWED,
+  chit_fund_payout: CHIT_PAYOUT,
+  other_non_income_credit: CREDITS_OTHER,
+  internal_transfer: SELF_MOVE_IN,
+  card_payment: SELF_MOVE_IN,
+  receivable_repayment: FROM_PEOPLE,
+  shared_expense_reimbursement: FROM_PEOPLE,
+  gift_or_personal_transfer: FROM_PEOPLE,
+};
+
 /** Rung 6/7 of the card-credit ladder: real money, and nothing explains it yet. */
 export const CARD_CREDIT_UNEXPLAINED: Lane = {
   id: 'card-credit-unexplained',
@@ -185,6 +214,9 @@ export function inflowLane(t: Transaction, ctx: LaneContext): Lane {
 
   const { financialMeaning } = interpretTransaction(t, ctx.accounts, ctx.income);
   if (financialMeaning === 'refund') return MONEY_BACK;
+  // A meaning the OWNER confirmed routes to its own lane — see CONFIRMED_MEANING_LANES.
+  const confirmedLane = CONFIRMED_MEANING_LANES[financialMeaning];
+  if (confirmedLane) return confirmedLane;
   if (isReward(named)) return REWARDS;
   if (financialMeaning === 'earned_income') {
     const c = incomeLaneName(t);
