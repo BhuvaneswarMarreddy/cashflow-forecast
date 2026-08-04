@@ -432,7 +432,17 @@ export function interpretTransaction(
   // confirm an answer and the app would keep calling it an internal transfer. Every
   // other transfer keeps the veto untouched.
   const review = t.id ? income?.reviews?.[t.id] : undefined;
-  const overridable = type !== 'transfer' || namesExternalCounterparty(t);
+  // The veto narrows by ONE more case: a transfer-typed row the OWNER has confirmed as
+  // something other than earned income. Live importers collapse provider categories like
+  // "Loan Payment" to type 'transfer' and store no counterparty text — measured on the
+  // live ledger, all 22 Upstart rows arrive that way — so without this the owner's own
+  // confirmed answer about their loan payments was silently ignored. The income golden
+  // rule is untouched: earned_income on a transfer row still requires a named external
+  // counterparty; no confirmation can turn a bare own-account move into income.
+  const overridable =
+    type !== 'transfer'
+    || namesExternalCounterparty(t)
+    || (review?.state === 'confirmed' && !!review.meaning && review.meaning !== 'earned_income');
   const confirmed =
     overridable && review?.state === 'confirmed' && review.meaning ? review.meaning : undefined;
 

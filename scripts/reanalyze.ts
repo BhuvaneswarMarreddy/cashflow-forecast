@@ -41,7 +41,17 @@ const BATCH_ID = 'reanalysis-2026-08-04';
 const NOW = new Date().toISOString();
 const money = (c: number) => '$' + (c / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-const hayOf = (t: Transaction) => norm(`${t.title} ${t.merchant ?? ''} ${t.description ?? ''}`);
+
+/**
+ * The live importer stores EMPTY descriptions — but the original bank statement survives,
+ * URL-encoded, inside the import fingerprint that IS the document id
+ * (imp_<date>|<amount>|<acct>|<statement>|<n>). Decoding it restores exactly the text the
+ * CSV verification ran on, so one predicate set works on both ledgers.
+ */
+const decodedId = (t: Transaction): string => {
+  try { return decodeURIComponent(t.id ?? ''); } catch { return t.id ?? ''; }
+};
+const hayOf = (t: Transaction) => norm(`${t.title} ${t.merchant ?? ''} ${t.description ?? ''} ${decodedId(t)}`);
 
 /**
  * The owner's own name AS THE COUNTERPARTY — not merely on the bank line. Every ACH row
@@ -53,9 +63,13 @@ const hayOf = (t: Transaction) => norm(`${t.title} ${t.merchant ?? ''} ${t.descr
 const OWNER_TOKENS = ['bhuvaneswar'];
 const isOwnName = (who: string) => OWNER_TOKENS.some((t) => norm(who).includes(t));
 const zelleParty = (t: Transaction) =>
-  (t.description ?? '').match(/zelle payment (?:from|to) ([A-Za-z .]+?)\s*(?:for|;|Conf)/i)?.[1] ?? '';
+  `${t.description ?? ''} ${decodedId(t)}`.match(/zelle payment (?:from|to) ([A-Za-z .]+?)\s*(?:for|;|conf)/i)?.[1] ?? '';
 const counterpartyIsOwner = (t: Transaction) =>
   isOwnName(zelleParty(t)) || isOwnName(t.merchant ?? '');
+
+/** Direction that survives the live importer collapsing categories to type 'transfer'. */
+const isInflow = (t: Transaction) => t.type === 'income' || (t.type === 'transfer' && t.transferDirection === 'in');
+const isOutflow = (t: Transaction) => t.type === 'expense' || (t.type === 'transfer' && t.transferDirection === 'out');
 
 // ---------------------------------------------------------------------------
 // The decisions. First match wins; order is load-bearing (the owner's own Zelle
@@ -77,7 +91,10 @@ const DECISIONS: Decision[] = [
     key: 'own-name',
     owner: 'My own name is in-between transactions — me moving my own money.',
     meaning: 'internal_transfer',
-    test: (t) => t.type !== 'transfer' && counterpartyIsOwner(t),
+    // No type filter: my own name on a transfer-typed row is still my own money moving
+    // (the Zelle legs that FUND the loan payments say "from <owner> for upstart" and
+    // must not fall through to the loan rule below).
+    test: (t) => counterpartyIsOwner(t),
   },
   {
     key: 'chit-payout',
@@ -86,10 +103,10 @@ const DECISIONS: Decision[] = [
     // Shape, not names: Zelle from a person, the payout window, the three pot amounts.
     // Names of the seven payers deliberately do not appear in this repo.
     test: (t, hay) => {
-      if (!/zelle payment from/i.test(t.description ?? '')) return false;
-      if (counterpartyIsOwner(t)) return false;
+      const party = zelleParty(t);
+      if (!party || isOwnName(party)) return false; // a named person paid, and not me
       const d = day(t.date);
-      if (d < '2026-03-03' || d > '2026-03-10') return false;
+      if (d < '2026-03-04' || d > '2026-03-10') return false;
       return [100000, 120000, 150000].includes(toCents(t.amount));
     },
   },
@@ -97,13 +114,14 @@ const DECISIONS: Decision[] = [
     key: 'upstart-in',
     owner: 'Upstart is my personal loan — this credit is the loan paid out to me.',
     meaning: 'loan_proceeds',
-    test: (t, hay) => hay.includes('upstart') && t.type === 'income',
+    // Live rows arrive as type 'transfer' — direction, not type, says which side.
+    test: (t, hay) => hay.includes('upstart') && isInflow(t),
   },
   {
     key: 'upstart-out',
     owner: 'Loan payment to Upstart. A loan payment is also spending.',
     meaning: 'loan_repayment',
-    test: (t, hay) => hay.includes('upstart') && t.type === 'expense',
+    test: (t, hay) => hay.includes('upstart') && isOutflow(t),
   },
   {
     key: 'irs',
@@ -130,7 +148,8 @@ const DECISIONS: Decision[] = [
     owner: 'Remitly is money I send to India — an expense.',
     meaning: 'personal_expense',
     gated: true,
-    test: (t, hay) => hay.includes('remitly'),
+    // Half the live rows are named "Sent Rmtly G" — the vowels did not survive.
+    test: (t, hay) => hay.includes('remitly') || hay.includes('rmtly'),
   },
 ];
 
@@ -187,11 +206,32 @@ async function main() {
   console.log(`ledger: ${transactions.length} rows, ${accounts.length} accounts, ` +
     `${existingSources.length} income sources, ${Object.keys(existingReviews).length} reviews (${ledger.source})\n`);
 
-  // -- sources to create (skip any that already exist by normalized name) ----
+  // -- sources to create ------------------------------------------------------
+  // Two guards. Same normalized name = same source. And CLAIM OVERLAP: the owner's
+  // existing "Salary" source (alias Canton) already claims the Canton deposits — adding
+  // ours would make every one of those rows match TWO sources, which is a conflict that
+  // un-classifies them. Measured on the live dry run before this guard existed: earned
+  // income would have DROPPED from $113,955.39 to $98,012.24.
   const have = new Set(existingSources.map((s) => norm(s.name)));
-  const newSources = Object.entries(SOURCES)
-    .filter(([, s]) => !have.has(norm(s.name)))
-    .map(([key, s]) => ({ key, id: `src-${key}-${BATCH_ID}`, doc: { ...s, batchId: BATCH_ID } }));
+  const activeExisting = existingSources.filter((s) => s.isActive && s.userApproved !== false);
+  const incomeRows = transactions.filter((t) => t.type === 'income');
+  const wouldConflict = (candidate: Omit<IncomeSource, 'id'>): number => {
+    const probe = { id: 'probe', ...candidate } as IncomeSource;
+    if (!probe.isActive) return 0; // an inactive source never matches anything
+    return incomeRows.filter(
+      (t) => matchApprovedSources(t, [probe]).length && matchApprovedSources(t, activeExisting).length
+    ).length;
+  };
+  const newSources: { key: string; id: string; doc: Omit<IncomeSource, 'id'> & { batchId: string } }[] = [];
+  for (const [key, src] of Object.entries(SOURCES)) {
+    if (have.has(norm(src.name))) continue;
+    const overlap = wouldConflict(src);
+    if (overlap) {
+      console.log(`SKIPPING source "${src.name}" — ${overlap} rows are already claimed by an existing source; a second claim would un-classify them.`);
+      continue;
+    }
+    newSources.push({ key, id: `src-${key}-${BATCH_ID}`, doc: { ...src, batchId: BATCH_ID } });
+  }
 
   // -- review records ---------------------------------------------------------
   const sourceIdOf = (key?: string) => {
@@ -237,7 +277,10 @@ async function main() {
     const rows = rowsOf.get(d.key) ?? [];
     if (!rows.length || rows.length > 15) continue;
     console.log(`\n  ${d.key}:`);
-    for (const t of rows) console.log(`    ${t.id}  ${day(t.date)}  ${(t.merchant || t.title).slice(0, 40).padEnd(40)} ${money(toCents(t.amount)).padStart(12)}`);
+    for (const t of rows) {
+      const who = zelleParty(t) || t.merchant || t.title;
+      console.log(`    ${t.id.slice(0, 44).padEnd(44)}  ${day(t.date)}  ${who.slice(0, 32).padEnd(32)} ${money(toCents(t.amount)).padStart(12)}`);
+    }
   }
 
   // -- what the Canton source claims by matching alone (no records needed) ----

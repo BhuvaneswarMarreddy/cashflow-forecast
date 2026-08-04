@@ -472,7 +472,20 @@ describe('a confirmation may override a provider transfer ONLY when it names a c
     expect(namesExternalCounterparty(own)).toBe(false);
   });
 
-  it('keeps the veto for an ordinary internal transfer — the one that has no counterparty', () => {
+  /**
+   * DESIGN CHANGE, 2026-08-04. These two cases used to assert the OPPOSITE: a confirmed
+   * non-income meaning on a bare transfer row was vetoed, because "only a counterparty
+   * row can tell an external payment from an own-account move".
+   *
+   * That premise died with the live importer: live rows carry EMPTY descriptions
+   * (measured: all 22 of the owner's real loan rows arrive type 'transfer' with no text),
+   * so namesExternalCounterparty can never fire and the veto silently discarded every
+   * answer the owner gave about a transfer-typed row — the exact "the app ignores what I
+   * tell it" failure this whole programme exists to remove. The owner's explicit,
+   * per-row, confirmed answer IS the counterparty testimony now. The golden rule is
+   * untouched: earned income still cannot be created this way (asserted below and in E8).
+   */
+  it('a confirmed non-income meaning now beats the provider type, even with no counterparty', () => {
     const t = {
       id: 'sweep1', title: 'Online Transfer to Savings', merchant: 'Online Transfer to Savings',
       description: 'ONLINE TRANSFER TO SAVINGS 1234', sourceCategory: 'Transfer',
@@ -480,15 +493,18 @@ describe('a confirmation may override a provider transfer ONLY when it names a c
       paymentMethod: 'other', date: '2025-04-01', accountId: 'chk',
     } as Transaction;
     const i = interpretTransaction(t, ACCOUNTS, review('sweep1', 'personal_expense'));
-    // The provider said this money moved between accounts. No counterparty, no override.
-    expect(i.financialMeaning).toBe('internal_transfer');
-    expect(i.expense).toBe('excluded');
-    expect(sumExpenseCents([t], ACCOUNTS, review('sweep1', 'personal_expense'))).toBe(0);
+    expect(i.financialMeaning).toBe('personal_expense');
+    expect(i.expense).toBe('counted');
+    expect(sumExpenseCents([t], ACCOUNTS, review('sweep1', 'personal_expense'))).toBe(90000);
+    // UNCONFIRMED, the provider's word still stands — only a decision overrides.
+    expect(interpretTransaction(t, ACCOUNTS).expense).toBe('excluded');
   });
 
-  it('keeps the veto for a row naming the owner\'s own name on both sides', () => {
-    const t = zelle('ME', 'out', 900, '2025-04-01');
-    expect(interpretTransaction(t, ACCOUNTS, review(t.id, 'personal_expense')).expense).toBe('excluded');
+  it('but no confirmation can turn a bare transfer row into EARNED INCOME', () => {
+    const t = zelle('ME', 'in', 900, '2025-04-01');
+    const i = interpretTransaction(t, ACCOUNTS, review(t.id, 'earned_income'));
+    expect(i.income).toBe('excluded');
+    expect(i.financialMeaning).not.toBe('earned_income');
   });
 
   it('a derived meaning still defers to the classifier — only a CONFIRMED one decides', () => {

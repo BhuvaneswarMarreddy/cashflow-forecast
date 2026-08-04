@@ -597,3 +597,28 @@ describe('E7 a chit-pool payout is nameable but never guessed', () => {
     }
   });
 });
+
+describe('E8 the owner can overrule a provider-typed transfer — except into income', () => {
+  // Live importers collapse "Loan Payment" to type 'transfer' with no counterparty
+  // text. All 22 of the owner's real loan rows arrive that way, so without this the
+  // confirmed answer "paying back money I borrowed" was silently ignored.
+  const row = tx({ id: 'loan-1', merchant: 'PARAGON CREDIT', title: 'PARAGON CREDIT', amount: 900, type: 'transfer', transferDirection: 'out', date: '2025-03-05', accountId: 'chk' });
+
+  it('a confirmed non-income meaning takes effect on a transfer row', () => {
+    const reviews = { 'loan-1': { transactionId: 'loan-1', state: 'confirmed', meaning: 'loan_repayment', decidedAt: '2026-08-04', reasons: [] } };
+    const i = interpretTransaction(row, ACCOUNTS, { reviews } as never);
+    expect({ meaning: i.financialMeaning, expense: i.expense }).toEqual({ meaning: 'loan_repayment', expense: 'counted' });
+  });
+
+  it('earned income on a bare transfer row stays vetoed, confirmation or not', () => {
+    const reviews = { 'loan-1': { transactionId: 'loan-1', state: 'confirmed', meaning: 'earned_income', decidedAt: '2026-08-04', reasons: [] } };
+    const i = interpretTransaction(row, ACCOUNTS, { reviews } as never);
+    expect(i.income).toBe('excluded');
+    expect(i.financialMeaning).not.toBe('earned_income');
+  });
+
+  it('an unconfirmed suggestion changes nothing on a transfer row', () => {
+    const reviews = { 'loan-1': { transactionId: 'loan-1', state: 'suggested', meaning: 'loan_repayment', decidedAt: '2026-08-04', reasons: [] } };
+    expect(interpretTransaction(row, ACCOUNTS, { reviews } as never).expense).toBe('excluded');
+  });
+});
