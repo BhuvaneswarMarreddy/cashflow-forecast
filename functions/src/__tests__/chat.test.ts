@@ -88,3 +88,19 @@ describe('buildChatMessages', () => {
     expect(msgs[0].content).toContain('(no title) | - | 0 | -');
   });
 });
+
+describe('the house rules travel with every turn', () => {
+  it('teaches the model how THIS app treats refunds, not general finance knowledge', () => {
+    // The owner asked "why are these refunds on the income side" and the chat answered
+    // "refunds are typically classified as income... I do not have the ability to change
+    // that structure" — both false for this app, and both invented because the system
+    // prompt never said a word about the app's own money rules.
+    const system = buildChatMessages({ message: 'why are refunds income?' })[0].content;
+    expect(system).toContain('A REFUND IS NEVER INCOME');
+    expect(system).toContain('REDUCES the spending category it came from');
+    // And the model is told where the user can act, so "the system just works that
+    // way" is never the answer.
+    expect(system).toContain('Flow -> Needs Review');
+    expect(system).toContain('A loan repayment DOES count as spending');
+  });
+});
