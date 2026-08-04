@@ -723,7 +723,9 @@ dialog.sheet::backdrop {
     width: min(26rem, 92vw); /* default only — the drag handle sets an inline width */
     border-radius: 16px;
     border: 1px solid var(--border-color);
-    padding-bottom: 0;
+    /* No padding override: `padding-bottom: 0` was the flush-dock era, and it beat the
+       component's own p-5, welding the composer to the bottom edge. A floating panel
+       breathes on all four sides — the component's padding is the one source of truth. */
     box-shadow: -8px 8px 40px rgba(0, 0, 0, 0.35);
     animation: railIn 0.25s ease-out;
   }

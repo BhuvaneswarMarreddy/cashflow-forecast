@@ -265,19 +265,22 @@ export default function DataChatSheet({ open, onClose, seed }: {
         <div ref={endRef} />
       </div>
 
-      <div className="flex items-end gap-2 shrink-0">
+      <div className="flex items-end gap-2 shrink-0 pt-1">
         <label htmlFor="data-chat-input" className="sr-only">Message</label>
+        {/* Short placeholder on purpose: the long example sentence wrapped inside the
+            44px single-line box, clipping mid-word behind a scrollbar. The example
+            phrasings already live on the Try buttons above. */}
         <textarea
           id="data-chat-input"
           rows={1}
           value={input}
           enterKeyHint="send"
-          placeholder="e.g. Anything from Instacart is Groceries"
+          placeholder="Ask about your data…"
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input); }
           }}
-          className="input-field flex-1 min-h-[44px] max-h-32 resize-y py-3"
+          className="input-field flex-1 min-h-[44px] max-h-32 resize-y py-3 leading-snug overflow-hidden focus:overflow-y-auto"
         />
         <button
           type="button"
