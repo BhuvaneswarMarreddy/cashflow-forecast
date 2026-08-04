@@ -700,7 +700,6 @@ dialog.sheet::backdrop {
   height: 75dvh;
   border-top: 1px solid var(--border-color);
   border-radius: 20px 20px 0 0;
-  padding-bottom: env(safe-area-inset-bottom);
   box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.35);
   animation: sheetUp 0.25s ease-out;
 }
@@ -711,6 +710,10 @@ dialog.sheet::backdrop {
 @media (max-width: 639.98px) {
   .chat-rail {
     width: auto !important;
+    /* The home-indicator allowance ADDS to the component's 1rem padding instead of
+       replacing it — a bare env() override read 0 on desktop and welded the composer
+       to the panel's bottom edge everywhere. */
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom)) !important;
   }
 }
 
