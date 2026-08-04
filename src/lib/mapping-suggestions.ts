@@ -1036,6 +1036,7 @@ export const OUTFLOW_GROUP_MEANINGS: readonly { value: FinancialMeaning; label: 
   { value: 'shared_expense', label: 'A cost I share with this person' },
   { value: 'reimbursable_expense', label: 'Money I expect to get back' },
   { value: 'loan_repayment', label: 'Paying back money I borrowed' },
+  { value: 'chit_fund_contribution', label: 'My chit pool contribution — I paid into the pot' },
   { value: 'gift_or_personal_transfer', label: 'A gift or a personal transfer' },
   { value: 'internal_transfer', label: 'Money moving between my own accounts' },
   { value: 'card_payment', label: 'A payment to one of my cards' },

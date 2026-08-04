@@ -567,6 +567,20 @@ describe('E7 a chit-pool payout is nameable but never guessed', () => {
     expect(OUTFLOW_GROUP_MEANINGS.map((m) => m.value)).not.toContain('chit_fund_payout');
   });
 
+  it('the contribution side is spending, and is offered only going out', () => {
+    expect(isFinancialMeaning('chit_fund_contribution')).toBe(true);
+    expect(countsAsEarnedIncome('chit_fund_contribution')).toBe(false);
+    // Money leaving every month is the thing to plan around — the owner's own rule,
+    // already applied to `loan_repayment`.
+    expect(personalCostSign('chit_fund_contribution')).toBe(1);
+    expect(OUTFLOW_GROUP_MEANINGS.map((m) => m.value)).toContain('chit_fund_contribution');
+    expect(GROUP_MEANINGS.map((m) => m.value)).not.toContain('chit_fund_contribution');
+
+    // The pair is directional and must not collapse: paying in is a cost, the pot
+    // arriving is not a windfall.
+    expect(personalCostSign('chit_fund_payout')).toBe(0);
+  });
+
   it('does NOT suggest itself when several people pay in the same week', () => {
     // The shape a pool payout has — five people, round amounts, six days. Measured on
     // the real export this pattern also matches at least ten windows that are plainly

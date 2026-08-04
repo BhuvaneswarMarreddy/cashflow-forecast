@@ -202,6 +202,8 @@ const COST_MEANINGS: readonly FinancialMeaning[] = [
    * account is what separates principal from interest, and is the upgrade path.
    */
   'loan_repayment',
+  // Same reasoning, same accepted ceiling — see the note on the value in `@/types`.
+  'chit_fund_contribution',
 ];
 
 /**

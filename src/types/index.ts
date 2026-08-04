@@ -275,6 +275,21 @@ export const FINANCIAL_MEANINGS = [
    * thing to plan around, and the interest inside it has nowhere else to land.
    */
   'loan_repayment',
+  /**
+   * Paying INTO a chit pool — the mirror of `chit_fund_payout`.
+   *
+   * Counts as spending, for the reason the owner gave about loan payments: in a
+   * cash-flow app the money leaving every month is the thing to plan around. Before your
+   * round comes it is closer to saving, and after it is closer to repaying an advance,
+   * but either way it leaves.
+   *
+   * THE COMPOUNDING CEILING, stated plainly: a full cycle answered this way — every
+   * contribution spending, the payout neither income nor cost — reads as a pure loss,
+   * when a pool is roughly break-even minus the discount. Same trade the owner accepted
+   * for `loan_repayment`. If they ever want the cycle to net out, these become sign 0
+   * and the payout stays as it is.
+   */
+  'chit_fund_contribution',
   'refund',
   // inflows
   'earned_income',
