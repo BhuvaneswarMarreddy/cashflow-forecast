@@ -59,9 +59,9 @@ export default function DuplicateCandidateCard({
               : 'Possible duplicate subscription'}
         </p>
         <p className="text-sm text-[var(--foreground-secondary)]">
-          {merchant} · {(isCharge ? rows : series).map((r) =>
+          {merchant} · {[...new Set((isCharge ? rows : series).map((r) =>
             isCharge ? maskedAccount(ctx.accounts, (r as { accountId?: string }).accountId) : (r as { accountLabel: string }).accountLabel
-          ).join(' and ')}
+          ))].join(' and ')}
         </p>
       </header>
 
@@ -137,6 +137,19 @@ export default function DuplicateCandidateCard({
         <p className="text-[var(--foreground-muted)]">{preview.scope}</p>
       </section>
 
+      {/* ABOVE the buttons it enables: the owner saw a dead "Already cancelled" button
+          with its explanation below the fold. The date has to be a real date, or
+          `continued_charge_after_cancellation` can never arm. Native control. */}
+      <label className="flex items-center gap-2 text-sm">
+        <span>Cancelled on</span>
+        <input
+          type="date"
+          className="min-h-[44px] rounded-lg border border-[var(--border-color)] bg-[var(--background)] px-2"
+          value={cancelledOn}
+          onChange={(e) => setCancelledOn(e.target.value)}
+        />
+      </label>
+
       <div className="flex flex-wrap gap-2">
         <button className={ACTION_BTN} onClick={() => onDecide({ status: 'confirmed', reasonCode: 'accidental_duplicate' }, candidate)}>
           {isCharge ? 'Yes, a duplicate' : 'Accidental duplicate'}
@@ -162,17 +175,6 @@ export default function DuplicateCandidateCard({
         </button>
       </div>
 
-      {/* The cancellation date has to be a real date, or `continued_charge_after_cancellation`
-          can never arm. Native control, visible label, no picker library. */}
-      <label className="flex items-center gap-2 text-sm">
-        <span>Cancelled on</span>
-        <input
-          type="date"
-          className="min-h-[44px] rounded-lg border border-[var(--border-color)] bg-[var(--background)] px-2"
-          value={cancelledOn}
-          onChange={(e) => setCancelledOn(e.target.value)}
-        />
-      </label>
     </article>
   );
 }

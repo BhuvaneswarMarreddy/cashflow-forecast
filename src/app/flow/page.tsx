@@ -469,6 +469,9 @@ export default function FlowPage() {
   const nameOf = (accountId: string) => accounts.find((a) => a.id === accountId)?.name ?? accountId;
   const activeRecurringCents = recurring.filter((r) => r.active).reduce((s, r) => s + r.monthlyCents, 0);
   const gapTotal = graph.reconciliation.reduce((s, r) => s + r.gapCents, 0);
+  /** '2027-08' -> 'Aug 2027' — a person never reads a raw month key. */
+  const monthLabel = (ym: string) =>
+    new Date(`${ym}-15T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
   const last = projection.points[projection.points.length - 1];
 
   // The reconciliation "Now" column actually shows the balance at the END of the selected
@@ -1345,7 +1348,7 @@ export default function FlowPage() {
                 ? `Zelle + Remitly. ${money(story.personExpense)} of this is also counted in spending; ${money(story.fromPeople)} came back from people and is inside "Money came in"`
                 : `Zelle + Remitly — money moved, not yet a cost. ${money(story.fromPeople)} came back from people and is inside "Money came in"`,
             },
-            { label: gapTotal > 0 ? '⚠ Not yet in the data' : 'Data complete', cents: gapTotal, sub: gapTotal > 0 ? 'export gaps — shown in the chart, being re-exported' : 'every dollar accounted for' },
+            { label: gapTotal > 0 ? '⚠ Not yet in the data' : 'Data complete', cents: gapTotal, sub: gapTotal > 0 ? 'history older than your connected feeds can reach — a bank export can fill it' : 'every dollar accounted for' },
           ].map((t) => (
             <div key={t.label} className="rounded-xl border border-[var(--border-color)] bg-[var(--background-secondary)] p-4">
               <p className="text-xs text-[var(--foreground-muted)]">{t.label}</p>
@@ -1620,10 +1623,10 @@ export default function FlowPage() {
                 {graph.reconciliation.map((r) => (
                   <tr key={r.accountId} className="border-t border-[var(--border-color)]">
                     <td className="px-3 py-2">{r.name}</td>
-                    <td className="px-3 py-2 text-right">{money(r.openingCents)}</td>
-                    <td className="px-3 py-2 text-right">{money(r.inCents)}</td>
-                    <td className="px-3 py-2 text-right">{money(r.outCents)}</td>
-                    <td className="px-3 py-2 text-right">{money(r.closingCents)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{money(r.openingCents)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{money(r.inCents)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{money(r.outCents)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{money(r.closingCents)}</td>
                     <td className="px-3 py-2">
                       {r.verdict === 'missing-rows'
                         ? <button
@@ -1639,7 +1642,7 @@ export default function FlowPage() {
                 ))}
                 <tr className="border-t border-[var(--border-color)] font-semibold">
                   <td className="px-3 py-2">Net worth</td><td /><td /><td />
-                  <td className="px-3 py-2 text-right">
+                  <td className="px-3 py-2 text-right tabular-nums">
                     {money(graph.reconciliation.reduce((s, r) => s + r.closingCents, 0))}
                   </td>
                   <td />
@@ -1667,7 +1670,7 @@ export default function FlowPage() {
                       <td className="px-3 py-2">{nameOf(b.from)}</td>
                       <td className="px-3 py-2">{nameOf(b.to)}</td>
                       <td className="px-3 py-2 text-right">{b.moves}</td>
-                      <td className="px-3 py-2 text-right">{money(b.cents)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{money(b.cents)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1697,8 +1700,8 @@ export default function FlowPage() {
                   <tr key={r.merchant} className="border-t border-[var(--border-color)]">
                     <td className="px-3 py-2">{r.merchant}</td>
                     <td className="px-3 py-2">{r.cadence}</td>
-                    <td className="px-3 py-2 text-right">{money(r.medianCents)}</td>
-                    <td className="px-3 py-2 text-right">{money(r.monthlyCents)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{money(r.medianCents)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{money(r.monthlyCents)}</td>
                     <td className="px-3 py-2">{r.lastSeen}</td>
                     <td className="px-3 py-2">
                       {r.active
@@ -1718,14 +1721,14 @@ export default function FlowPage() {
             <h2 className="text-lg font-semibold text-[var(--foreground)]">At this rate</h2>
             <p className="text-sm text-[var(--foreground-secondary)]">
               {money(projection.monthlyRateCents)}/mo →{' '}
-              <span className="font-semibold text-[var(--foreground)]">{money(last.cents)}</span> by {last.month}
+              <span className="font-semibold text-[var(--foreground)]">{money(last.cents)}</span> by {monthLabel(last.month)}
             </p>
           </div>
           <div className="rounded-xl border border-[var(--border-color)] bg-[var(--background-secondary)] p-4">
             <ResponsiveContainer width="100%" height={260}>
               <LineChart data={projection.points.map((p) => ({ month: p.month, value: p.cents / 100 }))}>
                 <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.2} />
-                <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                <XAxis dataKey="month" tick={{ fontSize: 11 }} tickFormatter={monthLabel} />
                 <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `$${Math.round(Number(v) / 1000)}k`} width={56} />
                 <Tooltip formatter={(v) => money(Math.round(Number(v) * 100))} />
                 <Line type="monotone" dataKey="value" stroke="#b08d3f" strokeWidth={2} dot={false} isAnimationActive={false} />

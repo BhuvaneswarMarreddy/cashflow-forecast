@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { formatMoney } from '@/lib/money';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
@@ -355,7 +356,7 @@ export default function DashboardPage() {
                 <div className="text-center">
                   <p className="text-xs text-[var(--foreground-muted)] mb-1">Lowest Point</p>
                   <p className={`text-xl font-bold ${forecast.lowestBalance < (profile?.settings?.safetyThreshold || 500) ? 'text-red-500' : 'text-[var(--foreground)]'}`}>
-                    ${forecast.lowestBalance.toLocaleString()}
+                    {formatMoney(forecast.lowestBalance, 'USD', 2)}
                   </p>
                 </div>
                 <div className="text-center">
@@ -380,7 +381,7 @@ export default function DashboardPage() {
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
           <div>
             <h1 className="text-3xl font-bold text-[var(--foreground)]">
-              Welcome back, {user?.name?.split(' ')[0]}!
+              Welcome back{user?.name ? `, ${user.name.split(' ')[0]}` : ''}!
             </h1>
             <p className="text-[var(--foreground-secondary)] mt-1">
               Here&apos;s your financial overview

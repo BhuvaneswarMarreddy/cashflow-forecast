@@ -448,7 +448,7 @@ function GoalModal({
           <h2 className="text-xl font-bold text-[var(--foreground)]">
             {isEditing ? 'Edit Goal' : 'New Savings Goal'}
           </h2>
-          <button onClick={onClose} className="p-2 rounded-lg text-[var(--foreground-muted)] hover:bg-[var(--background-tertiary)]">
+          <button onClick={onClose} aria-label="Close" className="p-2 rounded-lg text-[var(--foreground-muted)] hover:bg-[var(--background-tertiary)]">
             <X className="w-5 h-5" />
           </button>
         </div>

@@ -59,7 +59,10 @@ export default function DataChatSheet({ open, onClose, seed }: {
   const [railWidth, setRailWidth] = useState<number | null>(() => {
     if (typeof window === 'undefined') return null;
     const saved = Number(window.localStorage.getItem('chat-rail-width'));
-    return Number.isFinite(saved) && saved >= 320 ? saved : null;
+    if (!Number.isFinite(saved) || saved < 320) return null;
+    // Re-clamp to THIS window: a width saved on a wide monitor must not reopen wider
+    // than the screen it is on, with its own resize handle off-screen.
+    return Math.min(saved, Math.max(360, Math.floor(window.innerWidth * 0.8)));
   });
   useEffect(() => {
     if (railWidth === null) window.localStorage.removeItem('chat-rail-width');
@@ -200,6 +203,8 @@ export default function DataChatSheet({ open, onClose, seed }: {
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize chat panel"
+        aria-valuemin={320}
+        aria-valuenow={railWidth ?? RAIL_DEFAULT_PX}
         tabIndex={0}
         onPointerDown={startDrag}
         onPointerMove={onDrag}
@@ -251,7 +256,7 @@ export default function DataChatSheet({ open, onClose, seed }: {
                 ? 'bg-[var(--accent-primary)]/15 text-[var(--foreground)]'
                 : 'bg-[var(--background-secondary)] border border-[var(--border-color)] text-[var(--foreground-secondary)]'
             }`}>
-              <p className="whitespace-pre-wrap">{m.text}</p>
+              <p className="whitespace-pre-wrap break-words">{m.text}</p>
               {m.rule && <RulePreviewCard rule={m.rule} pending={m.status === 'pending'} busy={busy} money={money} onApply={() => apply(m)} onCancel={() => dismiss(m.id)} />}
             </div>
           </div>

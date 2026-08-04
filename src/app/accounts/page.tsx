@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { formatMoney } from '@/lib/money';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useUserProfile } from '@/context/UserProfileContext';
@@ -481,7 +482,7 @@ export default function AccountsPage() {
               <Banknote className="w-5 h-5 text-[var(--accent-success)]" />
             </div>
             <p className="text-2xl font-bold text-[var(--accent-success)]">
-              ${monthlyIncome.toLocaleString()}
+              {formatMoney(monthlyIncome, 'USD', 2)}
             </p>
             <p className="text-xs text-[var(--foreground-muted)]">{incomeIsDerived ? 'avg (from transactions)' : 'from income sources'}</p>
           </div>
@@ -491,7 +492,7 @@ export default function AccountsPage() {
               <DollarSign className="w-5 h-5 text-[var(--accent-warning)]" />
             </div>
             <p className="text-2xl font-bold text-[var(--foreground)]">
-              ${effectiveBudget.toLocaleString()}
+              {formatMoney(effectiveBudget, 'USD', 2)}
             </p>
             <p className="text-xs text-[var(--foreground-muted)]">{budgetIsDerived ? 'typical monthly spend' : 'your set budget'}</p>
           </div>
@@ -582,9 +583,9 @@ export default function AccountsPage() {
                             <p className="text-xs text-[var(--foreground-muted)]">
                               {account.apr && `APR: ${account.apr}%`}
                               {account.apr && (account.statementDate || account.dueDate) && ' • '}
-                              {account.statementDate && `Statement: ${account.statementDate}th`}
+                              {account.statementDate && `Statement: ${account.statementDate}${getOrdinalSuffix(account.statementDate)}`}
                               {account.statementDate && account.dueDate && ' • '}
-                              {account.dueDate && `Due: ${account.dueDate}th`}
+                              {account.dueDate && `Due: ${account.dueDate}${getOrdinalSuffix(account.dueDate)}`}
                             </p>
                           )}
                           {/* Show linked payment account */}
@@ -610,7 +611,7 @@ export default function AccountsPage() {
                           </p>
                           {account.openingDate && (
                             <p className="text-xs text-[var(--foreground-muted)]" title="Balances derive from transactions since this date">
-                              anchored {account.openingDate}
+                              anchored {account.openingDate.slice(0, 10)}
                             </p>
                           )}
                           {account.creditLimit && (
@@ -870,7 +871,7 @@ export default function AccountsPage() {
                             <span className="text-[var(--foreground-muted)]"> · {acctName(t.accountId)}</span>
                           </div>
                           <span className={dir === 'in' ? 'text-emerald-500' : 'text-[var(--accent-danger)]'}>
-                            {dir === 'in' ? '+' : '-'}${t.amount.toLocaleString()}
+                            {dir === 'in' ? '+' : '-'}{formatMoney(t.amount, 'USD', 2)}
                           </span>
                         </div>
                       ))}
@@ -983,10 +984,10 @@ export default function AccountsPage() {
                 {monthlyIncome > 0 && (
                   <div className="mt-6 p-4 rounded-xl bg-[var(--accent-success)]/10 border border-[var(--accent-success)]/30">
                     <p className="text-sm text-[var(--foreground-secondary)] mb-1">Monthly Income</p>
-                    <p className="text-xl font-bold text-[var(--accent-success)]">${monthlyIncome.toLocaleString()}</p>
+                    <p className="text-xl font-bold text-[var(--accent-success)]">{formatMoney(monthlyIncome, 'USD', 2)}</p>
                     {parseFloat(budgetAmount) > 0 && (
                       <p className="text-sm text-[var(--foreground-secondary)] mt-2">
-                        Savings potential: ${(monthlyIncome - parseFloat(budgetAmount)).toLocaleString()}/month
+                        Savings potential: {formatMoney(monthlyIncome - parseFloat(budgetAmount), 'USD', 2)}/month
                       </p>
                     )}
                   </div>
@@ -1098,7 +1099,7 @@ export default function AccountsPage() {
               <h2 className="text-xl font-bold text-[var(--foreground)]">
                 {editingAccount ? 'Edit Account' : 'Add Account'}
               </h2>
-              <button onClick={resetAccountForm} className="p-2 rounded-lg text-[var(--foreground-muted)] hover:bg-[var(--background-tertiary)]">
+              <button onClick={resetAccountForm} aria-label="Close" className="p-2 rounded-lg text-[var(--foreground-muted)] hover:bg-[var(--background-tertiary)]">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -1279,7 +1280,7 @@ export default function AccountsPage() {
               <h2 className="text-xl font-bold text-[var(--foreground)]">
                 {editingIncome ? 'Edit Income' : 'Add Income'}
               </h2>
-              <button onClick={resetIncomeForm} className="p-2 rounded-lg text-[var(--foreground-muted)] hover:bg-[var(--background-tertiary)]">
+              <button onClick={resetIncomeForm} aria-label="Close" className="p-2 rounded-lg text-[var(--foreground-muted)] hover:bg-[var(--background-tertiary)]">
                 <X className="w-5 h-5" />
               </button>
             </div>

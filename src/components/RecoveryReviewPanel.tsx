@@ -210,7 +210,7 @@ function PanelBody({
 
           <div role="group" aria-label="Filter review by kind" className="flex flex-wrap gap-1">
             <button
-              className={`${ACTION_BTN} ${sectionFilter === null ? 'bg-[var(--background-tertiary)]' : ''}`}
+              className={`${ACTION_BTN} ${sectionFilter === null ? 'bg-[var(--background-tertiary)] border-[var(--accent-primary)] font-semibold' : ''}`}
               aria-pressed={sectionFilter === null}
               onClick={() => onSectionFilter(null)}
             >
@@ -222,7 +222,7 @@ function PanelBody({
               return (
                 <button
                   key={section.id}
-                  className={`${ACTION_BTN} ${sectionFilter === section.id ? 'bg-[var(--background-tertiary)]' : ''}`}
+                  className={`${ACTION_BTN} ${sectionFilter === section.id ? 'bg-[var(--background-tertiary)] border-[var(--accent-primary)] font-semibold' : ''}`}
                   aria-pressed={sectionFilter === section.id}
                   onClick={() => onSectionFilter(section.id)}
                 >
@@ -298,7 +298,7 @@ function PanelBody({
             {visible.map((item) => (
               <li key={item.key}>
                 <button
-                  className={`${ACTION_BTN} w-full text-left ${item.key === selectedKey ? 'bg-[var(--background-tertiary)]' : ''}`}
+                  className={`${ACTION_BTN} w-full text-left ${item.key === selectedKey ? 'bg-[var(--background-tertiary)] border-[var(--accent-primary)] font-semibold' : ''}`}
                   aria-pressed={item.key === selectedKey}
                   onClick={() => onSelect(item.key)}
                 >

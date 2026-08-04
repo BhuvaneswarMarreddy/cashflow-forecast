@@ -406,16 +406,16 @@ export default function HistoryPage() {
                 <div className="flex items-center gap-6">
                   <div className="flex items-center gap-2">
                     <ArrowUpRight className="w-4 h-4 text-emerald-500" />
-                    <span className="text-emerald-500 font-semibold">${totals.income.toLocaleString()}</span>
+                    <span className="text-emerald-500 font-semibold tabular-nums">{formatMoney(totals.income, 'USD', 2)}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <ArrowDownRight className="w-4 h-4 text-red-400" />
-                    <span className="text-red-400 font-semibold">${totals.expenses.toLocaleString()}</span>
+                    <span className="text-red-400 font-semibold tabular-nums">{formatMoney(totals.expenses, 'USD', 2)}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <DollarSign className="w-4 h-4 text-[var(--foreground-muted)]" />
                     <span className={`font-semibold ${totals.net >= 0 ? 'text-emerald-500' : 'text-red-400'}`}>
-                      {totals.net >= 0 ? '+' : ''}${totals.net.toLocaleString()}
+                      {totals.net >= 0 ? '+' : ''}{formatMoney(totals.net, 'USD', 2)}
                     </span>
                   </div>
                 </div>
@@ -696,8 +696,8 @@ export default function HistoryPage() {
                         </span>
                       </div>
                       <div className="flex items-center gap-4">
-                        <span className="text-sm text-emerald-500">+${group.income.toLocaleString()}</span>
-                        <span className="text-sm text-red-400">-${group.expenses.toLocaleString()}</span>
+                        <span className="text-sm text-emerald-500 tabular-nums">+{formatMoney(group.income, 'USD', 2)}</span>
+                        <span className="text-sm text-red-400 tabular-nums">-{formatMoney(group.expenses, 'USD', 2)}</span>
                         {collapsedGroups.has(group.key) ? (
                           <ChevronDown className="w-5 h-5 text-[var(--foreground-muted)]" />
                         ) : (
@@ -774,7 +774,7 @@ export default function HistoryPage() {
                                   const positive = isPositive(txn, profile?.paymentAccounts);
                                   return (
                                     <p className={`font-semibold ${positive ? 'text-emerald-500' : 'text-[var(--foreground)]'}`}>
-                                      {positive ? '+' : '-'}${txn.amount.toLocaleString()}
+                                      {positive ? '+' : '-'}{formatMoney(txn.amount, 'USD', 2)}
                                     </p>
                                   );
                                 })()}

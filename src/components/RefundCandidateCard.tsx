@@ -188,7 +188,7 @@ export default function RefundCandidateCard({
           return (
             <li key={a.targetTransactionId} className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <span className="text-[var(--foreground)]">{rowLabel(purchase)}</span>
-              <span className="text-[var(--foreground-muted)]">{purchase?.date}</span>
+              <span className="text-[var(--foreground-muted)]">{purchase ? purchase.date.slice(0, 10) : ''}</span>
               <span className="tabular-nums">{money(gross)}</span>
               {editing ? (
                 <span className="inline-flex items-center gap-2">

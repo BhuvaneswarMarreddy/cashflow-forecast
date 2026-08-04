@@ -72,7 +72,7 @@ export default function CardCreditCard({
 
       <section aria-label="What confirming will do" className="rounded-lg bg-[var(--background-tertiary)] p-3 text-sm space-y-1">
         <p className="font-medium">If you confirm:</p>
-        <p>1 transaction affected · {transaction.date}</p>
+        <p>1 transaction affected · {transaction.date.slice(0, 10)}</p>
         <p>This records what the credit is. It adds nothing to your income, on any screen.</p>
         <p>The row stays in your history at its full amount.</p>
         <p>This transaction only. No merchant rule is created.</p>

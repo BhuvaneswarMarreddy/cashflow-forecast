@@ -86,10 +86,10 @@ export default function AccountDetailModal({ account, transactions, onClose }: {
             <h2 className="text-xl font-bold text-[var(--foreground)]">{account.name}</h2>
             <p className={`text-lg font-semibold mt-1 ${isDebt ? 'text-[var(--accent-danger)]' : 'text-[var(--accent-success)]'}`}>
               {isDebt ? 'Owe ' : ''}{money(Math.abs(current))}
-              {account.openingDate && <span className="text-xs text-[var(--foreground-muted)] font-normal"> · anchored {account.openingDate}</span>}
+              {account.openingDate && <span className="text-xs text-[var(--foreground-muted)] font-normal"> · anchored {account.openingDate.slice(0, 10)}</span>}
             </p>
           </div>
-          <button onClick={onClose} className="p-2 rounded-lg text-[var(--foreground-muted)] hover:bg-[var(--background-tertiary)]">
+          <button onClick={onClose} aria-label="Close" className="p-2 rounded-lg text-[var(--foreground-muted)] hover:bg-[var(--background-tertiary)]">
             <X className="w-5 h-5" />
           </button>
         </div>
