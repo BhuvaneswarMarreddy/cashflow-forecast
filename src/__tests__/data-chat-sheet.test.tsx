@@ -171,3 +171,48 @@ describe('saved-rule match count (settings/page.tsx probe)', () => {
     expect(applied.filter((t) => applyMappingRules(t, probe) !== t)).toHaveLength(2);
   });
 });
+
+describe('the rail resizes from its left edge', () => {
+  beforeEach(() => window.localStorage.removeItem('chat-rail-width'));
+  const rail = () => screen.getByRole('complementary', { name: 'Ask about your data' });
+  const handle = () => screen.getByRole('separator', { name: 'Resize chat panel' });
+
+  it('dragging the handle sets the width from the pointer, clamped at both ends', () => {
+    render(<DataChatSheet open onClose={() => {}} />);
+    // jsdom has no PointerEvent; a MouseEvent with the pointermove TYPE carries the
+    // buttons/clientX the handler reads and still reaches React's listener.
+    const move = (init: MouseEventInit) =>
+      fireEvent(handle(), new MouseEvent('pointermove', { bubbles: true, ...init }));
+    // jsdom window is 1024 wide. Pointer at x=700 → 324px rail.
+    move({ buttons: 1, clientX: 700 });
+    expect(rail().style.width).toBe('324px');
+    // Pointer nearly at the right edge → clamped to the 320px floor, not 14px.
+    move({ buttons: 1, clientX: 1010 });
+    expect(rail().style.width).toBe('320px');
+    // Pointer far left → clamped to 80% of the window, not the whole screen.
+    move({ buttons: 1, clientX: 10 });
+    expect(rail().style.width).toBe('819px');
+    // A move with NO button held is a hover, not a drag.
+    move({ buttons: 0, clientX: 500 });
+    expect(rail().style.width).toBe('819px');
+  });
+
+  it('arrow keys resize from the keyboard and the width persists', () => {
+    render(<DataChatSheet open onClose={() => {}} />);
+    // ArrowLeft pushes the left edge left: default 416 + 24.
+    fireEvent.keyDown(handle(), { key: 'ArrowLeft' });
+    expect(rail().style.width).toBe('440px');
+    fireEvent.keyDown(handle(), { key: 'ArrowRight' });
+    expect(rail().style.width).toBe('416px');
+    expect(window.localStorage.getItem('chat-rail-width')).toBe('416');
+  });
+
+  it('double-click (and Home) return to the stylesheet default', () => {
+    window.localStorage.setItem('chat-rail-width', '500');
+    render(<DataChatSheet open onClose={() => {}} />);
+    expect(rail().style.width).toBe('500px'); // the saved size survived a reopen
+    fireEvent.doubleClick(handle());
+    expect(rail().style.width).toBe('');
+    expect(window.localStorage.getItem('chat-rail-width')).toBeNull();
+  });
+});

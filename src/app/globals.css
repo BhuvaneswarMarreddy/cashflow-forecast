@@ -705,16 +705,26 @@ dialog.sheet::backdrop {
   animation: sheetUp 0.25s ease-out;
 }
 
+/* Phones: the inline resize width must never apply — the sheet spans the viewport and
+   its width comes from its insets. !important is what lets the inline style win on
+   desktop while losing here. */
+@media (max-width: 639.98px) {
+  .chat-rail {
+    width: auto !important;
+  }
+}
+
 @media (min-width: 640px) {
   .chat-rail {
-    inset: 4rem 0 0 auto; /* 4rem = the navbar's h-16; the rail starts under it */
+    /* Floating panel, not a flush dock: 4rem navbar + a half-rem breath, and margins
+       on the right and bottom so the page shows through — the owner asked for air. */
+    inset: 4.5rem 0.75rem 0.75rem auto;
     height: auto;
-    width: min(26rem, 92vw);
-    border-radius: 0;
-    border-top: 0;
-    border-left: 1px solid var(--border-color);
+    width: min(26rem, 92vw); /* default only — the drag handle sets an inline width */
+    border-radius: 16px;
+    border: 1px solid var(--border-color);
     padding-bottom: 0;
-    box-shadow: -8px 0 40px rgba(0, 0, 0, 0.35);
+    box-shadow: -8px 8px 40px rgba(0, 0, 0, 0.35);
     animation: railIn 0.25s ease-out;
   }
 }

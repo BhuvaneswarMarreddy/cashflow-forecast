@@ -51,6 +51,44 @@ export default function DataChatSheet({ open, onClose, seed }: {
   const endRef = useRef<HTMLDivElement>(null);
   const seq = useRef(0);
 
+  // ---- resizable rail (desktop only; the mobile bottom sheet keeps its CSS) ----
+  // `null` = the stylesheet default. A number is the owner's chosen width, persisted so
+  // the rail opens at the size they left it. CSS caps mobile with `width:auto !important`,
+  // so this inline width can only ever act on the >=640px rail.
+  const RAIL_DEFAULT_PX = 416; // 26rem — the CSS default, the baseline for keyboard steps
+  const [railWidth, setRailWidth] = useState<number | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const saved = Number(window.localStorage.getItem('chat-rail-width'));
+    return Number.isFinite(saved) && saved >= 320 ? saved : null;
+  });
+  useEffect(() => {
+    if (railWidth === null) window.localStorage.removeItem('chat-rail-width');
+    else window.localStorage.setItem('chat-rail-width', String(railWidth));
+  }, [railWidth]);
+
+  /** Never narrower than the input row, never wider than 80% of the window. */
+  const clampWidth = (w: number) =>
+    Math.min(Math.max(Math.round(w), 320), Math.max(360, Math.floor(window.innerWidth * 0.8)));
+
+  const startDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    // Capture routes every move to the handle even when the pointer outruns it,
+    // which a fast drag always does. Optional-chained: jsdom has no capture API.
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  };
+  const onDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.buttons !== 1) return; // moves only count while the button is down
+    setRailWidth(clampWidth(window.innerWidth - e.clientX));
+  };
+  const onHandleKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    // The left edge: ArrowLeft pushes it left (wider), ArrowRight pulls it right.
+    if (e.key === 'ArrowLeft') setRailWidth((w) => clampWidth((w ?? RAIL_DEFAULT_PX) + 24));
+    else if (e.key === 'ArrowRight') setRailWidth((w) => clampWidth((w ?? RAIL_DEFAULT_PX) - 24));
+    else if (e.key === 'Home') setRailWidth(null);
+    else return;
+    e.preventDefault();
+  };
+
   // Compact context — never the whole ledger. buildChatContext owns the size caps,
   // so the prompt can't quietly grow into every row the owner has ever had.
   const context = useMemo(
@@ -154,7 +192,23 @@ export default function DataChatSheet({ open, onClose, seed }: {
       role="complementary"
       aria-label="Ask about your data"
       className="chat-rail p-4 sm:p-5 gap-3"
+      style={railWidth !== null ? { width: `${railWidth}px` } : undefined}
     >
+      {/* The resize handle — the whole left edge. Drag it, or focus it and use the
+          arrow keys; Home (or double-click) returns to the default width. */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize chat panel"
+        tabIndex={0}
+        onPointerDown={startDrag}
+        onPointerMove={onDrag}
+        onKeyDown={onHandleKey}
+        onDoubleClick={() => setRailWidth(null)}
+        className="hidden sm:block absolute left-0 top-0 h-full w-2 -ml-1 cursor-col-resize rounded-full
+          hover:bg-[var(--accent-primary)]/30 focus-visible:bg-[var(--accent-primary)]/40
+          focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent-primary)]"
+      />
       <div className="flex items-start gap-3 shrink-0">
         <Sparkles className="w-5 h-5 text-[var(--accent-primary)] mt-0.5" aria-hidden="true" />
         <div className="flex-1 min-w-0">
