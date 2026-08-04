@@ -41,6 +41,18 @@ interface AskableRow {
 
 const usd = (n: number) => `$${n.toFixed(2)}`;
 
+/** Transactions carry a full ISO timestamp; a person reads a date. */
+const dateOnly = (s: string) => (s || '').slice(0, 10);
+
+/**
+ * How many rows travel with the question. The owner asked the chat to go through a
+ * 15-row node "one at a time" and it could not, because the question carried a COUNT and
+ * a TOTAL and no rows — so the model asked the owner to type out the very transactions
+ * the app was already showing them. Capped because this is prompt text, not a ledger
+ * dump; past the cap the question says how many it left out rather than pretending.
+ */
+const MAX_ROWS = 25;
+
 /** Distinct non-empty values, most-frequent first, capped. */
 function topValues(rows: AskableRow[], pick: (r: AskableRow) => string | undefined, cap = 3): string[] {
   const counts = new Map<string, number>();
@@ -61,18 +73,39 @@ function topValues(rows: AskableRow[], pick: (r: AskableRow) => string | undefin
  */
 export function askAboutNode(label: string, rows: AskableRow[]): string {
   const total = rows.reduce((s, r) => s + (Number.isFinite(r.amount) ? r.amount : 0), 0);
-  const dates = rows.map((r) => r.date).filter(Boolean).sort();
+  const dates = rows.map((r) => dateOnly(r.date)).filter(Boolean).sort();
   const cats = topValues(rows, (r) => r.sourceCategory);
-  const names = topValues(rows, (r) => r.merchant || r.title, 2);
 
-  return [
+  const shown = [...rows]
+    .sort((a, b) => dateOnly(a.date).localeCompare(dateOnly(b.date)))
+    .slice(0, MAX_ROWS);
+
+  const headline = [
     `I clicked "${label}" on my Flow chart.`,
     `It is ${rows.length} transaction${rows.length === 1 ? '' : 's'} totalling ${usd(total)}`,
     dates.length ? `between ${dates[0]} and ${dates[dates.length - 1]}` : '',
     cats.length ? `, filed under ${cats.join(', ')}` : '',
-    names.length && !names.includes(label) ? ` (rows read as ${names.join(', ')})` : '',
-    '. What is this, and how should it be categorised? If you need me to tell you what it is, ask me one question.',
+    '.',
   ].filter(Boolean).join(' ').replace(/\s+([,.])/g, '$1');
+
+  return [
+    headline,
+    '',
+    rows.length > shown.length
+      ? `Here are the first ${shown.length} of ${rows.length}:`
+      : 'Here they are:',
+    // The rows themselves, numbered, so "the third one" and "go one at a time" both mean
+    // something. Without these the model can only talk about the total.
+    ...shown.map((r, i) =>
+      `${i + 1}. ${dateOnly(r.date)} · ${(r.merchant || r.title || 'unnamed').trim()} · ${usd(
+        Number.isFinite(r.amount) ? r.amount : 0
+      )}${r.sourceCategory ? ` · filed as ${r.sourceCategory}` : ''}`
+    ),
+    '',
+    'What are these, and how should each be categorised? Work through them ONE AT A TIME:',
+    'ask me about the first one only, wait for my answer, then move to the next.',
+    'When I tell you what one is, propose the rule that files it that way.',
+  ].join('\n');
 }
 
 /*

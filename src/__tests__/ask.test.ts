@@ -32,7 +32,9 @@ describe('askAboutNode', () => {
   });
 
   it('invites one question rather than a guess', () => {
-    expect(askAboutNode('X', [row({})])).toContain('ask me one question');
+    // Was "ask me one question"; now it names WHICH one, because the question carries
+    // the numbered rows and "the first one" is a thing it can point at.
+    expect(askAboutNode('X', [row({})])).toContain('ask me about the first one only');
   });
 
   it('says "1 transaction", not "1 transactions"', () => {
@@ -44,5 +46,35 @@ describe('askAboutNode', () => {
     const q = askAboutNode('X', [row({ date: '', amount: Number.NaN }), row({ amount: 5 })]);
     expect(q).not.toMatch(/NaN/);
     expect(q).toContain('$5.00');
+  });
+});
+
+describe('askAboutNode carries the rows, not just the total', () => {
+  const rows = [
+    row({ date: '2025-11-12T06:00:00.000Z', amount: 750, merchant: 'Turo', sourceCategory: 'Other Income' }),
+    row({ date: '2026-05-05T05:00:00.000Z', amount: 130.79, merchant: 'Apple', sourceCategory: 'Other Income' }),
+  ];
+
+  it('lists every row so the model can go one at a time', () => {
+    const q = askAboutNode('Card credits not yet explained', rows);
+    // The owner asked the chat to work through 15 rows and it replied that it had no
+    // details — because the question carried a count and a total and no rows.
+    expect(q).toContain('1. 2025-11-12 · Turo · $750.00');
+    expect(q).toContain('2. 2026-05-05 · Apple · $130.79');
+    expect(q).toMatch(/ONE AT A TIME/);
+  });
+
+  it('never shows a raw timestamp to a person', () => {
+    const q = askAboutNode('X', rows);
+    expect(q).not.toMatch(/T\d{2}:\d{2}:\d{2}/);
+    expect(q).toContain('between 2025-11-12 and 2026-05-05');
+  });
+
+  it('says how many it left out rather than silently truncating', () => {
+    const many = Array.from({ length: 40 }, (_, i) =>
+      row({ date: `2026-01-${String((i % 28) + 1).padStart(2, '0')}`, amount: 10, merchant: `M${i}` })
+    );
+    const q = askAboutNode('X', many);
+    expect(q).toContain('first 25 of 40');
   });
 });

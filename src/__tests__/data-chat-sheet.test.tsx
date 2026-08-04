@@ -133,7 +133,10 @@ describe('DataChatSheet', () => {
     render(<DataChatSheet open onClose={() => {}} />);
     send('put X under crypto');
 
-    expect(await screen.findByText(/couldn't turn that into a change/)).toBeInTheDocument();
+    // The RULE is refused — no Apply button, nothing reaches the store. What the model
+    // SAID survives, because throwing the words away with the rule is what left the
+    // owner staring at "I couldn't turn that into a change" on a clear instruction.
+    expect(await screen.findByText('ok')).toBeInTheDocument();
     expect(screen.queryByText('Apply')).not.toBeInTheDocument();
   });
 

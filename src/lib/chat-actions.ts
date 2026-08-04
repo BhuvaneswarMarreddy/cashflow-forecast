@@ -90,6 +90,31 @@ export type ChatAction =
 export const explanationOf = (a: ChatAction | null | undefined): string | undefined =>
   a && 'explanation' in a ? a.explanation : undefined;
 
+/**
+ * The PROSE inside a payload `parseChatAction` refused — and nothing else.
+ *
+ * The owner typed "this Turo row is car rental for the trip", a perfectly clear
+ * instruction, and got "I couldn't turn that into a change." The strict parser had done
+ * its job: whatever came back was not a rule it could vouch for. The defect is what
+ * happened next — returning `null` threw away the model's ANSWER along with its rejected
+ * action, so a reply that could not become a button became nothing at all.
+ *
+ * This reads text and only text. No rule, no allocation, no candidate id, no action can
+ * come out of here, so the trust boundary above is untouched: a refused rule is still
+ * refused, the owner just gets to read what was said about it.
+ */
+export function fallbackText(raw: unknown): string | undefined {
+  if (typeof raw === 'string') return str(raw, MAX.explanation) ?? undefined;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  if (hasPollutedKey(raw)) return undefined;
+  const o = raw as Record<string, unknown>;
+  for (const key of ['explanation', 'reason', 'answer', 'text', 'message']) {
+    const s = str(o[key], MAX.explanation);
+    if (s) return s;
+  }
+  return undefined;
+}
+
 const MAX = {
   merchants: 40,
   recent: 15,

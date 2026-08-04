@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Loader2, Send, Sparkles, X } from 'lucide-react';
 import { aiChat, callableErrorMessage } from '@/lib/callables';
-import { parseChatAction, buildChatContext, explanationOf } from '@/lib/chat-actions';
+import { parseChatAction, buildChatContext, explanationOf, fallbackText } from '@/lib/chat-actions';
 import { describeRule, rulePreview, MappingRule, NewMappingRule } from '@/lib/mapping-rules';
 import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
@@ -102,10 +102,13 @@ export default function DataChatSheet({ open, onClose, seed }: {
       // The recovery actions (FIN-RELATION-001 §7.3) carry `reason`, not `explanation`,
       // and have no card here yet — FIN-RECOVERY-UI-001 owns that surface. Until then
       // they fall through to the same "couldn't turn that into a change" line.
-      const explanation = explanationOf(reply);
+      // A refused payload still usually SAYS something. Showing the words costs nothing
+      // and keeps a conversation going; the rule inside it is still refused.
+      const explanation = explanationOf(reply) ?? fallbackText(data?.result);
       setMessages((prev) => [...prev, reply?.action === 'create_rule'
         ? mk('assistant', reply.explanation, { rule: reply.rule, status: 'pending' })
-        : mk('assistant', explanation || "I couldn't turn that into a change. Try rephrasing it."),
+        : mk('assistant', explanation
+          || "I got a reply I couldn't read. Try saying it as a rule — for example “Turo is Travel”."),
       ]);
     } catch (e) {
       setMessages((prev) => [...prev, mk('assistant', callableErrorMessage(e))]);

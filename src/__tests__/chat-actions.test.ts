@@ -1,4 +1,4 @@
-import { buildChatContext, explanationOf, parseChatAction } from '@/lib/chat-actions';
+import { buildChatContext, explanationOf, parseChatAction, fallbackText } from '@/lib/chat-actions';
 import { applyMappingRules, MappingRule } from '@/lib/mapping-rules';
 import { PaymentAccount, Transaction } from '@/types';
 
@@ -203,5 +203,30 @@ describe('buildChatContext', () => {
     const ctx = buildChatContext([], []);
     expect(ctx).toMatchObject({ merchants: [], accounts: [], recent: [] });
     expect(ctx.categories.length).toBeGreaterThan(0);
+  });
+});
+
+describe('a refused payload still shows what the model said', () => {
+  it('surfaces the prose when the strict parser rejects the action', () => {
+    // The owner said "this Turo row is car rental for the trip" and got a dead end,
+    // because a null parse threw the answer away with the unusable rule.
+    const raw = { action: 'set_category', explanation: 'Turo is a car rental service, so this is Travel.' };
+    expect(parseChatAction(raw)).toBeNull();
+    expect(fallbackText(raw)).toBe('Turo is a car rental service, so this is Travel.');
+  });
+
+  it('handles a model that replied in plain text instead of JSON', () => {
+    expect(fallbackText('That looks like a car rental.')).toBe('That looks like a car rental.');
+  });
+
+  it('reads text and ONLY text — no rule can escape through it', () => {
+    const smuggled = { action: 'create_rule', rule: { match: { field: 'merchant', op: 'contains', value: 'X' }, set: { category: 'travel' } } };
+    // No prose, so nothing comes back — and a rule is never what comes back.
+    expect(fallbackText(smuggled)).toBeUndefined();
+    // JSON.parse, NOT an object literal: `{ __proto__: ... }` in source SETS the
+    // prototype and creates no own property, so a literal here would test nothing.
+    // This is the payload shape that actually arrives over the wire.
+    expect(fallbackText(JSON.parse('{"__proto__":{"polluted":1},"explanation":"hi"}'))).toBeUndefined();
+    expect(fallbackText({ rule: 'anything' })).toBeUndefined();
   });
 });

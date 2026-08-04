@@ -687,7 +687,11 @@ dialog.sheet::backdrop {
    Desktop: full-height right rail below the navbar, sliding in from the right. */
 .chat-rail {
   position: fixed;
-  z-index: 40;
+  /* Above QuickAddFAB's z-50. At 40 the FAB floated over the rail's own input and send
+     button — the owner could see the textarea and could not reach it. A docked panel the
+     owner is typing into outranks a floating shortcut; the FAB sits behind the rail's
+     opaque background until the rail is closed. */
+  z-index: 60;
   display: flex;
   flex-direction: column;
   background: var(--background-secondary);
