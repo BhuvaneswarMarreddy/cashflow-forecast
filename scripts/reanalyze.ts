@@ -164,6 +164,20 @@ async function main() {
   const includeRemitly = args.includes('--include-remitly');
   if (apply && useCsv) throw new Error('--apply and --csv are mutually exclusive.');
 
+  // The uid is an ADDRESS, not a credential — users/{uid}/… is where one owner's tree
+  // lives, and the Admin SDK bypasses firestore.rules, so it has to be told which tree.
+  // With exactly one user there is nothing to ask: discover it. More than one is an
+  // error by count only — no uid is ever printed for a tree this run does not touch.
+  if (!useCsv && process.env.CASHFLOW_FIRESTORE_KEY && !process.env.CASHFLOW_FIRESTORE_UID) {
+    const { initializeApp, cert, getApps } = await import('firebase-admin/app');
+    const { getFirestore } = await import('firebase-admin/firestore');
+    const app = getApps()[0] ?? initializeApp({ credential: cert(process.env.CASHFLOW_FIRESTORE_KEY) });
+    const users = await getFirestore(app).collection('users').listDocuments();
+    if (users.length !== 1) throw new Error(`users/ holds ${users.length} trees — set CASHFLOW_FIRESTORE_UID to pick one.`);
+    process.env.CASHFLOW_FIRESTORE_UID = users[0].id;
+    console.log('uid auto-discovered (single-user project)\n');
+  }
+
   const ledger: Ledger = useCsv
     ? { ...loadFromCsvDir(path.join(process.cwd(), 'transactionsbyaccount')), income: { sources: [], reviews: {} }, source: 'csv', loadedAt: NOW }
     : await loadFromFirestore();
@@ -271,8 +285,8 @@ async function main() {
 
   // -- apply ------------------------------------------------------------------
   const keyPath = process.env.CASHFLOW_FIRESTORE_KEY;
-  const uid = process.env.CASHFLOW_FIRESTORE_UID;
-  if (!keyPath || !uid) throw new Error('--apply needs CASHFLOW_FIRESTORE_KEY and CASHFLOW_FIRESTORE_UID.');
+  const uid = process.env.CASHFLOW_FIRESTORE_UID; // set above when auto-discovered
+  if (!keyPath || !uid) throw new Error('--apply needs CASHFLOW_FIRESTORE_KEY (uid is auto-discovered).');
   const { initializeApp, cert, getApps } = await import('firebase-admin/app');
   const { getFirestore } = await import('firebase-admin/firestore');
   const app = getApps()[0] ?? initializeApp({ credential: cert(keyPath) });
