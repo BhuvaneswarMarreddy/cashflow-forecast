@@ -547,3 +547,39 @@ describe('E6 paying a loan back is debt settlement, not spending', () => {
       .toEqual({ expense: 'excluded', forecast: 'excluded' });
   });
 });
+
+// ---------------------------------------------------------------------------
+// The chit pool — a meaning with NO detector, on purpose
+// ---------------------------------------------------------------------------
+
+describe('E7 a chit-pool payout is nameable but never guessed', () => {
+  it('is a closed-set inflow answer that is real money and never income', () => {
+    expect(isFinancialMeaning('chit_fund_payout')).toBe(true);
+    // Most of the pot is contributions coming back; taking it early is closer to
+    // borrowing. Neither is earning.
+    expect(countsAsEarnedIncome('chit_fund_payout')).toBe(false);
+    expect(FINANCIAL_MEANINGS.filter(countsAsEarnedIncome)).toEqual(['earned_income']);
+    expect(personalCostSign('chit_fund_payout')).toBe(0);
+
+    // Offered where the money actually lands, and nowhere else: a pot arrives, it is
+    // never a way to describe money going out.
+    expect(GROUP_MEANINGS.map((m) => m.value)).toContain('chit_fund_payout');
+    expect(OUTFLOW_GROUP_MEANINGS.map((m) => m.value)).not.toContain('chit_fund_payout');
+  });
+
+  it('does NOT suggest itself when several people pay in the same week', () => {
+    // The shape a pool payout has — five people, round amounts, six days. Measured on
+    // the real export this pattern also matches at least ten windows that are plainly
+    // not a pool (rent splits, a group trip settling up), so guessing here would be
+    // wrong more often than right. The owner names it; the app does not pretend.
+    const rows = ['AVA TREMBLAY', 'MORGAN DELACROIX', 'JORDAN AVERY', 'PRIYA EXAMPLE', 'ARJUN KUMAR EXAMPLE']
+      .map((who, i) => tx({
+        id: `pool-${i}`, merchant: '', title: 'Zelle',
+        description: `Zelle payment from ${who} for "pool"; Conf# demo${i}`,
+        amount: 1000 + i * 100, date: addDays('2026-03-04', i), accountId: 'chk',
+      }));
+    for (const g of buildMappingGroups({ transactions: rows, accounts: ACCOUNTS })) {
+      expect(g.suggestion?.meaning).not.toBe('chit_fund_payout');
+    }
+  });
+});

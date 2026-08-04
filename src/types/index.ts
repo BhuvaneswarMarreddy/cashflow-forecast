@@ -293,6 +293,21 @@ export const FINANCIAL_MEANINGS = [
    * returning; the repayments that follow are the cost, and they are their own rows.
    */
   'loan_proceeds',
+  /**
+   * A chit-fund / rotating-pool payout — the round where the pot comes to you.
+   *
+   * It needs its own value because none of the ten answers beside it is true. It is not
+   * earned income: most of it is contributions you already made coming back. It is not a
+   * gift, not a sale, and not one person repaying a loan — it arrives from SEVERAL people
+   * at once, which is why the owner had to name seven of them by hand. Taking the pot
+   * early is closer to borrowing and taking it late closer to saving, so it is treated
+   * like `loan_proceeds`: real money, never income.
+   *
+   * DELIBERATELY has no detector. Measured on the real export, "three or more people paid
+   * you inside a week" fires on at least ten windows that are plainly not a pool, so a
+   * suggestion here would be a guess. The owner names it; the app does not pretend.
+   */
+  'chit_fund_payout',
   'gift_or_personal_transfer',
   'other_non_income_credit',
   'unknown_inflow',

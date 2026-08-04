@@ -1015,6 +1015,7 @@ export const GROUP_MEANINGS: readonly { value: FinancialMeaning; label: string }
   { value: 'gift_or_personal_transfer', label: 'A gift or a personal transfer' },
   { value: 'sale_proceeds', label: 'Money from selling something' },
   { value: 'loan_proceeds', label: 'Money I borrowed — a loan paid out to me' },
+  { value: 'chit_fund_payout', label: 'My chit pool payout — the pot came to me' },
   { value: 'earned_income', label: 'Income I earned' },
   { value: 'other_non_income_credit', label: 'Something else — but not income' },
 ];
