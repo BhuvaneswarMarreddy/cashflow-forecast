@@ -440,7 +440,7 @@ export default function AccountsPage() {
               <Wallet className="w-5 h-5 text-[var(--accent-primary)]" />
             </div>
             <p className={`text-2xl font-bold ${netWorth >= 0 ? 'text-[var(--accent-success)]' : 'text-[var(--accent-danger)]'}`}>
-              {netWorth < 0 ? '-' : ''}${Math.abs(netWorth).toLocaleString()}
+              {netWorth < 0 ? '-' : ''}{formatMoney(Math.abs(netWorth), profile?.currency, 2)}
             </p>
             <p className="text-xs text-[var(--foreground-muted)]">cash − all debt</p>
           </div>
@@ -450,7 +450,7 @@ export default function AccountsPage() {
               <Building2 className="w-5 h-5 text-[var(--accent-secondary)]" />
             </div>
             <p className="text-2xl font-bold text-[var(--accent-success)]">
-              ${totalBankBalance.toLocaleString()}
+              {formatMoney(totalBankBalance, profile?.currency, 2)}
             </p>
             <p className="text-xs text-[var(--foreground-muted)]">across all cash accounts</p>
           </div>
@@ -460,10 +460,10 @@ export default function AccountsPage() {
               <CreditCard className="w-5 h-5 text-[var(--accent-primary)]" />
             </div>
             <p className="text-2xl font-bold text-[var(--accent-danger)]">
-              ${totalCreditUsed.toLocaleString()}
+              {formatMoney(totalCreditUsed, profile?.currency, 2)}
             </p>
             <p className="text-xs text-[var(--foreground-muted)]">
-              {creditUtilization}% of ${totalCreditLimit.toLocaleString()} limit
+              {creditUtilization}% of {formatMoney(totalCreditLimit, profile?.currency, 2)} limit
             </p>
           </div>
           <div className="stat-card">
@@ -505,7 +505,7 @@ export default function AccountsPage() {
               <button
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key as any)}
-                className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg font-medium transition-all text-sm sm:text-base ${
+                className={`flex items-center gap-2 min-h-[44px] px-3 sm:px-4 py-2 rounded-lg font-medium transition-all text-sm sm:text-base ${
                   activeTab === tab.key
                     ? 'bg-[var(--accent-primary)] text-[#16181c]'
                     : 'bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'
@@ -602,7 +602,7 @@ export default function AccountsPage() {
                         <div className="text-left sm:text-right">
                           {/* The balance YOU set is the truth (the CSV has no balance). */}
                           <p className={`text-lg font-semibold ${account.type === 'credit_card' || account.type === 'personal_loan' ? 'text-[var(--accent-danger)]' : 'text-[var(--accent-success)]'}`}>
-                            {account.type === 'credit_card' || account.type === 'personal_loan' ? '-' : ''}${Math.abs(currentOf(account)).toLocaleString()}
+                            {account.type === 'credit_card' || account.type === 'personal_loan' ? '-' : ''}{formatMoney(Math.abs(currentOf(account)), profile?.currency, 2)}
                           </p>
                           {account.openingDate && (
                             <p className="text-xs text-[var(--foreground-muted)]" title="Balances derive from transactions since this date">
@@ -611,7 +611,7 @@ export default function AccountsPage() {
                           )}
                           {account.creditLimit && (
                             <p className="text-xs text-[var(--foreground-muted)]">
-                              Limit: ${account.creditLimit.toLocaleString()}
+                              Limit: {formatMoney(account.creditLimit, profile?.currency, 2)}
                             </p>
                           )}
                         </div>
@@ -691,7 +691,7 @@ export default function AccountsPage() {
                             <div className="h-full rounded-full bg-[var(--accent-primary)]" style={{ width: `${grand > 0 ? (r.total / grand) * 100 : 0}%` }} />
                           </div>
                           <span className="text-sm font-medium text-[var(--foreground)] tabular-nums w-24 text-right">
-                            ${Math.round(r.total).toLocaleString()}
+                            {formatMoney(r.total, profile?.currency, 2)}
                           </span>
                         </div>
                       ))}
@@ -785,21 +785,21 @@ export default function AccountsPage() {
                 <div className="stat-card">
                   <p className="text-sm text-[var(--foreground-secondary)] mb-1">Matched (net zero)</p>
                   <p className="text-2xl font-bold text-[var(--foreground)]">
-                    ${transfers.matchedTotal.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                    {formatMoney(transfers.matchedTotal, profile?.currency, 2)}
                   </p>
                   <p className="text-xs text-[var(--foreground-muted)]">{transfers.pairs.length} paired moves</p>
                 </div>
                 <div className="stat-card">
                   <p className="text-sm text-[var(--foreground-secondary)] mb-1">Left to untracked</p>
                   <p className="text-2xl font-bold text-[var(--accent-danger)]">
-                    ${unmatchedOutTotal.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                    {formatMoney(unmatchedOutTotal, profile?.currency, 2)}
                   </p>
                   <p className="text-xs text-[var(--foreground-muted)]">{transfers.unmatchedOut.length} unmatched out</p>
                 </div>
                 <div className="stat-card">
                   <p className="text-sm text-[var(--foreground-secondary)] mb-1">Arrived from untracked</p>
                   <p className="text-2xl font-bold text-[var(--accent-success)]">
-                    ${unmatchedInTotal.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                    {formatMoney(unmatchedInTotal, profile?.currency, 2)}
                   </p>
                   <p className="text-xs text-[var(--foreground-muted)]">{transfers.unmatchedIn.length} unmatched in</p>
                 </div>
@@ -817,7 +817,7 @@ export default function AccountsPage() {
                       </div>
                       <div className="text-right">
                         <p className="font-semibold text-[var(--foreground)]">
-                          ${r.total.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                          {formatMoney(r.total, profile?.currency, 2)}
                         </p>
                         <p className="text-xs text-[var(--foreground-muted)]">{r.count} moves</p>
                       </div>
@@ -905,7 +905,7 @@ export default function AccountsPage() {
                       </div>
                       <div className="flex items-center justify-between sm:justify-end gap-4">
                         <p className="text-lg font-semibold text-[var(--accent-success)]">
-                          +${income.amount.toLocaleString()}
+                          +{formatMoney(income.amount, profile?.currency, 2)}
                         </p>
                         <div className="flex gap-1">
                           <button

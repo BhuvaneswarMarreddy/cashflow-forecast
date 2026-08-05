@@ -19,6 +19,7 @@ import PlannedPaymentsPanel from '@/components/PlannedPaymentsPanel';
 import AssumptionsPanel from '@/components/AssumptionsPanel';
 import { generateForecast, calculateCurrentCash, generateAccountForecast, getAllAccountForecasts, withDerivedBalances } from '@/lib/forecast';
 import { buildAssumptions, AssumptionOverrides } from '@/lib/behavior';
+import { formatMoney } from '@/lib/money';
 import { loadOverrides, saveOverrides } from '@/lib/assumption-overrides';
 import * as firestoreService from '@/lib/firestore';
 import { format } from 'date-fns';
@@ -240,7 +241,7 @@ export default function ForecastPage() {
               <div className="flex flex-wrap gap-2">
                 <button
                   onClick={() => setSelectedAccountId('all')}
-                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
+                  className={`min-h-[44px] px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
                     selectedAccountId === 'all'
                       ? 'bg-[var(--accent-primary)] text-[#16181c]'
                       : 'bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:bg-[var(--background-primary)] border border-[var(--border-color)]'
@@ -259,7 +260,7 @@ export default function ForecastPage() {
                     <button
                       key={account.id}
                       onClick={() => setSelectedAccountId(account.id)}
-                      className={`px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
+                      className={`min-h-[44px] px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
                         selectedAccountId === account.id
                           ? 'bg-[var(--accent-primary)] text-[#16181c]'
                           : 'bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:bg-[var(--background-primary)] border border-[var(--border-color)]'
@@ -296,7 +297,7 @@ export default function ForecastPage() {
                         <span className="font-medium text-[var(--foreground)]">{payment.cardName}</span>
                       </div>
                       <div className="flex items-center gap-2 mt-1 text-xs text-[var(--foreground-muted)]">
-                        <span className="text-red-400 font-semibold">-${payment.amount.toLocaleString()}</span>
+                        <span className="text-red-400 font-semibold tabular-nums">-{formatMoney(payment.amount, profile?.currency, 2)}</span>
                         <span>due {format(new Date(payment.dueDate), 'MMM d')}</span>
                       </div>
                     </div>
@@ -409,7 +410,7 @@ export default function ForecastPage() {
                   {forecast.daysUntilUnsafe}d
                 </p>
                 <p className="text-xs text-[var(--foreground-muted)] mt-1">
-                  ${forecast.lowestBalance.toLocaleString()} on {format(new Date(forecast.lowestBalanceDate), 'MMM d')}
+                  {formatMoney(forecast.lowestBalance, profile?.currency, 2)} on {format(new Date(forecast.lowestBalanceDate), 'MMM d')}
                 </p>
               </div>
             ) : (

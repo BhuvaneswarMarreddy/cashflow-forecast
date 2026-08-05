@@ -305,6 +305,7 @@ export default function DataChatSheet({ open, onClose, seed }: {
               {m.balance && (
                 <BalanceProposalCard
                   proposal={m.balance}
+                  currency={profile?.currency}
                   accounts={profile?.paymentAccounts ?? []}
                   pending={m.status === 'pending'}
                   busy={busy}
@@ -362,6 +363,7 @@ function RulePreviewCard({ rule, pending, busy, money, onApply, onCancel }: {
   rule: NewMappingRule;
   pending: boolean;
   busy: boolean;
+  currency?: string;
   money: (n: number) => string;
   onApply: () => void;
   onCancel: () => void;
@@ -411,11 +413,12 @@ function RulePreviewCard({ rule, pending, busy, money, onApply, onCancel }: {
  * numbers, and what does NOT change. An unknown or ambiguous account name gets
  * words and no button — the model picked the name, the owner's list decides.
  */
-function BalanceProposalCard({ proposal, accounts, pending, busy, money, onApply, onCancel }: {
+function BalanceProposalCard({ proposal, currency, accounts, pending, busy, money, onApply, onCancel }: {
   proposal: { accountName: string; balance: number };
   accounts: readonly PaymentAccount[];
   pending: boolean;
   busy: boolean;
+  currency?: string;
   money: (n: number) => string;
   onApply: () => void;
   onCancel: () => void;
@@ -433,7 +436,7 @@ function BalanceProposalCard({ proposal, accounts, pending, busy, money, onApply
   const label = isDebt ? 'you owe' : 'balance';
   // ONE template string (not JSX interpolation), and always 2 decimals: a balance
   // is the cents-exact number the owner just read off their bank.
-  const m2 = (n: number) => formatMoney(n, undefined, 2);
+  const m2 = (n: number) => formatMoney(n, currency, 2);
   return (
     <div className="mt-3 rounded-xl border border-[var(--border-color)] bg-[var(--background)] p-3">
       <p className="font-medium text-[var(--foreground)]">

@@ -404,21 +404,21 @@ export default function HistoryPage() {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setIsAddModalOpen(true)}
-                    className="btn-primary px-3 py-1.5 text-sm flex items-center gap-1.5"
+                    className="btn-primary min-h-[44px] px-3 py-1.5 text-sm flex items-center gap-1.5"
                   >
                     <Plus className="w-4 h-4" />
                     Add
                   </button>
                   <button
                     onClick={() => setIsScannerOpen(true)}
-                    className="btn-gradient px-3 py-1.5 text-sm flex items-center gap-1.5"
+                    className="btn-gradient min-h-[44px] px-3 py-1.5 text-sm flex items-center gap-1.5"
                   >
                     <Camera className="w-4 h-4" />
                     Scan
                   </button>
                   <button
                     onClick={() => setIsImportModalOpen(true)}
-                    className="btn-secondary px-3 py-1.5 text-sm flex items-center gap-1.5"
+                    className="btn-secondary min-h-[44px] px-3 py-1.5 text-sm flex items-center gap-1.5"
                   >
                     <Upload className="w-4 h-4" />
                     Import
@@ -492,7 +492,7 @@ export default function HistoryPage() {
                 <div className="flex items-center gap-1 p-1 bg-[var(--background)] rounded-lg border border-[var(--border-color)]">
                   <button
                     onClick={() => setTypeFilter('all')}
-                    className={`px-2.5 py-1 rounded text-xs font-medium transition-all ${
+                    className={`min-h-[44px] px-2.5 py-1 rounded text-xs font-medium transition-all ${
                       typeFilter === 'all'
                         ? 'bg-[var(--accent-primary)] text-[#16181c]'
                         : 'text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]'
@@ -502,7 +502,7 @@ export default function HistoryPage() {
                   </button>
                   <button
                     onClick={() => setTypeFilter('income')}
-                    className={`px-2.5 py-1 rounded text-xs font-medium transition-all ${
+                    className={`min-h-[44px] px-2.5 py-1 rounded text-xs font-medium transition-all ${
                       typeFilter === 'income'
                         ? 'bg-emerald-500 text-white'
                         : 'text-emerald-500 hover:bg-emerald-500/10'
@@ -512,7 +512,7 @@ export default function HistoryPage() {
                   </button>
                   <button
                     onClick={() => setTypeFilter('expense')}
-                    className={`px-2.5 py-1 rounded text-xs font-medium transition-all ${
+                    className={`min-h-[44px] px-2.5 py-1 rounded text-xs font-medium transition-all ${
                       typeFilter === 'expense'
                         ? 'bg-red-500 text-white'
                         : 'text-red-400 hover:bg-red-500/10'
@@ -526,7 +526,7 @@ export default function HistoryPage() {
                 <div className="flex items-center gap-1 p-1 bg-[var(--background)] rounded-lg border border-[var(--border-color)]">
                   <button
                     onClick={() => setGroupBy('month')}
-                    className={`px-2.5 py-1 rounded text-xs font-medium transition-all ${
+                    className={`min-h-[44px] px-2.5 py-1 rounded text-xs font-medium transition-all ${
                       groupBy === 'month'
                         ? 'bg-[var(--accent-primary)] text-[#16181c]'
                         : 'text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]'
@@ -536,7 +536,7 @@ export default function HistoryPage() {
                   </button>
                   <button
                     onClick={() => setGroupBy('year')}
-                    className={`px-2.5 py-1 rounded text-xs font-medium transition-all ${
+                    className={`min-h-[44px] px-2.5 py-1 rounded text-xs font-medium transition-all ${
                       groupBy === 'year'
                         ? 'bg-[var(--accent-primary)] text-[#16181c]'
                         : 'text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]'
@@ -546,7 +546,7 @@ export default function HistoryPage() {
                   </button>
                   <button
                     onClick={() => setGroupBy('category')}
-                    className={`px-2.5 py-1 rounded text-xs font-medium transition-all ${
+                    className={`min-h-[44px] px-2.5 py-1 rounded text-xs font-medium transition-all ${
                       groupBy === 'category'
                         ? 'bg-[var(--accent-primary)] text-[#16181c]'
                         : 'text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]'

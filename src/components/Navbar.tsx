@@ -9,6 +9,7 @@ import { useUserProfile } from '@/context/UserProfileContext';
 import { useTransactions } from '@/context/TransactionContext';
 import { withDerivedBalances } from '@/lib/forecast';
 import { currentOf } from '@/lib/accounts';
+import { formatMoney } from '@/lib/money';
 import {
   CreditCard,
   LogOut,
@@ -74,8 +75,8 @@ export default function Navbar() {
             <div className="hidden sm:block">
               <span className="text-lg font-bold text-[var(--foreground)]">Cash<span style={{ color: '#b08d3f' }}>Flow</span></span>
               {profile?.monthlyBudget ? (
-                <p className="text-xs text-[var(--foreground-muted)]">
-                  Budget: ${profile.monthlyBudget.toLocaleString()}/mo
+                <p className="text-xs text-[var(--foreground-muted)] tabular-nums">
+                  Budget: {formatMoney(profile.monthlyBudget, profile?.currency, 2)}/mo
                 </p>
               ) : null}
             </div>
@@ -116,8 +117,8 @@ export default function Navbar() {
             {profile?.paymentAccounts && profile.paymentAccounts.length > 0 && (
               <div className="text-right px-4 py-2 rounded-lg bg-[var(--background-tertiary)]">
                 <p className="text-xs text-[var(--foreground-muted)]">Net Balance</p>
-                <p className={`font-semibold ${totalBalance >= 0 ? 'text-[var(--accent-success)]' : 'text-[var(--accent-danger)]'}`}>
-                  ${Math.abs(totalBalance).toLocaleString()}
+                <p className={`font-semibold tabular-nums ${totalBalance >= 0 ? 'text-[var(--accent-success)]' : 'text-[var(--accent-danger)]'}`}>
+                  {formatMoney(Math.abs(totalBalance), profile?.currency, 2)}
                 </p>
               </div>
             )}

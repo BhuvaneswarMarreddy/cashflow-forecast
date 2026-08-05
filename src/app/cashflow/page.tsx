@@ -20,7 +20,8 @@ import {
 } from 'recharts';
 
 // Validated categorical palette (CVD-safe in light mode with the direct labels present).
-const money = (n: number) => formatMoney(n);
+// The one money dialect: 2 decimals, tabular digits handled at the call sites.
+const money = (n: number) => formatMoney(n, undefined, 2);
 
 // <sm only: shrink recharts axis tick labels so crowded X axes stop colliding.
 // CSS-gated (max-sm:) so desktop stays pixel-identical — no matchMedia in render.

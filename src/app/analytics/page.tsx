@@ -10,6 +10,7 @@ import ChartSrTable from '@/components/ChartSrTable';
 import { EXPENSE_CATEGORIES, Transaction, getMerchantColor, displayCategory } from '@/types';
 import { classifyTransaction } from '@/lib/classify';
 import { monthlyAverages } from '@/lib/forecast';
+import { formatMoney } from '@/lib/money';
 import {
   TrendingUp,
   TrendingDown,
@@ -361,7 +362,7 @@ export default function AnalyticsPage() {
           <p className="text-sm font-medium text-[var(--foreground)] mb-2">{label}</p>
           {payload.map((entry: any, index: number) => (
             <p key={index} className="text-sm" style={{ color: entry.color }}>
-              {entry.name}: ${entry.value?.toLocaleString() || 0}
+              {entry.name}: {formatMoney(entry.value || 0, profile?.currency, 2)}
             </p>
           ))}
         </div>
@@ -429,7 +430,8 @@ export default function AnalyticsPage() {
         <div className="flex items-center justify-between mb-6 p-4 bg-[var(--background-secondary)] rounded-xl border border-[var(--border-color)]">
           <button 
             onClick={goToPrevious}
-            className="p-2 rounded-lg hover:bg-[var(--background-tertiary)] transition-colors"
+            aria-label="Previous period"
+            className="min-h-[44px] min-w-[44px] flex items-center justify-center p-2 rounded-lg hover:bg-[var(--background-tertiary)] transition-colors"
           >
             <ChevronLeft className="w-5 h-5 text-[var(--foreground-secondary)]" />
           </button>
@@ -451,7 +453,8 @@ export default function AnalyticsPage() {
           
           <button 
             onClick={goToNext}
-            className="p-2 rounded-lg hover:bg-[var(--background-tertiary)] transition-colors"
+            aria-label="Next period"
+            className="min-h-[44px] min-w-[44px] flex items-center justify-center p-2 rounded-lg hover:bg-[var(--background-tertiary)] transition-colors"
           >
             <ChevronRight className="w-5 h-5 text-[var(--foreground-secondary)]" />
           </button>
@@ -465,7 +468,7 @@ export default function AnalyticsPage() {
               <span className="text-xs sm:text-sm text-[var(--foreground-muted)]">Spent</span>
             </div>
             <p className="text-xl sm:text-2xl font-bold text-red-400">
-              ${totals.expenses.toLocaleString()}
+              {formatMoney(totals.expenses, profile?.currency, 2)}
             </p>
             <div className="mt-2 h-1.5 bg-[var(--background-tertiary)] rounded-full overflow-hidden">
               <div 
@@ -484,7 +487,7 @@ export default function AnalyticsPage() {
               <span className="text-xs sm:text-sm text-[var(--foreground-muted)]">Income</span>
             </div>
             <p className="text-xl sm:text-2xl font-bold text-emerald-500">
-              ${totals.income.toLocaleString()}
+              {formatMoney(totals.income, profile?.currency, 2)}
             </p>
           </div>
 
@@ -494,7 +497,7 @@ export default function AnalyticsPage() {
               <span className="text-xs sm:text-sm text-[var(--foreground-muted)]">Remaining</span>
             </div>
             <p className={`text-xl sm:text-2xl font-bold ${totals.remaining >= 0 ? 'text-emerald-500' : 'text-red-400'}`}>
-              ${Math.abs(totals.remaining).toLocaleString()}
+              {formatMoney(Math.abs(totals.remaining), profile?.currency, 2)}
             </p>
             {totals.remaining < 0 && (
               <p className="text-xs text-red-400">Over budget</p>
@@ -523,7 +526,7 @@ export default function AnalyticsPage() {
             <div>
               <p className="font-medium text-[var(--foreground)]">Projected to exceed budget</p>
               <p className="text-sm text-[var(--foreground-secondary)]">
-                At your current pace (${projections.avgDailySpend.toFixed(0)}/day), you&apos;ll spend about ${projections.projectedTotal.toLocaleString()} this {viewMode === 'weekly' ? 'week' : 'month'}, which is ${projections.projectedOverage.toLocaleString()} over budget.
+                At your current pace ({formatMoney(projections.avgDailySpend, profile?.currency, 2)}/day), you&apos;ll spend about {formatMoney(projections.projectedTotal, profile?.currency, 2)} this {viewMode === 'weekly' ? 'week' : 'month'}, which is {formatMoney(projections.projectedOverage, profile?.currency, 2)} over budget.
               </p>
             </div>
           </div>
@@ -541,7 +544,7 @@ export default function AnalyticsPage() {
                   <button
                     key={type}
                     onClick={() => setChartType(type)}
-                    className={`px-3 py-1 rounded text-xs font-medium transition-all ${
+                    className={`min-h-[44px] px-3 py-1 rounded text-xs font-medium transition-all ${
                       chartType === type
                         ? 'bg-[var(--accent-primary)] text-[#16181c]'
                         : 'text-[var(--foreground-secondary)]'
@@ -557,7 +560,7 @@ export default function AnalyticsPage() {
           <div
             className={`h-[300px] sm:h-[350px] ${MOBILE_TICKS}`}
             role="img"
-            aria-label={`Daily spending chart: $${totals.expenses.toLocaleString()} spent this ${viewMode === 'weekly' ? 'week' : 'month'} against a $${totals.budget.toLocaleString()} budget.`}
+            aria-label={`Daily spending chart: ${formatMoney(totals.expenses, profile?.currency, 2)} spent this ${viewMode === 'weekly' ? 'week' : 'month'} against a ${formatMoney(totals.budget, profile?.currency, 2)} budget.`}
           >
             <ResponsiveContainer width="100%" height="100%">
               {chartType === 'area' ? (
@@ -605,8 +608,8 @@ export default function AnalyticsPage() {
             columns={['Date', 'Expenses', 'Income']}
             rows={dailyData.map(d => [
               d.date,
-              d.expenses != null ? `$${d.expenses.toLocaleString()}` : '—',
-              d.income != null ? `$${d.income.toLocaleString()}` : '—',
+              d.expenses != null ? formatMoney(d.expenses, profile?.currency, 2) : '—',
+              d.income != null ? formatMoney(d.income, profile?.currency, 2) : '—',
             ])}
           />
 
@@ -651,9 +654,9 @@ export default function AnalyticsPage() {
               columns={[viewMode === 'weekly' ? 'Week' : 'Month', 'Expenses', 'Income', 'Budget']}
               rows={trendData.map(d => [
                 'week' in d ? d.week : d.month,
-                `$${d.expenses.toLocaleString()}`,
-                `$${d.income.toLocaleString()}`,
-                `$${d.budget.toLocaleString()}`,
+                formatMoney(d.expenses, profile?.currency, 2),
+                formatMoney(d.income, profile?.currency, 2),
+                formatMoney(d.budget, profile?.currency, 2),
               ])}
             />
           </div>
@@ -666,7 +669,7 @@ export default function AnalyticsPage() {
                 <div
                   className="w-[180px] h-[180px]"
                   role="img"
-                  aria-label={`Category breakdown pie chart: $${totals.expenses.toLocaleString()} across ${categoryBreakdown.length} categories, led by ${categoryBreakdown[0].name} at $${categoryBreakdown[0].value.toLocaleString()}.`}
+                  aria-label={`Category breakdown pie chart: ${formatMoney(totals.expenses, profile?.currency, 2)} across ${categoryBreakdown.length} categories, led by ${categoryBreakdown[0].name} at ${formatMoney(categoryBreakdown[0].value, profile?.currency, 2)}.`}
                 >
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
@@ -683,14 +686,14 @@ export default function AnalyticsPage() {
                           <Cell key={`cell-${index}`} fill={entry.color} />
                         ))}
                       </Pie>
-                      <Tooltip formatter={(value) => [`$${(value as number)?.toLocaleString() || 0}`, '']} />
+                      <Tooltip formatter={(value) => [formatMoney((value as number) || 0, profile?.currency, 2), '']} />
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
                 <ChartSrTable
                   caption="Spending by category this period"
                   columns={['Category', 'Spent']}
-                  rows={categoryBreakdown.map(c => [c.name, `$${c.value.toLocaleString()}`])}
+                  rows={categoryBreakdown.map(c => [c.name, formatMoney(c.value, profile?.currency, 2)])}
                 />
                 <div className="flex-1 space-y-2 max-h-[200px] overflow-y-auto">
                   {categoryBreakdown.slice(0, 6).map((cat, i) => (
@@ -702,7 +705,7 @@ export default function AnalyticsPage() {
                         </span>
                       </div>
                       <span className="text-sm font-medium text-[var(--foreground)]">
-                        ${cat.value.toLocaleString()}
+                        {formatMoney(cat.value, profile?.currency, 2)}
                       </span>
                     </div>
                   ))}
@@ -736,7 +739,7 @@ export default function AnalyticsPage() {
                 <div
                   className="w-[220px] h-[220px]"
                   role="img"
-                  aria-label={`Top merchants pie chart: led by ${merchantBreakdown[0].name} at $${merchantBreakdown[0].value.toLocaleString()} of $${totals.expenses.toLocaleString()} spent.`}
+                  aria-label={`Top merchants pie chart: led by ${merchantBreakdown[0].name} at ${formatMoney(merchantBreakdown[0].value, profile?.currency, 2)} of ${formatMoney(totals.expenses, profile?.currency, 2)} spent.`}
                 >
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
@@ -753,14 +756,14 @@ export default function AnalyticsPage() {
                           <Cell key={`cell-${index}`} fill={entry.color} />
                         ))}
                       </Pie>
-                      <Tooltip formatter={(value) => [`$${(value as number)?.toLocaleString() || 0}`, '']} />
+                      <Tooltip formatter={(value) => [formatMoney((value as number) || 0, profile?.currency, 2), '']} />
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
                 <ChartSrTable
                   caption="Top merchants this period"
                   columns={['Merchant', 'Spent', 'Transactions']}
-                  rows={topMerchantsPieData.map(m => [m.name, `$${m.value.toLocaleString()}`, m.count || '—'])}
+                  rows={topMerchantsPieData.map(m => [m.name, formatMoney(m.value, profile?.currency, 2), m.count || '—'])}
                 />
                 <p className="text-sm text-[var(--foreground-muted)] mt-2">
                   {merchantBreakdown.length} merchants this period
@@ -786,7 +789,7 @@ export default function AnalyticsPage() {
                       </p>
                     </div>
                     <div className="text-right">
-                      <p className="font-bold text-[var(--foreground)]">${merchant.value.toLocaleString()}</p>
+                      <p className="font-bold text-[var(--foreground)] tabular-nums">{formatMoney(merchant.value, profile?.currency, 2)}</p>
                       <p className="text-xs text-[var(--foreground-muted)]">
                         {((merchant.value / totals.expenses) * 100).toFixed(1)}%
                       </p>
@@ -823,7 +826,7 @@ export default function AnalyticsPage() {
           <div className="p-4 rounded-xl bg-[var(--background-secondary)] border border-[var(--border-color)]">
             <p className="text-xs text-[var(--foreground-muted)] mb-1">Projected Total</p>
             <p className={`text-xl font-bold ${projections.willExceedBudget ? 'text-red-400' : 'text-[var(--foreground)]'}`}>
-              ${projections.projectedTotal.toLocaleString()}
+              {formatMoney(projections.projectedTotal, profile?.currency, 2)}
             </p>
           </div>
           <div className="p-4 rounded-xl bg-[var(--background-secondary)] border border-[var(--border-color)]">

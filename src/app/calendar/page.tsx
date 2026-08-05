@@ -147,24 +147,24 @@ export default function CalendarPage() {
             <p className="text-[var(--foreground-secondary)] text-sm font-medium mb-2">
               {format(currentMonth, 'MMMM')} Income
             </p>
-            <p className="text-2xl font-bold text-[var(--accent-success)]">
-              ${monthlyIncome.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+            <p className="text-2xl font-bold text-[var(--accent-success)] tabular-nums">
+              {formatMoney(monthlyIncome, profile?.currency, 2)}
             </p>
           </div>
           <div className="stat-card">
             <p className="text-[var(--foreground-secondary)] text-sm font-medium mb-2">
               {format(currentMonth, 'MMMM')} Expenses
             </p>
-            <p className="text-2xl font-bold text-[var(--accent-danger)]">
-              ${monthlyExpenses.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+            <p className="text-2xl font-bold text-[var(--accent-danger)] tabular-nums">
+              {formatMoney(monthlyExpenses, profile?.currency, 2)}
             </p>
           </div>
           <div className="stat-card">
             <p className="text-[var(--foreground-secondary)] text-sm font-medium mb-2">
               {format(currentMonth, 'MMMM')} Net
             </p>
-            <p className={`text-2xl font-bold ${monthlyIncome - monthlyExpenses >= 0 ? 'text-[var(--accent-success)]' : 'text-[var(--accent-danger)]'}`}>
-              ${Math.abs(monthlyIncome - monthlyExpenses).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+            <p className={`text-2xl font-bold tabular-nums ${monthlyIncome - monthlyExpenses >= 0 ? 'text-[var(--accent-success)]' : 'text-[var(--accent-danger)]'}`}>
+              {formatMoney(monthlyIncome - monthlyExpenses, profile?.currency, 2)}
             </p>
           </div>
         </div>
@@ -176,7 +176,7 @@ export default function CalendarPage() {
             <button
               onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
               aria-label="Previous month"
-              className="p-2 rounded-xl text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] hover:text-[var(--foreground)] transition-all"
+              className="min-h-[44px] min-w-[44px] flex items-center justify-center p-2 rounded-xl text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] hover:text-[var(--foreground)] transition-all"
             >
               <ChevronLeft className="w-6 h-6" />
             </button>
@@ -186,7 +186,7 @@ export default function CalendarPage() {
             <button
               onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}
               aria-label="Next month"
-              className="p-2 rounded-xl text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] hover:text-[var(--foreground)] transition-all"
+              className="min-h-[44px] min-w-[44px] flex items-center justify-center p-2 rounded-xl text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] hover:text-[var(--foreground)] transition-all"
             >
               <ChevronRight className="w-6 h-6" />
             </button>

@@ -6,7 +6,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import { PAYMENT_METHODS, PaymentAccount, IncomeSource, AccountType, PaymentMethod } from '@/types';
 import { currentOf } from '@/lib/accounts';
-import { monthlyIncomeOf } from '@/lib/money';
+import { formatMoney, monthlyIncomeOf } from '@/lib/money';
 import {
   TrendingUp,
   CreditCard,
@@ -759,7 +759,7 @@ function OnboardingContent() {
                       </div>
                       <div className="flex items-center gap-4">
                         <p className="font-semibold text-[var(--accent-success)]">
-                          ${account.openingBalance.toLocaleString()}
+                          {formatMoney(account.openingBalance, undefined, 2)}
                         </p>
                         <button
                           onClick={() => removeBankAccount(index)}
@@ -962,7 +962,7 @@ function OnboardingContent() {
                             {card.lastFourDigits && ` •••• ${card.lastFourDigits}`}
                           </p>
                           <p className="text-sm text-[var(--foreground-secondary)]">
-                            {card.creditLimit && `Limit: $${card.creditLimit.toLocaleString()}`}
+                            {card.creditLimit && `Limit: ${formatMoney(card.creditLimit, undefined, 2)}`}
                             {card.apr && ` • APR: ${card.apr}%`}
                             {card.dueDate && ` • Due: ${card.dueDate}${getOrdinalSuffix(card.dueDate)}`}
                           </p>
@@ -970,7 +970,7 @@ function OnboardingContent() {
                       </div>
                       <div className="flex items-center gap-4">
                         <p className="font-semibold text-[var(--accent-danger)]">
-                          -${card.openingBalance.toLocaleString()}
+                          -{formatMoney(card.openingBalance, undefined, 2)}
                         </p>
                         <button
                           onClick={() => removeCreditCard(index)}
@@ -1263,15 +1263,15 @@ function OnboardingContent() {
                         <div>
                           <p className="font-medium text-[var(--foreground)]">{loan.name}</p>
                           <p className="text-sm text-[var(--foreground-secondary)]">
-                            {loan.originalAmount && `Original: $${loan.originalAmount.toLocaleString()}`}
+                            {loan.originalAmount && `Original: ${formatMoney(loan.originalAmount, undefined, 2)}`}
                             {loan.apr && ` • APR: ${loan.apr}%`}
-                            {loan.monthlyPayment && ` • Payment: $${loan.monthlyPayment}/mo`}
+                            {loan.monthlyPayment && ` • Payment: ${formatMoney(loan.monthlyPayment, undefined, 2)}/mo`}
                           </p>
                         </div>
                       </div>
                       <div className="flex items-center gap-4">
                         <p className="font-semibold text-[var(--accent-danger)]">
-                          -${loan.openingBalance.toLocaleString()}
+                          -{formatMoney(loan.openingBalance, undefined, 2)}
                         </p>
                         <button
                           onClick={() => removeLoan(index)}
@@ -1515,7 +1515,7 @@ function OnboardingContent() {
                       </div>
                       <div className="flex items-center gap-4">
                         <p className="font-semibold text-[var(--accent-success)]">
-                          +${income.amount.toLocaleString()}
+                          +{formatMoney(income.amount, undefined, 2)}
                         </p>
                         <button
                           onClick={() => removeIncome(index)}
@@ -1532,7 +1532,7 @@ function OnboardingContent() {
                     <div className="flex justify-between items-center">
                       <span className="text-[var(--foreground-secondary)]">Est. Monthly Income:</span>
                       <span className="text-lg font-bold text-[var(--accent-success)]">
-                        ${calculateMonthlyIncome().toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {formatMoney(calculateMonthlyIncome(), undefined, 2)}
                       </span>
                     </div>
                   </div>
@@ -1717,7 +1717,7 @@ function OnboardingContent() {
                       <div className="flex justify-between items-center">
                         <span className="text-sm text-[var(--foreground-secondary)]">Monthly Income:</span>
                         <span className="font-bold text-[var(--accent-success)]">
-                          ${calculateMonthlyIncome().toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                          {formatMoney(calculateMonthlyIncome(), undefined, 2)}
                         </span>
                       </div>
                     </div>
@@ -1728,7 +1728,7 @@ function OnboardingContent() {
                       <div className="flex justify-between items-center">
                         <span className="text-sm text-[var(--foreground-secondary)]">Total Debt:</span>
                         <span className="font-bold text-[var(--accent-danger)]">
-                          ${totalDebt.toLocaleString()}
+                          {formatMoney(totalDebt, undefined, 2)}
                         </span>
                       </div>
                     </div>
@@ -1739,7 +1739,7 @@ function OnboardingContent() {
                       <div className="flex justify-between items-center">
                         <span className="text-sm text-[var(--foreground-secondary)]">Loan Payments:</span>
                         <span className="font-medium text-[var(--foreground)]">
-                          ${totalMonthlyPayments.toLocaleString()}/mo
+                          {formatMoney(totalMonthlyPayments, undefined, 2)}/mo
                         </span>
                       </div>
                     </div>

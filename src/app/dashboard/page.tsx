@@ -203,6 +203,7 @@ export default function DashboardPage() {
         
         return {
           ...account,
+          balanceDue: currentOf(account),
           dueDate: dueDate,
           daysUntilDue,
         };
@@ -279,8 +280,8 @@ export default function DashboardPage() {
         <div className="bg-[var(--background-tertiary)] border border-[var(--border-color)] rounded-lg p-3 shadow-lg">
           <p className="text-[var(--foreground)] font-medium">{label}</p>
           {payload.map((entry: any, index: number) => (
-            <p key={index} style={{ color: entry.color }} className="text-sm">
-              {entry.name}: ${entry.value.toLocaleString()}
+            <p key={index} style={{ color: entry.color }} className="text-sm tabular-nums">
+              {entry.name}: {formatMoney(entry.value, profile?.currency, 2)}
             </p>
           ))}
         </div>
@@ -350,8 +351,8 @@ export default function DashboardPage() {
               <div className="flex flex-wrap items-center gap-4 lg:gap-8">
                 <div className="text-center">
                   <p className="text-xs text-[var(--foreground-muted)] mb-1">Lowest Point</p>
-                  <p className={`text-xl font-bold ${forecast.lowestBalance < (profile?.settings?.safetyThreshold || 500) ? 'text-red-500' : 'text-[var(--foreground)]'}`}>
-                    {formatMoney(forecast.lowestBalance, 'USD', 2)}
+                  <p className={`text-xl font-bold tabular-nums ${forecast.lowestBalance < (profile?.settings?.safetyThreshold || 500) ? 'text-red-500' : 'text-[var(--foreground)]'}`}>
+                    {formatMoney(forecast.lowestBalance, profile?.currency, 2)}
                   </p>
                 </div>
                 <div className="text-center">
@@ -398,7 +399,7 @@ export default function DashboardPage() {
               <h2 className="text-lg font-semibold text-[var(--foreground)]">Your Accounts</h2>
               <button
                 onClick={() => router.push('/accounts')}
-                className="text-sm text-[var(--accent-primary)] hover:underline flex items-center gap-1"
+                className="min-h-[44px] text-sm text-[var(--accent-primary)] hover:underline flex items-center gap-1"
               >
                 Manage <ChevronRight className="w-4 h-4" />
               </button>
@@ -428,8 +429,8 @@ export default function DashboardPage() {
                     {account.name}
                     {account.lastFourDigits && ` •••• ${account.lastFourDigits}`}
                   </p>
-                  <p className={`text-xl font-bold ${account.type === 'credit_card' ? 'text-[var(--accent-danger)]' : 'text-[var(--accent-success)]'}`}>
-                    {account.type === 'credit_card' && currentOf(account) > 0 ? '-' : ''}${currentOf(account).toLocaleString()}
+                  <p className={`text-xl font-bold tabular-nums ${account.type === 'credit_card' ? 'text-[var(--accent-danger)]' : 'text-[var(--accent-success)]'}`}>
+                    {account.type === 'credit_card' && currentOf(account) > 0 ? '-' : ''}{formatMoney(currentOf(account), profile?.currency, 2)}
                   </p>
                   {account.type === 'credit_card' && account.creditLimit && (
                     <div className="mt-2">
@@ -460,7 +461,7 @@ export default function DashboardPage() {
               </div>
             </div>
             <p className={`text-3xl font-bold ${netWorth >= 0 ? 'text-[var(--accent-success)]' : 'text-[var(--accent-danger)]'}`}>
-              {netWorth < 0 ? '-' : ''}${Math.abs(netWorth).toLocaleString()}
+              {netWorth < 0 ? '-' : ''}{formatMoney(Math.abs(netWorth), profile?.currency, 2)}
             </p>
             <p className="text-[var(--foreground-muted)] text-sm mt-1">
               Cash − all debt
@@ -475,7 +476,7 @@ export default function DashboardPage() {
               </div>
             </div>
             <p className="text-3xl font-bold text-[var(--accent-success)]">
-              ${totalBankBalance.toLocaleString()}
+              {formatMoney(totalBankBalance, profile?.currency, 2)}
             </p>
             <p className="text-[var(--foreground-muted)] text-sm mt-1">
               Bank & cash accounts
@@ -490,10 +491,10 @@ export default function DashboardPage() {
               </div>
             </div>
             <p className="text-3xl font-bold text-[var(--accent-danger)]">
-              ${totalCreditUsed.toLocaleString()}
+              {formatMoney(totalCreditUsed, profile?.currency, 2)}
             </p>
             <p className="text-[var(--foreground-muted)] text-sm mt-1">
-              {creditUtilization}% of ${totalCreditLimit.toLocaleString()} limit
+              {creditUtilization}% of {formatMoney(totalCreditLimit, profile?.currency, 2)} limit
             </p>
           </div>
 
@@ -505,7 +506,7 @@ export default function DashboardPage() {
               </div>
             </div>
             <p className="text-3xl font-bold text-[var(--accent-primary)]">
-              ${Math.round(monthlyIncome).toLocaleString()}
+              {formatMoney(monthlyIncome, profile?.currency, 2)}
             </p>
             <p className="text-[var(--foreground-muted)] text-sm mt-1">
               {incomeFromSources > 0 ? 'Expected per month' : 'Avg / month (from transactions)'}
@@ -520,7 +521,7 @@ export default function DashboardPage() {
               </div>
             </div>
             <p className={`text-3xl font-bold ${budgetRemaining >= 0 ? 'text-[var(--accent-success)]' : 'text-[var(--accent-danger)]'}`}>
-              ${Math.round(Math.abs(budgetRemaining)).toLocaleString()}
+              {formatMoney(Math.abs(budgetRemaining), profile?.currency, 2)}
             </p>
             {effectiveBudget > 0 && (
               <div className="mt-2">
@@ -534,7 +535,7 @@ export default function DashboardPage() {
                   />
                 </div>
                 <p className="text-xs text-[var(--foreground-muted)] mt-1">
-                  {Math.round(budgetPercentage)}% of ${Math.round(effectiveBudget).toLocaleString()} used
+                  {Math.round(budgetPercentage)}% of {formatMoney(effectiveBudget, profile?.currency, 2)} used
                   {budgetIsDerived && ' (typical spend)'}
                 </p>
               </div>
@@ -567,7 +568,7 @@ export default function DashboardPage() {
                         </div>
                       </div>
                       <p className="text-sm font-semibold text-[var(--accent-danger)]">
-                        ${(bill.currentBalance ?? bill.openingBalance).toLocaleString()}
+                        {formatMoney(bill.balanceDue, profile?.currency, 2)}
                       </p>
                     </div>
                   ))}
@@ -587,7 +588,7 @@ export default function DashboardPage() {
                 <div
                   className="h-[240px] sm:h-[300px]"
                   role="img"
-                  aria-label={`Line chart of income versus expenses across ${monthlyChartData.length} months; ${latestMonth.month}: income $${latestMonth.income.toLocaleString()}, expenses $${latestMonth.expenses.toLocaleString()}.`}
+                  aria-label={`Line chart of income versus expenses across ${monthlyChartData.length} months; ${latestMonth.month}: income ${formatMoney(latestMonth.income, profile?.currency, 2)}, expenses ${formatMoney(latestMonth.expenses, profile?.currency, 2)}.`}
                 >
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={monthlyChartData}>
@@ -618,7 +619,7 @@ export default function DashboardPage() {
                 <ChartSrTable
                   caption="Monthly income and expenses"
                   columns={['Month', 'Income', 'Expenses']}
-                  rows={monthlyChartData.map((m) => [m.month, `$${m.income.toLocaleString()}`, `$${m.expenses.toLocaleString()}`])}
+                  rows={monthlyChartData.map((m) => [m.month, formatMoney(m.income, profile?.currency, 2), formatMoney(m.expenses, profile?.currency, 2)])}
                 />
               </>
             ) : (
@@ -640,7 +641,7 @@ export default function DashboardPage() {
                 <div
                   className="h-[240px] sm:h-[300px]"
                   role="img"
-                  aria-label={`Donut chart of $${pieTotal.toLocaleString()} in spending split across ${pieChartData.length} payment methods.`}
+                  aria-label={`Donut chart of ${formatMoney(pieTotal, profile?.currency, 2)} in spending split across ${pieChartData.length} payment methods.`}
                 >
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
@@ -659,9 +660,9 @@ export default function DashboardPage() {
                       </Pie>
                       <Tooltip content={<CustomTooltip />} />
                       <Legend
-                        layout="vertical"
-                        align="right"
-                        verticalAlign="middle"
+                        layout="horizontal"
+                        align="center"
+                        verticalAlign="bottom"
                         formatter={(value) => <span className="text-[var(--foreground-secondary)] text-sm">{value}</span>}
                       />
                     </PieChart>
@@ -670,7 +671,7 @@ export default function DashboardPage() {
                 <ChartSrTable
                   caption="Spending by payment method"
                   columns={['Payment method', 'Total']}
-                  rows={pieChartData.map((d) => [d.name, `$${d.value.toLocaleString()}`])}
+                  rows={pieChartData.map((d) => [d.name, formatMoney(d.value, profile?.currency, 2)])}
                 />
               </>
             ) : (
@@ -689,7 +690,7 @@ export default function DashboardPage() {
             <div
               className="h-[240px] sm:h-[300px]"
               role="img"
-              aria-label={`Bar chart of the top ${categoryChartData.length} expense categories; highest is ${categoryChartData[0].name} at $${categoryChartData[0].total.toLocaleString()}.`}
+              aria-label={`Bar chart of the top ${categoryChartData.length} expense categories; highest is ${categoryChartData[0].name} at ${formatMoney(categoryChartData[0].total, profile?.currency, 2)}.`}
             >
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={categoryChartData} layout="vertical">
@@ -700,7 +701,7 @@ export default function DashboardPage() {
                     type="category"
                     stroke="var(--foreground-secondary)"
                     fontSize={12}
-                    width={120}
+                    width={90}
                     tickFormatter={(value, index) => `${categoryChartData[index]?.icon || ''} ${value}`}
                   />
                   <Tooltip content={<CustomTooltip />} />
@@ -718,7 +719,7 @@ export default function DashboardPage() {
             <ChartSrTable
               caption="Top expense categories"
               columns={['Category', 'Total']}
-              rows={categoryChartData.map((c) => [c.name, `$${c.total.toLocaleString()}`])}
+              rows={categoryChartData.map((c) => [c.name, formatMoney(c.total, profile?.currency, 2)])}
             />
           </div>
         )}
@@ -730,7 +731,7 @@ export default function DashboardPage() {
               <h3 className="text-lg font-semibold text-[var(--foreground)]">Income Sources</h3>
               <button
                 onClick={() => router.push('/accounts')}
-                className="text-sm text-[var(--accent-primary)] hover:underline flex items-center gap-1"
+                className="min-h-[44px] text-sm text-[var(--accent-primary)] hover:underline flex items-center gap-1"
               >
                 Manage <ChevronRight className="w-4 h-4" />
               </button>
@@ -754,7 +755,7 @@ export default function DashboardPage() {
                     </div>
                   </div>
                   <p className="text-xl font-bold text-[var(--accent-success)]">
-                    +${income.amount.toLocaleString()}
+                    +{formatMoney(income.amount, profile?.currency, 2)}
                   </p>
                 </div>
               ))}
@@ -771,7 +772,7 @@ export default function DashboardPage() {
               <select
                 value={filter}
                 onChange={(e) => setFilter(e.target.value as 'all' | 'past' | 'future')}
-                className="select-field py-2 px-3 text-sm"
+                className="select-field min-h-[44px] py-2 px-3 text-sm"
               >
                 <option value="all">All Transactions</option>
                 <option value="past">Past Only</option>
@@ -823,7 +824,7 @@ export default function DashboardPage() {
                       </div>
                     </div>
                     <p className={`text-lg font-semibold ${isExpense ? 'text-[var(--accent-danger)]' : 'text-[var(--accent-success)]'}`}>
-                      {isExpense ? '-' : '+'}${txn.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      {isExpense ? '-' : '+'}{formatMoney(txn.amount, profile?.currency, 2)}
                     </p>
                   </div>
                 );
