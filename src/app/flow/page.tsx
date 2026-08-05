@@ -20,6 +20,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import { buildFlowGraph, counterpartyRowIds, detectRecurring, projectNetWorth, day, FlowGraph } from '@/lib/flows';
+import { simplifyFlowGraph } from '@/lib/flow-simple';
 import {
   MONEY_BACK_LANE_IDS, NODE_PADDING_PX, fitLabel, labelMaxChars, nodeDepths, sankeyHeightFor,
 } from '@/lib/flow-lanes';
@@ -179,6 +180,17 @@ export default function FlowPage() {
   // gross cash movement is always one click away and is never destroyed to show net.
   const [links, setLinks] = useState<TransactionLink[]>([]);
   const [showGross, setShowGross] = useState(false);
+  // FIN-FLOW-002: Simple is the default; the last choice sticks. Read in an effect,
+  // not the initializer, so the server-rendered markup can never disagree with the
+  // client's localStorage (hydration).
+  const [simpleView, setSimpleView] = useState(true);
+  useEffect(() => {
+    setSimpleView(localStorage.getItem('flow-chart-view') !== 'detailed');
+  }, []);
+  const chooseView = (simple: boolean) => {
+    setSimpleView(simple);
+    localStorage.setItem('flow-chart-view', simple ? 'simple' : 'detailed');
+  };
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) router.push('/login');
@@ -251,10 +263,17 @@ export default function FlowPage() {
     () => flowNetting(transactions, accounts, links, incomeContext),
     [transactions, accounts, links, incomeContext]
   );
-  const graph: FlowGraph = useMemo(
+  const detailedGraph: FlowGraph = useMemo(
     () => buildFlowGraph(transactions, accounts, periodFor(range, todayISO, month),
       showGross ? {} : { netting, income: incomeContext }),
     [transactions, accounts, range, todayISO, month, showGross, netting, incomeContext]
+  );
+  // FIN-FLOW-002: what the charts DRAW. Same graph, fewer names — anything that
+  // reasons about raw lane ids (story tiles, queue feed) reads detailedGraph instead,
+  // because grouping renames ids and a `person-in:` prefix test finds nothing here.
+  const graph: FlowGraph = useMemo(
+    () => (simpleView ? simplifyFlowGraph(detailedGraph) : detailedGraph),
+    [simpleView, detailedGraph]
   );
   const recurring = useMemo(
     () => detectRecurring(transactions, accounts, todayISO),
@@ -537,8 +556,10 @@ export default function FlowPage() {
    * spending either — you cannot net a match nobody has proved. It gets its own number.
    */
   const story = (() => {
+    // Always the DETAILED graph: these sums test raw lane-id prefixes, which the
+    // simple view renames — and the tiles must not change when the chart regroups.
     const sum = (pred: (l: { source: string; target: string; cents: number }) => boolean) =>
-      graph.links.filter(pred).reduce((s, l) => s + l.cents, 0);
+      detailedGraph.links.filter(pred).reduce((s, l) => s + l.cents, 0);
     // Split, because bundling these made the tiles impossible to reconcile by eye:
     // money received FROM people sat silently inside "Money came in" while money sent
     // TO people had a tile of its own, so one side of every person relationship was
@@ -553,14 +574,14 @@ export default function FlowPage() {
     // every other surface: /flow said $46,447.36 for 2026 where the chat said
     // $53,340.61, on identical rows. Adding the person-out rows the classifier calls
     // an expense closes it exactly — the two figures now reconcile to the cent.
-    const spending = sum((l) => l.target.startsWith('cat:')) + graph.personExpenseCents;
+    const spending = sum((l) => l.target.startsWith('cat:')) + detailedGraph.personExpenseCents;
     const toPeople = sum((l) => l.target.startsWith('person-out:'));
     return {
       moneyIn, earnedIn, fromPeople, spending, toPeople, moneyBack,
-      netted: graph.nettedRefundCents,
+      netted: detailedGraph.nettedRefundCents,
       // The overlap is real and stated rather than hidden: these rows are a cost AND
       // they went to a person, so they belong in both tiles.
-      personExpense: graph.personExpenseCents,
+      personExpense: detailedGraph.personExpenseCents,
     };
   })();
 
@@ -663,6 +684,25 @@ export default function FlowPage() {
       {showGross ? 'Showing gross' : 'Show gross'}
     </button>
   ) : null;
+
+  // FIN-FLOW-002: Simple regroups the same graph into the four-step story; Detailed
+  // is every lane the classifier knows. The choice sticks (localStorage).
+  const detailToggle = (
+    <div role="group" aria-label="Detail level" className="flex gap-1 rounded-lg bg-[var(--background-tertiary)] p-1">
+      {([[true, 'Simple'], [false, 'Detailed']] as const).map(([simple, label]) => (
+        <button
+          key={label}
+          onClick={() => chooseView(simple)}
+          aria-pressed={simpleView === simple}
+          className={`px-3 py-1.5 rounded-md text-sm transition-colors ${simpleView === simple
+            ? 'bg-[var(--accent-primary)] text-[#16181c]'
+            : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'}`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
 
   const chartToggle = (
     <div role="group" aria-label="Chart type" className="flex gap-1 rounded-lg bg-[var(--background-tertiary)] p-1">
@@ -834,13 +874,14 @@ export default function FlowPage() {
   // already built, so the unpaired legs are exactly the rows sitting in the four
   // "other leg not found" lanes and not a second, differently-computed set.
   const unpairedLegIds = useMemo(
-    () => UNPAIRED_LEG_LANE_IDS.flatMap((id) => graph.nodeTxnIds[id] ?? []),
-    [graph]
+    () => UNPAIRED_LEG_LANE_IDS.flatMap((id) => detailedGraph.nodeTxnIds[id] ?? []),
+    [detailedGraph]
   );
   // FIN-SETTLEMENT-003 — the rows behind the person nodes, read off the SAME graph, so
   // what the chart drew and what the queue asks about cannot drift. Before this the
   // person lanes were terminal: money went in and no question ever came out.
-  const counterpartyIds = useMemo(() => counterpartyRowIds(graph), [graph]);
+  // (The DETAILED graph on purpose: both feeds test raw lane ids the simple view renames.)
+  const counterpartyIds = useMemo(() => counterpartyRowIds(detailedGraph), [detailedGraph]);
   const groups: MappingGroup[] = useMemo(
     () => (recoveryLoaded
       ? buildMappingGroups({
@@ -1403,6 +1444,7 @@ export default function FlowPage() {
           <section className="rounded-xl border border-[var(--border-color)] bg-[var(--background-secondary)] p-4 relative">
             <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
               <div className="flex items-center gap-2 flex-wrap">
+                {detailToggle}
                 {chartToggle}
                 {chart === 'sankey' && kindChips}
                 {chart === 'sankey' && grossToggle}
@@ -1585,7 +1627,7 @@ export default function FlowPage() {
                 </button>
               </div>
             </div>
-            <div className="mb-2 flex items-center gap-2 flex-wrap">{chartToggle}{chart === 'sankey' && kindChips}{chart === 'sankey' && grossToggle}</div>
+            <div className="mb-2 flex items-center gap-2 flex-wrap">{detailToggle}{chartToggle}{chart === 'sankey' && kindChips}{chart === 'sankey' && grossToggle}</div>
             <div className="flex-1 min-h-0 overflow-auto rounded-xl border border-[var(--border-color)] bg-[var(--background-secondary)] p-2">
               {/* minHeight keeps the chart usable on short/landscape screens — it scrolls in
                   the overflow-auto parent instead of being crushed to a few pixels. */}
