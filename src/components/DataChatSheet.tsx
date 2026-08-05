@@ -9,7 +9,8 @@ import { describeRule, rulePreview, MappingRule, NewMappingRule } from '@/lib/ma
 import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import { formatMoney } from '@/lib/money';
-import { displayCategory } from '@/types';
+import { currentOf } from '@/lib/accounts';
+import { PaymentAccount, displayCategory } from '@/types';
 
 /**
  * "Ask about your data" — the owner types plain English ("anything from Instacart is
@@ -34,7 +35,24 @@ interface ChatMessage {
   text: string;
   /** Set when the assistant proposed a rule — renders the preview card. */
   rule?: NewMappingRule;
+  /** Set when the assistant proposed a balance re-anchor — renders that card. */
+  balance?: { accountName: string; balance: number };
   status?: 'pending' | 'applied';
+}
+
+/**
+ * The account the proposal names, resolved against the owner's REAL list — exact
+ * name first, then a unique substring. Anything ambiguous or unknown resolves to
+ * null and the card renders words instead of a button: the model chose the name,
+ * so the model's spelling is never trusted with a write.
+ */
+export function resolveAccount(name: string, accounts: readonly PaymentAccount[]): PaymentAccount | null {
+  const n = name.trim().toLowerCase();
+  if (!n) return null;
+  const exact = accounts.filter((a) => a.name.trim().toLowerCase() === n);
+  if (exact.length === 1) return exact[0];
+  const contains = accounts.filter((a) => a.name.toLowerCase().includes(n));
+  return contains.length === 1 ? contains[0] : null;
 }
 
 export default function DataChatSheet({ open, onClose, seed }: {
@@ -44,7 +62,7 @@ export default function DataChatSheet({ open, onClose, seed }: {
   seed?: string;
 }) {
   const { transactions, addRule } = useTransactions();
-  const { profile } = useUserProfile();
+  const { profile, reconcileAccount } = useUserProfile();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -146,10 +164,16 @@ export default function DataChatSheet({ open, onClose, seed }: {
       // A refused payload still usually SAYS something. Showing the words costs nothing
       // and keeps a conversation going; the rule inside it is still refused.
       const explanation = explanationOf(reply) ?? fallbackText(data?.result);
-      setMessages((prev) => [...prev, reply?.action === 'create_rule'
-        ? mk('assistant', reply.explanation, { rule: reply.rule, status: 'pending' })
-        : mk('assistant', explanation
-          || "I got a reply I couldn't read. Try saying it as a rule — for example “Turo is Travel”."),
+      setMessages((prev) => [...prev,
+        reply?.action === 'create_rule'
+          ? mk('assistant', reply.explanation, { rule: reply.rule, status: 'pending' })
+          : reply?.action === 'set_account_balance'
+            ? mk('assistant', reply.reason, {
+                balance: { accountName: reply.accountName, balance: reply.balance },
+                status: 'pending',
+              })
+            : mk('assistant', explanation
+              || "I got a reply I couldn't read. Try saying it as a rule — for example “Turo is Travel”."),
       ]);
     } catch (e) {
       setMessages((prev) => [...prev, mk('assistant', callableErrorMessage(e))]);
@@ -177,7 +201,27 @@ export default function DataChatSheet({ open, onClose, seed }: {
   };
 
   const dismiss = (id: string) =>
-    setMessages((prev) => prev.map((x) => (x.id === id ? { ...x, rule: undefined, status: undefined } : x)));
+    setMessages((prev) => prev.map((x) => (x.id === id ? { ...x, rule: undefined, balance: undefined, status: undefined } : x)));
+
+  /** THE one path from a balance proposal to the store — a button press, same
+   *  reconcile() the accounts screen used before its manual knob was removed. */
+  const applyBalance = async (m: ChatMessage) => {
+    if (!m.balance || busy) return;
+    const account = resolveAccount(m.balance.accountName, profile?.paymentAccounts ?? []);
+    if (!account) return;
+    setBusy(true);
+    try {
+      await reconcileAccount(account.id, m.balance.balance, currentOf(account));
+      setMessages((prev) => [
+        ...prev.map((x) => (x.id === m.id ? { ...x, status: 'applied' as const } : x)),
+        mk('assistant', `Saved — ${account.name} reads ${formatMoney(m.balance!.balance, profile?.currency, 2)} as of today. No transaction changed.`),
+      ]);
+    } catch {
+      setMessages((prev) => [...prev, mk('assistant', 'That could not be saved. Please try again.')]);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   if (!open) return null;
 
@@ -258,6 +302,17 @@ export default function DataChatSheet({ open, onClose, seed }: {
             }`}>
               <p className="whitespace-pre-wrap break-words">{m.text}</p>
               {m.rule && <RulePreviewCard rule={m.rule} pending={m.status === 'pending'} busy={busy} money={money} onApply={() => apply(m)} onCancel={() => dismiss(m.id)} />}
+              {m.balance && (
+                <BalanceProposalCard
+                  proposal={m.balance}
+                  accounts={profile?.paymentAccounts ?? []}
+                  pending={m.status === 'pending'}
+                  busy={busy}
+                  money={money}
+                  onApply={() => applyBalance(m)}
+                  onCancel={() => dismiss(m.id)}
+                />
+              )}
             </div>
           </div>
         ))}
@@ -339,6 +394,54 @@ function RulePreviewCard({ rule, pending, busy, money, onApply, onCancel }: {
         </ul>
       )}
 
+      {pending ? (
+        <div className="flex gap-2 mt-3">
+          <button type="button" onClick={onApply} disabled={busy} className="btn-primary min-h-[44px] px-4 text-sm disabled:opacity-50">Apply</button>
+          <button type="button" onClick={onCancel} disabled={busy} className="min-h-[44px] px-4 text-sm rounded-xl border border-[var(--border-color)] text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] transition-colors disabled:opacity-50">Cancel</button>
+        </div>
+      ) : (
+        <p className="mt-3 text-xs text-[var(--accent-success)]">Applied</p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The confirm gate for a balance re-anchor: current -> new, in the owner's own
+ * numbers, and what does NOT change. An unknown or ambiguous account name gets
+ * words and no button — the model picked the name, the owner's list decides.
+ */
+function BalanceProposalCard({ proposal, accounts, pending, busy, money, onApply, onCancel }: {
+  proposal: { accountName: string; balance: number };
+  accounts: readonly PaymentAccount[];
+  pending: boolean;
+  busy: boolean;
+  money: (n: number) => string;
+  onApply: () => void;
+  onCancel: () => void;
+}) {
+  const account = resolveAccount(proposal.accountName, accounts);
+  if (!account) {
+    return (
+      <p className="mt-3 text-xs text-[var(--foreground-muted)]">
+        I couldn&apos;t match &ldquo;{proposal.accountName}&rdquo; to exactly one of your accounts, so nothing is offered.
+        Your accounts: {accounts.map((a) => a.name).join(', ') || '(none)'}.
+      </p>
+    );
+  }
+  const isDebt = account.type === 'credit_card' || account.type === 'personal_loan';
+  const label = isDebt ? 'you owe' : 'balance';
+  // ONE template string (not JSX interpolation), and always 2 decimals: a balance
+  // is the cents-exact number the owner just read off their bank.
+  const m2 = (n: number) => formatMoney(n, undefined, 2);
+  return (
+    <div className="mt-3 rounded-xl border border-[var(--border-color)] bg-[var(--background)] p-3">
+      <p className="font-medium text-[var(--foreground)]">
+        {`Set ${account.name} — ${label} ${m2(Math.abs(currentOf(account)))} → ${m2(proposal.balance)}`}
+      </p>
+      <p className="text-xs text-[var(--foreground-muted)] mt-1">
+        Re-anchors as of today. Every screen derives from it. No transaction is changed.
+      </p>
       {pending ? (
         <div className="flex gap-2 mt-3">
           <button type="button" onClick={onApply} disabled={busy} className="btn-primary min-h-[44px] px-4 text-sm disabled:opacity-50">Apply</button>

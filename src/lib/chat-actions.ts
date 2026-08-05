@@ -79,6 +79,9 @@ export type RecoveryAction =
 export type ChatAction =
   | { action: 'answer'; explanation: string }
   | { action: 'create_rule'; rule: NewMappingRule; explanation: string }
+  /** Proposes a balance re-anchor. accountName resolves CLIENT-side against the
+   *  owner's real account list; an ambiguous or unknown name renders no button. */
+  | { action: 'set_account_balance'; accountName: string; balance: number; reason: string }
   | RecoveryAction;
 
 /**
@@ -456,6 +459,20 @@ export function parseChatAction(raw: unknown, ctx?: RecoveryContext): ChatAction
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const action = (raw as Record<string, unknown>).action;
   if (typeof action !== 'string') return null;
+
+  if (action === 'set_account_balance') {
+    const o = record(raw, ['action', 'accountName', 'balance', 'reason']);
+    if (!o) return null;
+    const accountName = str(o.accountName, MAX.str);
+    const reason = str(o.reason, MAX.explanation);
+    // Bounded and finite, or nothing: a model typo of 60097 instead of 600.97 is
+    // exactly the kind of number the card must show and the owner must refuse —
+    // but NaN, Infinity and absurd magnitudes never reach a card at all.
+    const balance = o.balance;
+    if (!accountName || !reason) return null;
+    if (typeof balance !== 'number' || !Number.isFinite(balance) || Math.abs(balance) > 5_000_000) return null;
+    return { action: 'set_account_balance', accountName, balance: Math.round(balance * 100) / 100, reason };
+  }
 
   if (action in CANDIDATE_ACTIONS || action in TRANSACTION_ACTIONS) {
     const allowed = [

@@ -104,3 +104,12 @@ describe('the house rules travel with every turn', () => {
     expect(system).toContain('A loan repayment DOES count as spending');
   });
 });
+
+describe('the balance action travels with the contract', () => {
+  it('teaches the model the shape, the dollars convention and the owed sign', () => {
+    const system = buildChatMessages({ message: 'chase is actually 600.97' })[0].content;
+    expect(system).toContain('"action":"set_account_balance"');
+    expect(system).toContain('amount OWED');
+    expect(system).toContain('copied from the ACCOUNTS list');
+  });
+});

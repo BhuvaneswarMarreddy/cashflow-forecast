@@ -33,8 +33,14 @@ jest.mock('@/context/TransactionContext', () => ({
   useTransactions: () => ({ transactions: TRANSACTIONS, addRule }),
 }));
 
+const reconcileAccount = jest.fn().mockResolvedValue(0);
+const MOCK_ACCOUNTS = [
+  { id: 'acct-chase', name: 'CHASE SAVINGS', type: 'bank_account', provider: 'chase', openingBalance: 2600.97, openingDate: '2026-08-02', color: '#111', isActive: true },
+  { id: 'acct-adv', name: 'Advantage Savings', type: 'bank_account', provider: 'other', openingBalance: 45.52, openingDate: '2026-08-02', color: '#222', isActive: true },
+  { id: 'acct-apple', name: 'Apple Card', type: 'credit_card', provider: 'apple', openingBalance: 2068.93, openingDate: '2026-08-02', color: '#333', isActive: true },
+];
 jest.mock('@/context/UserProfileContext', () => ({
-  useUserProfile: () => ({ profile: { currency: 'USD', paymentAccounts: [] } }),
+  useUserProfile: () => ({ profile: { currency: 'USD', paymentAccounts: MOCK_ACCOUNTS }, reconcileAccount }),
 }));
 
 beforeAll(() => {
@@ -214,5 +220,42 @@ describe('the rail resizes from its left edge', () => {
     fireEvent.doubleClick(handle());
     expect(rail().style.width).toBe('');
     expect(window.localStorage.getItem('chat-rail-width')).toBeNull();
+  });
+});
+
+describe('the balance proposal card', () => {
+  const proposal = (accountName: string, balance = 600.97) => ({
+    success: true,
+    result: { action: 'set_account_balance', accountName, balance, reason: `You said ${accountName} is ${balance}.` },
+  });
+
+  it('shows current → new and writes ONLY on Apply', async () => {
+    aiChat.mockResolvedValue(proposal('CHASE SAVINGS'));
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('chase savings is actually 600.97');
+
+    expect(await screen.findByText('Set CHASE SAVINGS — balance $2,600.97 → $600.97')).toBeInTheDocument();
+    expect(reconcileAccount).not.toHaveBeenCalled(); // proposing is not applying
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    await screen.findByText(/Saved — CHASE SAVINGS reads \$600\.97 as of today/);
+    expect(reconcileAccount).toHaveBeenCalledWith('acct-chase', 600.97, 2600.97);
+  });
+
+  it('an ambiguous name gets words and NO button — the model never picks the account', async () => {
+    // Two accounts contain "savings"; the model's vague name must not resolve.
+    aiChat.mockResolvedValue(proposal('savings'));
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('savings is 100');
+
+    expect(await screen.findByText(/couldn't match .savings. to exactly one of your accounts/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+  });
+
+  it('a debt account is phrased as what you OWE', async () => {
+    aiChat.mockResolvedValue(proposal('Apple Card', 2405));
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('i owe 2405 on the apple card');
+    expect(await screen.findByText('Set Apple Card — you owe $2,068.93 → $2,405.00')).toBeInTheDocument();
   });
 });

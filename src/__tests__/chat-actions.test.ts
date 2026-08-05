@@ -230,3 +230,20 @@ describe('a refused payload still shows what the model said', () => {
     expect(fallbackText({ rule: 'anything' })).toBeUndefined();
   });
 });
+
+describe('set_account_balance — the first chat action that touches an account', () => {
+  const valid = { action: 'set_account_balance', accountName: 'CHASE SAVINGS', balance: 600.97, reason: 'You said the real balance is $600.97.' };
+
+  it('parses the exact shape and normalises the amount to cents precision', () => {
+    expect(parseChatAction({ ...valid, balance: 600.969 })).toEqual({ ...valid, balance: 600.97 });
+  });
+
+  it('rejects anything off-shape rather than coercing', () => {
+    expect(parseChatAction({ ...valid, extra: 1 })).toBeNull();          // unknown key
+    expect(parseChatAction({ ...valid, balance: 'abc' })).toBeNull();     // not a number
+    expect(parseChatAction({ ...valid, balance: Infinity })).toBeNull();  // not finite
+    expect(parseChatAction({ ...valid, balance: 6_000_000 })).toBeNull(); // absurd magnitude
+    expect(parseChatAction({ ...valid, reason: '' })).toBeNull();         // silent action
+    expect(parseChatAction({ ...valid, accountName: '' })).toBeNull();
+  });
+});
