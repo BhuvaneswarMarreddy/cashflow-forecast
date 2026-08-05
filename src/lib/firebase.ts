@@ -9,6 +9,10 @@ import {
   onAuthStateChanged,
   GoogleAuthProvider,
   signInWithPopup,
+  deleteUser,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
+  reauthenticateWithPopup,
   User as FirebaseUser
 } from "firebase/auth";
 import {
@@ -84,7 +88,11 @@ export {
   updateProfile,
   onAuthStateChanged,
   googleProvider,
-  signInWithPopup
+  signInWithPopup,
+  deleteUser,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
+  reauthenticateWithPopup
 };
 
 // Firestore exports

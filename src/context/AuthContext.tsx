@@ -12,6 +12,10 @@ import {
   onAuthStateChanged,
   googleProvider,
   signInWithPopup,
+  deleteUser,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
+  reauthenticateWithPopup,
   FirebaseUser,
 } from '@/lib/firebase';
 import * as firestoreService from '@/lib/firestore';
@@ -26,6 +30,9 @@ export interface AuthContextType {
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<{ success: boolean; error?: string }>;
   updateUserProfile: (name: string) => Promise<{ success: boolean; error?: string }>;
+  /** true when the signed-in user authenticates with a password (vs. Google popup). */
+  usesPassword: boolean;
+  deleteAccount: (password?: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 // Exported so a development-only fixture route can supply sanitized values without
@@ -341,6 +348,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  /**
+   * Delete the account: prove it is really the owner (recent login), wipe every
+   * Firestore document, THEN remove the login itself. Order is load-bearing —
+   * the wipe needs an authenticated user for the security rules, so the Auth
+   * user must die last. If that final step fails, data is already gone and the
+   * surviving login simply owns an empty account; pressing the button again
+   * finishes the job.
+   */
+  const deleteAccount = async (password?: string): Promise<{ success: boolean; error?: string }> => {
+    const current = auth.currentUser;
+    if (!current) return { success: false, error: 'Not signed in.' };
+    try {
+      if (current.providerData.some((p) => p.providerId === 'password')) {
+        if (!password) return { success: false, error: 'Enter your password to confirm.' };
+        await reauthenticateWithCredential(current, EmailAuthProvider.credential(current.email ?? '', password));
+      } else {
+        await reauthenticateWithPopup(current, googleProvider);
+      }
+      await firestoreService.deleteAllUserData(current.uid);
+      await deleteUser(current);
+      setUser(null);
+      return { success: true };
+    } catch (error) {
+      const code = (error as { code?: string }).code ?? '';
+      console.error('Delete account error:', code);
+      return { success: false, error: getErrorMessage(code) };
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -353,6 +389,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         logout,
         resetPassword,
         updateUserProfile: updateUserProfileHandler,
+        usesPassword: !!auth.currentUser?.providerData.some((p) => p.providerId === 'password'),
+        deleteAccount,
       }}
     >
       {children}

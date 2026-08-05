@@ -1067,33 +1067,32 @@ export async function hasUserData(userId: string): Promise<boolean> {
   }
 }
 
+/**
+ * Every subcollection that exists under users/{uid}. Account deletion iterates THIS
+ * list — a new subcollection that is not added here survives the wipe, which is a
+ * privacy defect, so the list is pinned by a test and must be updated together with
+ * any new collection() call.
+ */
+export const USER_SUBCOLLECTIONS = [
+  'accounts', 'goals', 'income', 'links', 'plannedTransactions',
+  'reminders', 'reviewCandidates', 'reviews', 'rules', 'transactions',
+] as const;
+
+/** Firestore rejects a batch of more than 500 writes; same ceiling the CSV importer chunks for. */
+export const DELETE_CHUNK = 450;
+
 export async function deleteAllUserData(userId: string): Promise<void> {
-  try {
-    // Delete all subcollections first
-    const subcollections = ['accounts', 'income', 'transactions', 'goals', 'reminders'];
-    
-    for (const subcollection of subcollections) {
-      const collectionRef = collection(db, 'users', userId, subcollection);
-      const snapshot = await getDocs(collectionRef);
+  // No offline swallowing here: a deletion that silently skipped a collection would
+  // report "deleted" with data still on the server. Errors must surface.
+  for (const subcollection of USER_SUBCOLLECTIONS) {
+    const snapshot = await getDocs(collection(db, 'users', userId, subcollection));
+    for (let i = 0; i < snapshot.docs.length; i += DELETE_CHUNK) {
       const batch = writeBatch(db);
-      
-      snapshot.docs.forEach((doc) => {
-        batch.delete(doc.ref);
-      });
-      
+      for (const d of snapshot.docs.slice(i, i + DELETE_CHUNK)) batch.delete(d.ref);
       await batch.commit();
     }
-    
-    // Delete user document
-    const userRef = doc(db, 'users', userId);
-    await deleteDoc(userRef);
-  } catch (error) {
-    if (isOfflineError(error)) {
-      console.warn('Firestore offline - deletion will sync when online');
-      return;
-    }
-    throw error;
   }
+  await deleteDoc(doc(db, 'users', userId));
 }
 
 // ============================================
