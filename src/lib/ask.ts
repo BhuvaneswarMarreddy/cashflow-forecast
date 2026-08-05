@@ -112,3 +112,60 @@ export function askAboutNode(label: string, rows: AskableRow[]): string {
  * The review queue's own phraser is `askAboutItem()` in `review-queue.ts`, not here: it
  * needs the section copy, the candidate and the option labels, all of which live there.
  */
+
+/** What the transaction phraser needs — id and account for neighbours, the rest for words. */
+interface AskableTxn extends AskableRow {
+  id: string;
+  accountId?: string;
+  type?: string;
+  transferDirection?: 'in' | 'out';
+  pending?: boolean;
+  description?: string;
+}
+
+const rowLine = (t: AskableTxn) =>
+  `${dateOnly(t.date)} · ${(t.merchant || t.title || 'unnamed').trim()} · ${usd(Number.isFinite(t.amount) ? t.amount : 0)}`;
+
+/**
+ * ONE transaction, clicked anywhere in the app, with enough of its surroundings
+ * that the conversation can move: "when was this", "who was it to", "what came
+ * next". The neighbours are the SAME ACCOUNT's adjacent rows — without them the
+ * model can only repeat the row back; with them, "the next one" means something.
+ */
+export function askAboutTransaction(
+  t: AskableTxn,
+  accounts: readonly { id: string; name: string }[],
+  all: readonly AskableTxn[]
+): string {
+  const accountName = accounts.find((a) => a.id === t.accountId)?.name ?? 'an account';
+  const flow =
+    t.type === 'transfer'
+      ? t.transferDirection === 'in'
+        ? `a transfer INTO ${accountName} — the money came FROM somewhere else`
+        : `a transfer OUT of ${accountName} — the money went TO the counterparty`
+      : t.type === 'income'
+        ? `money arriving into ${accountName}`
+        : `paid from ${accountName}`;
+
+  const sameAccount = all
+    .filter((x) => x.accountId === t.accountId)
+    .sort((a, b) => dateOnly(a.date).localeCompare(dateOnly(b.date)) || a.id.localeCompare(b.id));
+  const i = sameAccount.findIndex((x) => x.id === t.id);
+  const before = i >= 0 ? sameAccount.slice(Math.max(0, i - 2), i) : [];
+  const after = i >= 0 ? sameAccount.slice(i + 1, i + 3) : [];
+
+  return [
+    'I clicked one transaction:',
+    `${rowLine(t)} — ${flow}${t.pending ? ' (still pending)' : ''}`,
+    t.sourceCategory ? `My bank/export files it as: ${t.sourceCategory}` : '',
+    t.description ? `Bank text: ${t.description.slice(0, 120)}` : '',
+    '',
+    before.length || after.length ? `Its neighbours on ${accountName}:` : '',
+    ...before.map((x) => `  ${rowLine(x)}`),
+    i >= 0 ? `> ${rowLine(t)}   <- this one` : '',
+    ...after.map((x) => `  ${rowLine(x)}`),
+    '',
+    'Tell me about this transaction — which merchant, when, and where the money came from or went to.',
+    'If I ask about "the next one" or "the one before", use the neighbours listed above.',
+  ].filter(Boolean).join('\n');
+}

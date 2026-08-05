@@ -37,6 +37,7 @@ import {
 import { format, parseISO, startOfMonth, endOfMonth, subMonths, isWithinInterval } from 'date-fns';
 import { currentOf } from '@/lib/accounts';
 import { formatMoney } from '@/lib/money';
+import { askAbout, askAboutTransaction } from '@/lib/ask';
 
 type ViewMode = 'history' | 'runway';
 type DateFilter = 'all' | 'thisMonth' | 'lastMonth' | 'last3Months' | 'last6Months';
@@ -797,6 +798,17 @@ export default function HistoryPage() {
                                   </div>
                                 ) : (
                                   <div className="flex items-center gap-1">
+                                    {/* The owner's chat-first rule: any transaction is a
+                                        conversation. The question ships the row AND its
+                                        account neighbours, so "the next one" means something. */}
+                                    <button
+                                      onClick={() => askAbout(askAboutTransaction(txn, profile?.paymentAccounts ?? [], transactions))}
+                                      aria-label={`Ask about ${txn.title}`}
+                                      className="p-2 rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors max-sm:min-w-[44px] max-sm:min-h-[44px] flex items-center justify-center"
+                                      title="Ask about this transaction"
+                                    >
+                                      <Sparkles className="w-4 h-4" />
+                                    </button>
                                     <button
                                       onClick={() => {
                                         setEditingTransaction(txn);

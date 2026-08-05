@@ -4,7 +4,7 @@
  * keyed differently — and quietly answers about a DIFFERENT set of rows than the ones
  * on screen. These pin the facts into the sentence.
  */
-import { askAboutNode } from '@/lib/ask';
+import { askAboutNode, askAboutTransaction } from '@/lib/ask';
 
 const row = (o: Partial<Parameters<typeof askAboutNode>[1][number]>) => ({
   date: '2026-03-01', amount: 100, ...o,
@@ -76,5 +76,32 @@ describe('askAboutNode carries the rows, not just the total', () => {
     );
     const q = askAboutNode('X', many);
     expect(q).toContain('first 25 of 40');
+  });
+});
+
+describe('askAboutTransaction — one row, plus the neighbours that make follow-ups work', () => {
+  const acct = [{ id: 'chk', name: 'CHASE SAVINGS' }];
+  const t = (id: string, date: string, amount: number, over: object = {}) =>
+    ({ id, date, amount, merchant: `M-${id}`, accountId: 'chk', type: 'expense', ...over });
+  const ALL = [t('a', '2026-07-28', 12.34), t('b', '2026-08-01', 500, { type: 'transfer', transferDirection: 'out', merchant: 'Zelle' }), t('c', '2026-08-03', 5)];
+
+  it('says from/to for a transfer and names the account', () => {
+    const q = askAboutTransaction(ALL[1] as never, acct, ALL as never);
+    expect(q).toContain('a transfer OUT of CHASE SAVINGS');
+    expect(q).toContain('2026-08-01 · Zelle · $500.00');
+  });
+
+  it('ships the neighbours and marks the clicked row, so "the next one" means something', () => {
+    const q = askAboutTransaction(ALL[1] as never, acct, ALL as never);
+    expect(q).toContain('  2026-07-28 · M-a · $12.34');
+    expect(q).toContain('<- this one');
+    expect(q).toContain('  2026-08-03 · M-c · $5.00');
+    expect(q).toContain('use the neighbours listed above');
+  });
+
+  it('neighbours come from the SAME account only', () => {
+    const other = t('x', '2026-08-02', 99, { accountId: 'other' });
+    const q = askAboutTransaction(ALL[1] as never, acct, [...ALL, other] as never);
+    expect(q).not.toContain('M-x');
   });
 });
