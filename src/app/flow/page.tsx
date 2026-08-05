@@ -180,13 +180,12 @@ export default function FlowPage() {
   // gross cash movement is always one click away and is never destroyed to show net.
   const [links, setLinks] = useState<TransactionLink[]>([]);
   const [showGross, setShowGross] = useState(false);
-  // FIN-FLOW-002: Simple is the default; the last choice sticks. Read in an effect,
-  // not the initializer, so the server-rendered markup can never disagree with the
-  // client's localStorage (hydration).
-  const [simpleView, setSimpleView] = useState(true);
-  useEffect(() => {
-    setSimpleView(localStorage.getItem('flow-chart-view') !== 'detailed');
-  }, []);
+  // FIN-FLOW-002: Simple is the default; the last choice sticks. Lazy initializer
+  // (DataChatSheet's rail-width pattern): safe here because the toggle only renders
+  // after the client-side Firestore load, so server markup never contains it.
+  const [simpleView, setSimpleView] = useState<boolean>(() =>
+    typeof window === 'undefined' || window.localStorage.getItem('flow-chart-view') !== 'detailed'
+  );
   const chooseView = (simple: boolean) => {
     setSimpleView(simple);
     localStorage.setItem('flow-chart-view', simple ? 'simple' : 'detailed');
