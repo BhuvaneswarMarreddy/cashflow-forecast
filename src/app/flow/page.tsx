@@ -170,7 +170,12 @@ export default function FlowPage() {
   const router = useRouter();
   const [range, setRange] = useState<Range>('all');
   const [month, setMonth] = useState<string>(() => shiftMonth(new Date().toISOString().slice(0, 7), -1));
-  const [chart, setChart] = useState<ChartKind>('sankey');
+  // Same sticky-choice rule as Simple|Detailed: your last chart is the default.
+  const [chart, setChart] = useState<ChartKind>(() => {
+    if (typeof window === 'undefined') return 'sankey';
+    const saved = window.localStorage.getItem('flow-chart-kind');
+    return CHART_KINDS.some((c) => c.key === saved) ? (saved as ChartKind) : 'sankey';
+  });
   const [maximized, setMaximized] = useState(false);
   const [hoverLabel, setHoverLabel] = useState<string | null>(null);
   const [pinLabel, setPinLabel] = useState<string | null>(null);
@@ -708,7 +713,7 @@ export default function FlowPage() {
       {CHART_KINDS.map((c) => (
         <button
           key={c.key}
-          onClick={() => setChart(c.key)}
+          onClick={() => { setChart(c.key); window.localStorage.setItem('flow-chart-kind', c.key); }}
           aria-pressed={chart === c.key}
           className={`px-3 py-1.5 rounded-md text-sm transition-colors ${chart === c.key
             ? 'bg-[var(--accent-primary)] text-[#16181c]'
