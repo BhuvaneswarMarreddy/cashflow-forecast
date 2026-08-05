@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { formatMoney } from '@/lib/money';
+import { formatMoney, monthlyIncomeOf } from '@/lib/money';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
@@ -155,12 +155,7 @@ export default function DashboardPage() {
 
   // ACTIVE sources only — a paused source is still stored (so it can be resumed) but
   // must not be claimed as income.
-  const incomeFromSources = profile?.incomeSources?.filter((i) => i.isActive).reduce((sum, inc) => {
-    const monthly = inc.frequency === 'yearly' ? inc.amount / 12 :
-      inc.frequency === 'biweekly' ? inc.amount * 26 / 12 :
-      inc.frequency === 'weekly' ? inc.amount * 52 / 12 : inc.amount;
-    return sum + monthly;
-  }, 0) || 0;
+  const incomeFromSources = monthlyIncomeOf(profile?.incomeSources?.filter((i) => i.isActive) ?? []);
   // Fall back to a figure DERIVED from the last 6 months of transactions when the user
   // hasn't hand-entered income sources / a budget — so these never show a bare $0.
   const derivedMonthly = monthlyAverages(transactions, derivedAccounts, 6, incomeContext);

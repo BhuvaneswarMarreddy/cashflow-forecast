@@ -34,7 +34,6 @@ export default function SignupPage() {
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
-      console.log('🔄 [Signup Page] User authenticated, redirecting to dashboard...');
       router.push('/forecast');
     }
   }, [isAuthenticated, isLoading, router]);
@@ -53,7 +52,6 @@ export default function SignupPage() {
     setSuccess('');
     setStatus('');
 
-    console.log('📋 [Signup Page] Form submitted', { name, email });
 
     if (password !== confirmPassword) {
       setError('Passwords do not match');
@@ -68,19 +66,15 @@ export default function SignupPage() {
     setIsSubmitting(true);
     setStatus('Creating your account...');
 
-    console.log('🚀 [Signup Page] Calling signup function...');
     const result = await signup(name, email, password);
-    console.log('📋 [Signup Page] Signup result:', result);
     
     if (result.success) {
       setSuccess('Account created successfully! Redirecting...');
       setStatus('');
-      console.log('✅ [Signup Page] Signup successful, redirecting...');
       setTimeout(() => router.push('/forecast'), 1000);
     } else {
       setError(result.error || 'Signup failed. Please try again.');
       setStatus('');
-      console.log('❌ [Signup Page] Signup failed:', result.error);
     }
     
     setIsSubmitting(false);
@@ -93,19 +87,15 @@ export default function SignupPage() {
     setIsGoogleLoading(true);
     setStatus('Connecting to Google...');
 
-    console.log('🚀 [Signup Page] Starting Google sign-in...');
     const result = await signInWithGoogle();
-    console.log('📋 [Signup Page] Google sign-in result:', result);
     
     if (result.success) {
       setSuccess('Signed in with Google! Redirecting...');
       setStatus('');
-      console.log('✅ [Signup Page] Google sign-in successful, redirecting...');
       setTimeout(() => router.push('/forecast'), 1000);
     } else {
       setError(result.error || 'Google sign-in failed. Please try again.');
       setStatus('');
-      console.log('❌ [Signup Page] Google sign-in failed:', result.error);
     }
     
     setIsGoogleLoading(false);

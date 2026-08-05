@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { formatMoney } from '@/lib/money';
+import { formatMoney, monthlyIncomeOf } from '@/lib/money';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useUserProfile } from '@/context/UserProfileContext';
@@ -389,12 +389,7 @@ export default function AccountsPage() {
   // from the last 6 months of transactions (so these never read a bare $0).
   // ACTIVE sources only: getIncomeSources() now returns paused sources too (so they
   // can be resumed), and a paused source is not money arriving.
-  const incomeFromSources = profile?.incomeSources?.filter((i) => i.isActive).reduce((sum, inc) => {
-    const monthly = inc.frequency === 'yearly' ? inc.amount / 12 :
-      inc.frequency === 'biweekly' ? inc.amount * 26 / 12 :
-      inc.frequency === 'weekly' ? inc.amount * 52 / 12 : inc.amount;
-    return sum + monthly;
-  }, 0) || 0;
+  const incomeFromSources = monthlyIncomeOf(profile?.incomeSources?.filter((i) => i.isActive) ?? []);
   const derivedMonthly = monthlyAverages(transactions, derivedAccounts, 6, incomeContext);
   const monthlyIncome = incomeFromSources > 0 ? incomeFromSources : derivedMonthly.income;
   const incomeIsDerived = incomeFromSources === 0 && derivedMonthly.income > 0;

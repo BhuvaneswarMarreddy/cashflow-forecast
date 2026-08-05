@@ -6,6 +6,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import { PAYMENT_METHODS, PaymentAccount, IncomeSource, AccountType, PaymentMethod } from '@/types';
 import { currentOf } from '@/lib/accounts';
+import { monthlyIncomeOf } from '@/lib/money';
 import {
   TrendingUp,
   CreditCard,
@@ -273,19 +274,31 @@ function OnboardingContent() {
     setDeleteConfirm({ show: true, type, index, name });
   };
 
+  // A local onboarding row carries no Firestore id, so name+type is the only bridge
+  // back to the saved record. Deleting on that match is only safe when it is UNIQUE:
+  // with two accounts named "Checking", .find() deletes whichever came first — the
+  // wrong one half the time. Ambiguous match -> no Firestore delete, never a guess.
+  const uniqueProfileMatch = <T extends { name?: string }>(
+    items: T[] | undefined,
+    name: string | undefined,
+    pred: (x: T) => boolean
+  ): T | undefined => {
+    const hits = (items ?? []).filter((x) => x.name === name && pred(x));
+    return hits.length === 1 ? hits[0] : undefined;
+  };
+
   // Handle confirmed delete - also deletes from Firestore if item was saved
   const handleConfirmedDelete = async () => {
     if (!deleteConfirm || !user?.id) return;
-    
+
     setIsDeleting(true);
     const { type, index } = deleteConfirm;
-    
+
     try {
       if (type === 'bank') {
         const account = bankAccounts[index];
-        // Delete from Firestore if it has a real ID (was saved)
-        const accountInProfile = profile?.paymentAccounts?.find(
-          a => a.name === account?.name && a.type === account?.type
+        const accountInProfile = uniqueProfileMatch(
+          profile?.paymentAccounts, account?.name, (a) => a.type === account?.type
         );
         if (accountInProfile && !accountInProfile.id.startsWith('local_')) {
           await deletePaymentAccount(accountInProfile.id);
@@ -302,8 +315,8 @@ function OnboardingContent() {
         setExistingCounts(prev => ({ ...prev, banks: Math.max(0, prev.banks - 1) }));
       } else if (type === 'card') {
         const card = creditCards[index];
-        const cardInProfile = profile?.paymentAccounts?.find(
-          a => a.name === card?.name && a.type === 'credit_card'
+        const cardInProfile = uniqueProfileMatch(
+          profile?.paymentAccounts, card?.name, (a) => a.type === 'credit_card'
         );
         if (cardInProfile && !cardInProfile.id.startsWith('local_')) {
           await deletePaymentAccount(cardInProfile.id);
@@ -312,8 +325,8 @@ function OnboardingContent() {
         setExistingCounts(prev => ({ ...prev, cards: Math.max(0, prev.cards - 1) }));
       } else if (type === 'loan') {
         const loan = loans[index];
-        const loanInProfile = profile?.paymentAccounts?.find(
-          a => a.name === loan?.name && a.type === 'personal_loan'
+        const loanInProfile = uniqueProfileMatch(
+          profile?.paymentAccounts, loan?.name, (a) => a.type === 'personal_loan'
         );
         if (loanInProfile && !loanInProfile.id.startsWith('local_')) {
           await deletePaymentAccount(loanInProfile.id);
@@ -322,8 +335,8 @@ function OnboardingContent() {
         setExistingCounts(prev => ({ ...prev, loans: Math.max(0, prev.loans - 1) }));
       } else if (type === 'income') {
         const income = incomeSources[index];
-        const incomeInProfile = profile?.incomeSources?.find(
-          i => i.name === income?.name
+        const incomeInProfile = uniqueProfileMatch(
+          profile?.incomeSources, income?.name, () => true
         );
         if (incomeInProfile && !incomeInProfile.id.startsWith('local_')) {
           await deleteIncomeSource(incomeInProfile.id);
@@ -555,14 +568,7 @@ function OnboardingContent() {
     }
   };
 
-  const calculateMonthlyIncome = () => {
-    return incomeSources.reduce((sum, inc) => {
-      const monthly = inc.frequency === 'yearly' ? inc.amount / 12 :
-        inc.frequency === 'biweekly' ? inc.amount * 26 / 12 :
-        inc.frequency === 'weekly' ? inc.amount * 52 / 12 : inc.amount;
-      return sum + monthly;
-    }, 0);
-  };
+  const calculateMonthlyIncome = () => monthlyIncomeOf(incomeSources);
 
   const totalDebt = creditCards.reduce((sum, c) => sum + c.openingBalance, 0) + loans.reduce((sum, l) => sum + l.openingBalance, 0);
   const totalMonthlyPayments = loans.reduce((sum, l) => sum + (l.monthlyPayment || 0), 0);

@@ -11,7 +11,7 @@ import CSVImportModal from '@/components/CSVImportModal';
 import ReceiptScannerModal from '@/components/ReceiptScannerModal';
 import RunwayCalculator from '@/components/RunwayCalculator';
 import { generateForecast, calculateCurrentCash, monthlyAverages, withDerivedBalances } from '@/lib/forecast';
-import { classifyTransaction, isPositive, isReward } from '@/lib/classify';
+import { classifyTransaction, isPositive, isReward, sumExpenseCents, sumIncomeCents } from '@/lib/classify';
 import { pairedLegId } from '@/lib/transfers';
 import { EXPENSE_CATEGORIES, Transaction, TransactionType, getMerchantColor, displayCategory } from '@/types';
 import {
@@ -36,7 +36,7 @@ import {
 } from 'lucide-react';
 import { format, parseISO, startOfMonth, endOfMonth, subMonths, isWithinInterval } from 'date-fns';
 import { currentOf } from '@/lib/accounts';
-import { formatMoney } from '@/lib/money';
+import { formatMoney, monthlyIncomeOf } from '@/lib/money';
 import { askAbout, askAboutTransaction } from '@/lib/ask';
 
 type ViewMode = 'history' | 'runway';
@@ -184,33 +184,26 @@ export default function HistoryPage() {
   // Group transactions by month or year
   // Transfers between accounts don't count as real income/expense
   const groupedTransactions = useMemo(() => {
-    const groups: { [key: string]: { transactions: Transaction[]; income: number; expenses: number } } = {};
-    
-    filteredTransactions.forEach(t => {
+    const byKey = new Map<string, Transaction[]>();
+    for (const t of filteredTransactions) {
       const groupKey = groupBy === 'month'
         ? format(parseISO(t.date), 'yyyy-MM')
         : groupBy === 'year'
         ? format(parseISO(t.date), 'yyyy')
         : displayCategory(t);
+      const arr = byKey.get(groupKey);
+      if (arr) arr.push(t); else byKey.set(groupKey, [t]);
+    }
 
-      if (!groups[groupKey]) {
-        groups[groupKey] = { transactions: [], income: 0, expenses: 0 };
-      }
-      groups[groupKey].transactions.push(t);
-
-      const classification = classifyTransaction(t, profile?.paymentAccounts);
-      if (classification === 'income') {
-        groups[groupKey].income += t.amount;
-      } else if (classification === 'expense') {
-        groups[groupKey].expenses += t.amount;
-      }
-      // 'transfer' transactions don't add to income or expense totals
-    });
-
-    const entries = Object.entries(groups).map(([key, data]) => ({
+    // The ENGINE's sums, per group — earned income only, confirmed spending included.
+    // The per-row classifyTransaction accumulation this replaces counted every inflow
+    // as income, which is the drift the runway block below was already fixed for.
+    const entries = [...byKey.entries()].map(([key, txns]) => ({
       key,
       label: groupBy === 'month' ? format(parseISO(key + '-01'), 'MMMM yyyy') : key,
-      ...data,
+      transactions: txns,
+      income: sumIncomeCents(txns, profile?.paymentAccounts, incomeContext) / 100,
+      expenses: sumExpenseCents(txns, profile?.paymentAccounts, incomeContext) / 100,
     }));
 
     // Time groups read newest-first; category groups read biggest-spend-first, which is
@@ -218,25 +211,16 @@ export default function HistoryPage() {
     return groupBy === 'category'
       ? entries.sort((a, b) => (b.expenses + b.income) - (a.expenses + a.income))
       : entries.sort((a, b) => b.key.localeCompare(a.key));
-  }, [filteredTransactions, groupBy, profile?.paymentAccounts]);
+  }, [filteredTransactions, groupBy, profile?.paymentAccounts, incomeContext]);
 
-  // Calculate totals for stats - excludes transfers between own accounts
+  // The header's In/Out/Net — from the ENGINE, so History can never disagree with
+  // Flow or the XLSX export. In = earned income matched to approved sources only;
+  // a refund or an unreviewed credit is not "In".
   const totals = useMemo(() => {
-    let income = 0;
-    let expenses = 0;
-
-    filteredTransactions.forEach(t => {
-      const classification = classifyTransaction(t, profile?.paymentAccounts);
-      if (classification === 'income') {
-        income += t.amount;
-      } else if (classification === 'expense') {
-        expenses += t.amount;
-      }
-      // 'transfer' transactions don't count
-    });
-    
+    const income = sumIncomeCents(filteredTransactions, profile?.paymentAccounts, incomeContext) / 100;
+    const expenses = sumExpenseCents(filteredTransactions, profile?.paymentAccounts, incomeContext) / 100;
     return { income, expenses, net: income - expenses };
-  }, [filteredTransactions, profile?.paymentAccounts]);
+  }, [filteredTransactions, profile?.paymentAccounts, incomeContext]);
 
   // Per-account summary — appears when History is filtered to one account. The metrics
   // shown differ by account type (loan / credit card / bank), computed from the filtered
@@ -244,18 +228,20 @@ export default function HistoryPage() {
   const accountSummary = useMemo(() => {
     const acct = profile?.paymentAccounts?.find(a => a.id === accountFilter);
     if (!acct) return null;
-    let spent = 0, income = 0, inbound = 0, outbound = 0, rewards = 0;
+    // Earned/spent from the engine; transfers and rewards counted separately.
+    const spent = sumExpenseCents(filteredTransactions, profile?.paymentAccounts, incomeContext) / 100;
+    const income = sumIncomeCents(filteredTransactions, profile?.paymentAccounts, incomeContext) / 100;
+    let inbound = 0, outbound = 0, rewards = 0;
     filteredTransactions.forEach(t => {
       const cls = classifyTransaction(t, profile?.paymentAccounts);
-      if (cls === 'expense') spent += t.amount;
-      else if (cls === 'income') { income += t.amount; if (isReward(t)) rewards += t.amount; }
+      if (cls === 'income' && isReward(t)) rewards += t.amount;
       else if (cls === 'transfer') {
         if (isPositive(t, profile?.paymentAccounts)) inbound += t.amount;
         else outbound += t.amount;
       }
     });
     return { acct, spent, income, inbound, outbound, rewards };
-  }, [accountFilter, filteredTransactions, profile?.paymentAccounts]);
+  }, [accountFilter, filteredTransactions, profile?.paymentAccounts, incomeContext]);
 
   // Calculate monthly averages for runway
   /**
@@ -344,12 +330,7 @@ export default function HistoryPage() {
   const currentCash = calculateCurrentCash(withDerivedBalances(profile?.paymentAccounts || [], transactions));
   // ACTIVE sources only: getIncomeSources() now returns paused sources too (so they
   // can be resumed), and a paused source is not money arriving.
-  const monthlyIncome = profile?.incomeSources?.filter((i) => i.isActive).reduce((sum, inc) => {
-    const monthly = inc.frequency === 'yearly' ? inc.amount / 12 :
-      inc.frequency === 'biweekly' ? inc.amount * 26 / 12 :
-      inc.frequency === 'weekly' ? inc.amount * 52 / 12 : inc.amount;
-    return sum + monthly;
-  }, 0) || monthlyStats.avgIncome;
+  const monthlyIncome = monthlyIncomeOf(profile?.incomeSources?.filter((i) => i.isActive) ?? []) || monthlyStats.avgIncome;
 
   return (
     <div className="min-h-screen relative">

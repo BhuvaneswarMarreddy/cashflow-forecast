@@ -9,6 +9,7 @@ import Navbar from '@/components/Navbar';
 import ChartSrTable from '@/components/ChartSrTable';
 import { EXPENSE_CATEGORIES, Transaction, getMerchantColor, displayCategory } from '@/types';
 import { classifyTransaction } from '@/lib/classify';
+import { monthlyAverages } from '@/lib/forecast';
 import {
   TrendingUp,
   TrendingDown,
@@ -75,13 +76,12 @@ const MOBILE_TICKS = 'max-sm:[&_.recharts-cartesian-axis-tick-value]:text-[10px]
 export default function AnalyticsPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const { transactions, isLoading: txnLoading } = useTransactions();
-  const { profile, isLoading: profileLoading, isOnboarded } = useUserProfile();
+  const { profile, isLoading: profileLoading, isOnboarded, incomeContext } = useUserProfile();
   const router = useRouter();
 
   const [viewMode, setViewMode] = useState<ViewMode>('weekly');
   const [chartType, setChartType] = useState<ChartType>('area');
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [showProjection, setShowProjection] = useState(true);
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -101,6 +101,16 @@ export default function AnalyticsPage() {
     classifyTransaction(t, profile?.paymentAccounts) === 'income';
   const isRealExpense = (t: Transaction) =>
     classifyTransaction(t, profile?.paymentAccounts) === 'expense';
+
+  // The budget line is real or it is derived from real rows — never invented. A
+  // hard-coded `|| 3000` used to stand in when no budget was set, so every budget
+  // ratio on the page was computed against a number that existed nowhere.
+  const derivedMonthly = useMemo(
+    () => monthlyAverages(transactions, profile?.paymentAccounts || [], 6, incomeContext),
+    [transactions, profile?.paymentAccounts, incomeContext]
+  );
+  const effectiveMonthlyBudget =
+    (profile?.monthlyBudget || 0) > 0 ? profile!.monthlyBudget! : derivedMonthly.spending;
 
   // Calculate date range based on view mode
   const dateRange = useMemo(() => {
@@ -144,7 +154,6 @@ export default function AnalyticsPage() {
         .reduce((sum, t) => sum + t.amount, 0);
 
       const isPast = day <= today;
-      const isProjected = day > today;
 
       return {
         date: format(day, 'MMM d'),
@@ -152,13 +161,11 @@ export default function AnalyticsPage() {
         dayOfWeek: format(day, 'EEE'),
         expenses: isPast ? expenses : null,
         income: isPast ? income : null,
-        projectedExpenses: isProjected ? (profile?.monthlyBudget || 3000) / 30 : null,
         net: isPast ? income - expenses : null,
         isPast,
-        isProjected,
       };
     });
-  }, [transactions, dateRange, profile?.monthlyBudget]);
+  }, [transactions, dateRange]);
 
   // Calculate weekly comparison data
   const weeklyComparison = useMemo(() => {
@@ -180,11 +187,11 @@ export default function AnalyticsPage() {
         expenses,
         income,
         net: income - expenses,
-        budget: (profile?.monthlyBudget || 3000) / 4,
+        budget: effectiveMonthlyBudget / 4,
       });
     }
     return weeks;
-  }, [transactions, profile?.monthlyBudget]);
+  }, [transactions, effectiveMonthlyBudget]);
 
   // Calculate monthly comparison data
   const monthlyComparison = useMemo(() => {
@@ -206,11 +213,11 @@ export default function AnalyticsPage() {
         expenses,
         income,
         net: income - expenses,
-        budget: profile?.monthlyBudget || 3000,
+        budget: effectiveMonthlyBudget,
       });
     }
     return months;
-  }, [transactions, profile?.monthlyBudget]);
+  }, [transactions, effectiveMonthlyBudget]);
 
   // Calculate category breakdown — grouped by the user's own label (Monarch's real
   // category when present) so the pie stops collapsing a third of spend into "Other".
@@ -278,9 +285,7 @@ export default function AnalyticsPage() {
   const totals = useMemo(() => {
     const expenses = periodTransactions.filter(isRealExpense).reduce((sum, t) => sum + t.amount, 0);
     const income = periodTransactions.filter(isRealIncome).reduce((sum, t) => sum + t.amount, 0);
-    const budget = viewMode === 'weekly' 
-      ? (profile?.monthlyBudget || 3000) / 4 
-      : (profile?.monthlyBudget || 3000);
+    const budget = viewMode === 'weekly' ? effectiveMonthlyBudget / 4 : effectiveMonthlyBudget;
     
     return {
       expenses,
@@ -290,7 +295,7 @@ export default function AnalyticsPage() {
       budgetUsed: (expenses / budget) * 100,
       remaining: budget - expenses,
     };
-  }, [periodTransactions, viewMode, profile?.monthlyBudget]);
+  }, [periodTransactions, viewMode, effectiveMonthlyBudget]);
 
   // Calculate projections
   const projections = useMemo(() => {
@@ -531,15 +536,6 @@ export default function AnalyticsPage() {
               {viewMode === 'weekly' ? 'Daily' : 'Daily'} Spending
             </h3>
             <div className="flex items-center gap-2">
-              <label className="flex items-center gap-2 text-sm text-[var(--foreground-secondary)]">
-                <input
-                  type="checkbox"
-                  checked={showProjection}
-                  onChange={(e) => setShowProjection(e.target.checked)}
-                  className="w-4 h-4 rounded border-[var(--border-color)] bg-[var(--background-tertiary)] text-[var(--accent-primary)]"
-                />
-                Show projection
-              </label>
               <div className="flex bg-[var(--background-tertiary)] rounded-lg p-1">
                 {(['area', 'bar', 'composed'] as ChartType[]).map((type) => (
                   <button
@@ -581,9 +577,6 @@ export default function AnalyticsPage() {
                   <YAxis stroke="var(--foreground-muted)" fontSize={12} tickLine={false} tickFormatter={(v) => `$${v}`} />
                   <Tooltip content={<CustomTooltip />} />
                   <Area isAnimationActive={false} type="monotone" dataKey="expenses" stroke="#ef4444" strokeWidth={2} fill="url(#expenseGradient)" name="Expenses" />
-                  {showProjection && (
-                    <Area isAnimationActive={false} type="monotone" dataKey="projectedExpenses" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 5" fill="url(#projectedGradient)" name="Projected" />
-                  )}
                   <ReferenceLine y={totals.budget / (viewMode === 'weekly' ? 7 : 30)} stroke="#10b981" strokeDasharray="5 5" label={{ value: 'Daily Budget', position: 'right', fill: '#10b981', fontSize: 10 }} />
                 </AreaChart>
               ) : chartType === 'bar' ? (
@@ -593,9 +586,6 @@ export default function AnalyticsPage() {
                   <YAxis stroke="var(--foreground-muted)" fontSize={12} tickLine={false} tickFormatter={(v) => `$${v}`} />
                   <Tooltip content={<CustomTooltip />} />
                   <Bar isAnimationActive={false} dataKey="expenses" fill="#ef4444" radius={[4, 4, 0, 0]} name="Expenses" />
-                  {showProjection && (
-                    <Bar isAnimationActive={false} dataKey="projectedExpenses" fill="#f59e0b" opacity={0.5} radius={[4, 4, 0, 0]} name="Projected" />
-                  )}
                   <ReferenceLine y={totals.budget / (viewMode === 'weekly' ? 7 : 30)} stroke="#10b981" strokeDasharray="5 5" />
                 </BarChart>
               ) : (
@@ -605,9 +595,6 @@ export default function AnalyticsPage() {
                   <YAxis stroke="var(--foreground-muted)" fontSize={12} tickLine={false} tickFormatter={(v) => `$${v}`} />
                   <Tooltip content={<CustomTooltip />} />
                   <Bar isAnimationActive={false} dataKey="expenses" fill="#ef4444" opacity={0.8} radius={[4, 4, 0, 0]} name="Expenses" />
-                  {showProjection && (
-                    <Line isAnimationActive={false} type="monotone" dataKey="projectedExpenses" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Projected" />
-                  )}
                   <ReferenceLine y={totals.budget / (viewMode === 'weekly' ? 7 : 30)} stroke="#10b981" strokeDasharray="5 5" />
                 </ComposedChart>
               )}
@@ -615,12 +602,11 @@ export default function AnalyticsPage() {
           </div>
           <ChartSrTable
             caption={`Daily spending, ${format(dateRange.start, 'MMM d')} – ${format(dateRange.end, 'MMM d, yyyy')}`}
-            columns={['Date', 'Expenses', 'Income', 'Projected']}
+            columns={['Date', 'Expenses', 'Income']}
             rows={dailyData.map(d => [
               d.date,
               d.expenses != null ? `$${d.expenses.toLocaleString()}` : '—',
               d.income != null ? `$${d.income.toLocaleString()}` : '—',
-              d.projectedExpenses != null ? `$${d.projectedExpenses.toFixed(0)}` : '—',
             ])}
           />
 
@@ -630,12 +616,6 @@ export default function AnalyticsPage() {
               <div className="w-3 h-3 rounded-full bg-red-400" />
               <span className="text-[var(--foreground-secondary)]">Actual Spending</span>
             </div>
-            {showProjection && (
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-amber-500" />
-                <span className="text-[var(--foreground-secondary)]">Projected</span>
-              </div>
-            )}
             <div className="flex items-center gap-2">
               <div className="w-8 h-0.5 bg-emerald-500 border-dashed border-t-2 border-emerald-500" />
               <span className="text-[var(--foreground-secondary)]">Daily Budget</span>

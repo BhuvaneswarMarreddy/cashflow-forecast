@@ -18,6 +18,7 @@ import {
 import { addDays, format, parseISO, startOfDay, isBefore, isAfter, isSameDay } from 'date-fns';
 import { isPositive, classifyTransaction, interpretTransaction, isPosted, IncomeContext } from '@/lib/classify';
 import { currentOf } from '@/lib/accounts';
+import { monthlyIncomeOf } from '@/lib/money';
 import { buildAssumptions, behaviorEvents, AssumptionOverrides } from '@/lib/behavior';
 import { normalizeMerchant } from '@/lib/flows';
 
@@ -743,7 +744,7 @@ export interface AIUserContext {
   incomeSources?: {
     name: string;
     amount: number;
-    frequency: string;
+    frequency: 'weekly' | 'biweekly' | 'monthly' | 'yearly';
   }[];
   emergencyFund?: {
     monthsOfRunway: number;
@@ -835,16 +836,7 @@ export function prepareFullContextForAI(context: AIUserContext): string {
       // NOTE: callers must pass ACTIVE approved sources only — a paused source is
       // retained in Firestore so it can be resumed and is not money being received.
       numberOfSources: incomeSources.length,
-      estimatedMonthlyIncome: incomeSources.reduce((sum, i) => {
-        if (i.frequency === 'monthly') return sum + i.amount;
-        // 26/12 and 52/12, matching the dashboard: biweekly is 26 paychecks a year,
-        // not 24 — the naive *2 understated a $4,340 paycheck by ~$723/month, so the
-        // AI panels reasoned from different income than the tile the owner sees.
-        if (i.frequency === 'biweekly') return sum + (i.amount * 26 / 12);
-        if (i.frequency === 'weekly') return sum + (i.amount * 52 / 12);
-        if (i.frequency === 'yearly') return sum + (i.amount / 12);
-        return sum;
-      }, 0),
+      estimatedMonthlyIncome: monthlyIncomeOf(incomeSources),
       sources: incomeSources,
     } : null,
     
