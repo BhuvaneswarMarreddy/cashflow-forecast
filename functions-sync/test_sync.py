@@ -226,12 +226,15 @@ class BalanceTrust(unittest.TestCase):
         self.assertFalse(sc.balance_is_trustworthy({"isManual": True})[0])
         self.assertFalse(sc.balance_is_trustworthy({"syncDisabled": True})[0])
 
-    def test_stale_balance_is_not_trusted(self):
-        now = dt.datetime(2026, 8, 1, 12, tzinfo=dt.timezone.utc)
-        fresh = {"displayLastUpdatedAt": "2026-08-01T06:00:00Z"}
+    def test_manual_and_disabled_rejected_stale_anchored_at_its_date(self):
+        """Staleness no longer rejects (see test_simplefin for the full story);
+        manual/disabled still must never overwrite a good anchor."""
+        self.assertFalse(sc.balance_is_trustworthy({"isManual": True})[0])
+        self.assertFalse(sc.balance_is_trustworthy({"syncDisabled": True})[0])
         stale = {"displayLastUpdatedAt": "2026-07-28T06:00:00Z"}
-        self.assertTrue(sc.balance_is_trustworthy(fresh, now)[0])
-        self.assertFalse(sc.balance_is_trustworthy(stale, now)[0])
+        self.assertTrue(sc.balance_is_trustworthy(stale)[0])
+        self.assertEqual(sc.anchor_when(stale, "2026-08-02"), "2026-07-29")
+
 
     def test_healthy_balance_is_trusted(self):
         self.assertTrue(sc.balance_is_trustworthy({})[0])

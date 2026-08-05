@@ -237,25 +237,39 @@ def resolve_matches(monarch_accounts: list, app_accounts: list):
 
 
 def balance_is_trustworthy(ma: dict, now: dt.datetime | None = None):
-    """(ok, reason). A manual/disabled/stale account's currentBalance must never
+    """(ok, reason). A manual/disabled account's currentBalance must never
     overwrite a good anchor — a broken bank connection reporting 0.00 would
-    otherwise wipe the account's real balance."""
+    otherwise wipe the account's real balance.
+
+    STALENESS is deliberately no longer a rejection. It used to be, and the
+    combination — skip the stale balance, but stamp fresh ones with TOMORROW —
+    is exactly how the owner's Chase anchor ended up $2,000 wrong: a 71h-stale
+    balance had been anchored with a fresh date on an earlier run, going blind
+    to withdrawals dated in between. A stale balance is TRUE AS OF ITS OWN
+    DATE, and anchor_when() now stamps it there, so age stops being a threat.
+    (`now` stays in the signature for call-site compatibility.)"""
+    del now  # no longer consulted — see docstring
     if ma.get("isManual"):
         return False, "manual account"
     if ma.get("syncDisabled"):
         return False, "sync disabled"
+    return True, ""
+
+
+def anchor_when(ma: dict, today: str) -> str:
+    """The openingDate for a re-anchor: the day AFTER the balance's own
+    timestamp. The bank's figure already contains everything through its own
+    day (deriveAccountBalance counts rows with day >= openingDate), and rows
+    dated later are counted on top. No parseable stamp -> tomorrow, the old
+    behaviour, correct for a balance the source reports as current."""
     stamp = ma.get("displayLastUpdatedAt") or ma.get("updatedAt")
     if stamp:
         try:
             seen = dt.datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
-            if seen.tzinfo is None:
-                seen = seen.replace(tzinfo=dt.timezone.utc)
-            age_h = ((now or dt.datetime.now(dt.timezone.utc)) - seen).total_seconds() / 3600
-            if age_h > STALE_BALANCE_HOURS:
-                return False, f"balance {int(age_h)}h stale"
+            return (seen.date() + dt.timedelta(days=1)).isoformat()
         except ValueError:
-            pass  # unparseable stamp — fall through, the change-guard still applies
-    return True, ""
+            pass
+    return (dt.date.fromisoformat(today) + dt.timedelta(days=1)).isoformat()
 
 
 def opening_balance_for(account_type, monarch_balance: float) -> float:
@@ -458,7 +472,6 @@ async def run_sync(db, uid: str, email: str, password: str, mfa_secret: str,
     # rows — anchoring at today would count them twice.
     last_bal = meta.get("lastBalances") or {}
     first_run = not last_bal
-    anchor_date = (dt.date.fromisoformat(today) + dt.timedelta(days=1)).isoformat()
     new_bal, reanchored, balance_skips = {}, [], []
     for mid, (ma, app) in matched.items():
         cur = ma.get("currentBalance")
@@ -473,6 +486,15 @@ async def run_sync(db, uid: str, email: str, password: str, mfa_secret: str,
         if first_run:
             continue  # seed only — never re-anchor everything on the first pass
         if mid in last_bal and float(last_bal[mid]) == cur:
+            continue
+        # The balance is anchored AT ITS OWN DATE, and never behind the stored
+        # anchor: moving an anchor backwards would trade a newer truth for an
+        # older one and multiply same-day edge cases.
+        anchor_date = anchor_when(ma, today)
+        stored_anchor = str(app.get("openingDate") or "")[:10]
+        if stored_anchor and anchor_date < stored_anchor:
+            balance_skips.append(
+                f"{app.get('name')}: balance dated {anchor_date} is older than its anchor {stored_anchor}")
             continue
         opening = opening_balance_for(app.get("type"), cur)
         reanchored.append(f"{app.get('name')}: {opening} @ {anchor_date}")

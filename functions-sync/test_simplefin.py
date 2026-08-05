@@ -307,15 +307,25 @@ class AccountAdapter(unittest.TestCase):
         self.assertEqual(matched, {})
         self.assertEqual(len(ambiguous), 1)
 
-    def test_stale_balance_date_is_not_trusted(self):
+    def test_stale_balance_is_trusted_AT_ITS_OWN_DATE(self):
+        """DESIGN CHANGE 2026-08-04. Staleness used to reject the balance while
+        fresh ones were stamped TOMORROW — the combination that left the owner's
+        Chase anchor $2,000 wrong (a stale value had been stamped with a fresh
+        date, going blind to withdrawals dated in between). A balance is true as
+        of its own date; anchor_when() stamps it there and age stops mattering."""
         now = dt.datetime(2026, 8, 2, 12, tzinfo=dt.timezone.utc)
         fresh = sf.adapt_account({"id": "a", "name": "x", "balance": "1",
                                   "balance-date": int(now.timestamp()) - 3600})
         stale = sf.adapt_account({"id": "a", "name": "x", "balance": "1",
                                   "balance-date": int(now.timestamp()) - 5 * 86400})
         self.assertTrue(sc.balance_is_trustworthy(fresh, now)[0])
-        self.assertFalse(sc.balance_is_trustworthy(stale, now)[0],
-                         "a broken feed reporting 0.00 must never overwrite the anchor")
+        self.assertTrue(sc.balance_is_trustworthy(stale, now)[0])
+        # The date does the work the rejection used to do — one day after the
+        # balance's own day, so rows dated later are counted on top of it.
+        self.assertEqual(sc.anchor_when(fresh, "2026-08-02"), "2026-08-03")
+        self.assertEqual(sc.anchor_when(stale, "2026-08-02"), "2026-07-29")
+        # No stamp at all -> tomorrow, the old behaviour.
+        self.assertEqual(sc.anchor_when({"id": "a"}, "2026-08-02"), "2026-08-03")
 
     def test_debt_balance_keeps_the_apps_positive_owed_convention(self):
         self.assertEqual(sc.opening_balance_for("credit_card",

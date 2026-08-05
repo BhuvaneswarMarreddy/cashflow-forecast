@@ -10,7 +10,6 @@ import Navbar from '@/components/Navbar';
 import AccountsList from '@/components/AccountsList';
 import AccountsDiagnostics from '@/components/AccountsDiagnostics';
 import AccountDetailModal from '@/components/AccountDetailModal';
-import ReconcileSheet from '@/components/ReconcileSheet';
 import AccountTransactions from '@/components/AccountTransactions';
 import SubscriptionsPanel from '@/components/SubscriptionsPanel';
 import BudgetSettingsPanel from '@/components/BudgetSettingsPanel';
@@ -36,7 +35,6 @@ import {
   Building2,
   Banknote,
   X,
-  Check,
   AlertCircle,
   FileText,
   Percent,
@@ -54,7 +52,6 @@ export default function AccountsPage() {
     isLoading: profileLoading, 
     addPaymentAccount, 
     updatePaymentAccount,
-    reconcileAccount,
     reorderPaymentAccounts,
     deletePaymentAccount,
     addIncomeSource,
@@ -108,7 +105,6 @@ export default function AccountsPage() {
   const [showIncomeModal, setShowIncomeModal] = useState(false);
   const [editingAccount, setEditingAccount] = useState<PaymentAccount | null>(null);
   const [graphAccount, setGraphAccount] = useState<PaymentAccount | null>(null);
-  const [reconcileTarget, setReconcileTarget] = useState<PaymentAccount | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [syncErr, setSyncErr] = useState(false);
@@ -183,7 +179,6 @@ export default function AccountsPage() {
     }
   };
 
-  const handleReconcile = (account: PaymentAccount) => setReconcileTarget(account);
 
   // Pulls straight from the banks (10-20s), then reloads so every derived number
   // on the page reflects the new rows and re-anchored balances.
@@ -577,7 +572,12 @@ export default function AccountsPage() {
                             )}
                           </p>
                           <p className="text-sm text-[var(--foreground-secondary)]">
-                            {PAYMENT_METHODS.find((m) => m.value === account.provider)?.label} • {ACCOUNT_TYPES.find((t) => t.value === account.type)?.label}
+                            {(() => {
+                              const provider = PAYMENT_METHODS.find((m) => m.value === account.provider)?.label;
+                              const kind = ACCOUNT_TYPES.find((t) => t.value === account.type)?.label;
+                              // "Bank Account • Bank Account" told the owner nothing twice.
+                              return provider && provider !== kind && provider !== 'Other' ? `${provider} • ${kind}` : kind;
+                            })()}
                           </p>
                           {account.type === 'credit_card' && (
                             <p className="text-xs text-[var(--foreground-muted)]">
@@ -611,7 +611,7 @@ export default function AccountsPage() {
                           </p>
                           {account.openingDate && (
                             <p className="text-xs text-[var(--foreground-muted)]" title="Balances derive from transactions since this date">
-                              anchored {account.openingDate.slice(0, 10)}
+                              as of {account.openingDate.slice(0, 10)}
                             </p>
                           )}
                           {account.creditLimit && (
@@ -621,14 +621,6 @@ export default function AccountsPage() {
                           )}
                         </div>
                         <div className="flex gap-1">
-                          <button
-                            onClick={() => handleReconcile(account)}
-                            title="Reconcile — enter your real balance now"
-                            aria-label={`Reconcile ${account.name}`}
-                            className="p-2.5 min-w-11 min-h-11 sm:p-2 sm:min-w-auto sm:min-h-auto rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors"
-                          >
-                            <Check className="w-4 h-4" />
-                          </button>
                           <button
                             onClick={() => openEditAccount(account)}
                             aria-label={`Edit ${account.name}`}
@@ -1074,20 +1066,6 @@ export default function AccountsPage() {
           account={graphAccount}
           transactions={transactions}
           onClose={() => setGraphAccount(null)}
-        />
-      )}
-
-      {reconcileTarget && (
-        <ReconcileSheet
-          accountName={reconcileTarget.name}
-          inputLabel={reconcileTarget.type === 'credit_card' || reconcileTarget.type === 'personal_loan'
-            ? 'amount you currently owe'
-            : 'real balance right now'}
-          derivedCurrent={reconcileTarget.currentBalance ?? reconcileTarget.openingBalance}
-          onConfirm={async (entered) => {
-            await reconcileAccount(reconcileTarget.id, entered, reconcileTarget.currentBalance ?? reconcileTarget.openingBalance);
-          }}
-          onClose={() => setReconcileTarget(null)}
         />
       )}
 

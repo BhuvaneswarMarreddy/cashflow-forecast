@@ -437,7 +437,6 @@ async def run_simplefin_sync(db, uid: str, access_url: str,
     # openingDate and the bank balance already contains today's rows.
     last_bal = meta.get("lastBalances") or {}
     first_run = not last_bal
-    anchor_date = (dt.date.fromisoformat(today) + dt.timedelta(days=1)).isoformat()
     new_bal, reanchored, balance_skips = {}, [], []
     for sid, (adapted, app) in matched.items():
         cur = adapted.get("currentBalance")
@@ -452,6 +451,14 @@ async def run_simplefin_sync(db, uid: str, access_url: str,
         if first_run:
             continue  # seed only — never re-anchor everything on the first pass
         if sid in last_bal and float(last_bal[sid]) == cur:
+            continue
+        # Anchored at the balance's OWN date (see sync_core.anchor_when), never
+        # behind the stored anchor.
+        anchor_date = sync_core.anchor_when(adapted, today)
+        stored_anchor = str(app.get("openingDate") or "")[:10]
+        if stored_anchor and anchor_date < stored_anchor:
+            balance_skips.append(
+                f"{app.get('name')}: balance dated {anchor_date} is older than its anchor {stored_anchor}")
             continue
         opening = sync_core.opening_balance_for(app.get("type"), cur)
         reanchored.append(f"{app.get('name')}: {opening} @ {anchor_date}")
