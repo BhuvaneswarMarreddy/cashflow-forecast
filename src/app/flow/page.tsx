@@ -21,6 +21,7 @@ import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import { buildFlowGraph, counterpartyRowIds, detectRecurring, projectNetWorth, day, FlowGraph } from '@/lib/flows';
 import { simplifyFlowGraph } from '@/lib/flow-simple';
+import SpendingTree from '@/components/SpendingTree';
 import {
   MONEY_BACK_LANE_IDS, NODE_PADDING_PX, fitLabel, labelMaxChars, nodeDepths, sankeyHeightFor,
 } from '@/lib/flow-lanes';
@@ -45,11 +46,12 @@ import {
 
 const money = (cents: number) => formatMoneyCents(cents);
 
-type Range = 'all' | '2024' | '2025' | '2026' | '12m' | 'month';
+// Three ways to look at time, not six chips: everything, one year, one month.
+// The year list is DERIVED from the ledger — a hard-coded list once hid Dec 2023
+// behind chips that started at 2024.
+type Range = 'all' | 'year' | 'month';
 const RANGES: Array<{ key: Range; label: string }> = [
-  { key: 'all', label: 'All time' }, { key: '2024', label: '2024' },
-  { key: '2025', label: '2025' }, { key: '2026', label: '2026' },
-  { key: '12m', label: 'Last 12 months' }, { key: 'month', label: 'Monthly' },
+  { key: 'all', label: 'All time' }, { key: 'year', label: 'Year' }, { key: 'month', label: 'Month' },
 ];
 
 const shiftMonth = (ym: string, delta: number) => {
@@ -80,21 +82,17 @@ const SANKEY_MIN_WIDTH = 900;
 const SANKEY_MARGIN = { top: 16, right: 230, bottom: 16, left: 16 };
 const SANKEY_NODE_WIDTH = 12;
 
-function periodFor(range: Range, todayISO: string, month: string): { start?: string; end?: string } {
-  if (range === 'all') return {};
+function periodFor(range: Range, month: string, year: string): { start?: string; end?: string } {
   if (range === 'month') return { start: `${month}-01`, end: `${month}-31` };
-  if (range === '12m') {
-    const [y, m] = todayISO.slice(0, 7).split('-').map(Number);
-    const d = new Date(Date.UTC(y, m - 12, 1));
-    return { start: d.toISOString().slice(0, 10) };
-  }
-  return { start: `${range}-01-01`, end: `${range}-12-31` };
+  if (range === 'year') return { start: `${year}-01-01`, end: `${year}-12-31` };
+  return {};
 }
 
 type NodePayload = { label?: string; kind?: FlowColorKey; value?: number; depth?: number };
-type ChartKind = 'sankey' | 'treemap' | 'waterfall';
+type ChartKind = 'sankey' | 'tree' | 'treemap' | 'waterfall';
 const CHART_KINDS: Array<{ key: ChartKind; label: string }> = [
   { key: 'sankey', label: 'Flow' },
+  { key: 'tree', label: 'Spending tree' },
   { key: 'treemap', label: 'Where it went' },
   { key: 'waterfall', label: 'Step by step' },
 ];
@@ -170,6 +168,7 @@ export default function FlowPage() {
   const router = useRouter();
   const [range, setRange] = useState<Range>('all');
   const [month, setMonth] = useState<string>(() => shiftMonth(new Date().toISOString().slice(0, 7), -1));
+  const [year, setYear] = useState<string>(() => String(new Date().getFullYear()));
   // Same sticky-choice rule as Simple|Detailed: your last chart is the default.
   const [chart, setChart] = useState<ChartKind>(() => {
     if (typeof window === 'undefined') return 'sankey';
@@ -260,6 +259,18 @@ export default function FlowPage() {
     return out;
   }, [minMonth, maxMonth]);
 
+  // Every year present in the data, newest → oldest — never a hard-coded list, which
+  // once hid the Dec 2023 rows behind chips that started at 2024.
+  const yearOptions = useMemo(() => {
+    if (maxMonth < minMonth) return [];
+    const out: string[] = [];
+    for (let y = Number(maxMonth.slice(0, 4)); y >= Number(minMonth.slice(0, 4)); y--) out.push(String(y));
+    return out;
+  }, [minMonth, maxMonth]);
+  // The chosen year, snapped into the data: a fresh ledger whose rows end in 2024
+  // must not show an empty chart because the default year is the current one.
+  const effectiveYear = yearOptions.includes(year) ? year : yearOptions[0] ?? year;
+
   // The link-aware half of the lanes, resolved ONCE per (ledger, links) rather than per
   // render — it runs matchTransfers() and the ten-kind ladder, neither of which belongs
   // in a hover.
@@ -268,9 +279,9 @@ export default function FlowPage() {
     [transactions, accounts, links, incomeContext]
   );
   const detailedGraph: FlowGraph = useMemo(
-    () => buildFlowGraph(transactions, accounts, periodFor(range, todayISO, month),
+    () => buildFlowGraph(transactions, accounts, periodFor(range, month, effectiveYear),
       showGross ? {} : { netting, income: incomeContext }),
-    [transactions, accounts, range, todayISO, month, showGross, netting, incomeContext]
+    [transactions, accounts, range, month, effectiveYear, showGross, netting, incomeContext]
   );
   // FIN-FLOW-002: what the charts DRAW. Same graph, fewer names — anything that
   // reasons about raw lane ids (story tiles, queue feed) reads detailedGraph instead,
@@ -500,7 +511,7 @@ export default function FlowPage() {
   // The reconciliation "Now" column actually shows the balance at the END of the selected
   // period. That equals today only when the period runs to (or past) today — for a bounded
   // PAST period it is a historical balance, so label it honestly.
-  const periodEnd = periodFor(range, todayISO, month).end;
+  const periodEnd = periodFor(range, month, effectiveYear).end;
   const balanceColLabel = !periodEnd || periodEnd >= todayISO ? 'Now' : 'Period end';
 
   const rangeButtons = (
@@ -519,6 +530,18 @@ export default function FlowPage() {
           </button>
         ))}
       </div>
+      {range === 'year' && (
+        <select
+          value={effectiveYear}
+          onChange={(e) => setYear(e.target.value)}
+          aria-label="Choose year"
+          className="px-3 py-1.5 text-sm font-medium rounded-lg bg-[var(--background-tertiary)] text-[var(--foreground)] focus:outline-none cursor-pointer"
+        >
+          {yearOptions.map((y) => (
+            <option key={y} value={y} className="bg-[var(--background-secondary)] text-[var(--foreground)]">{y}</option>
+          ))}
+        </select>
+      )}
       {range === 'month' && (
         <div className="flex items-center gap-1 rounded-lg bg-[var(--background-tertiary)] p-1">
           <button
@@ -708,24 +731,39 @@ export default function FlowPage() {
     </div>
   );
 
+  // ONE control, not a row of buttons — the owner's rule: fewer chips, calmer page.
   const chartToggle = (
-    <div role="group" aria-label="Chart type" className="flex gap-1 rounded-lg bg-[var(--background-tertiary)] p-1">
+    <select
+      value={chart}
+      onChange={(e) => {
+        const key = e.target.value as ChartKind;
+        setChart(key);
+        window.localStorage.setItem('flow-chart-kind', key);
+      }}
+      aria-label="Chart type"
+      className="px-3 py-1.5 text-sm font-medium rounded-lg bg-[var(--background-tertiary)] text-[var(--foreground)] focus:outline-none cursor-pointer"
+    >
       {CHART_KINDS.map((c) => (
-        <button
-          key={c.key}
-          onClick={() => { setChart(c.key); window.localStorage.setItem('flow-chart-kind', c.key); }}
-          aria-pressed={chart === c.key}
-          className={`px-3 py-1.5 rounded-md text-sm transition-colors ${chart === c.key
-            ? 'bg-[var(--accent-primary)] text-[#16181c]'
-            : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'}`}
-        >
+        <option key={c.key} value={c.key} className="bg-[var(--background-secondary)] text-[var(--foreground)]">
           {c.label}
-        </button>
+        </option>
       ))}
-    </div>
+    </select>
   );
 
   const chartView = (heightPx: number | '100%') => {
+    if (chart === 'tree') {
+      // Always the DETAILED graph: the tree exists to show every category, so the
+      // Simple view's folded "N smaller categories" must never reach it.
+      return (
+        <div
+          className="overflow-y-auto pr-1"
+          style={{ maxHeight: typeof heightPx === 'number' ? heightPx : '100%' }}
+        >
+          <SpendingTree graph={detailedGraph} transactions={transactions} accounts={accounts} />
+        </div>
+      );
+    }
     if (chart === 'treemap') {
       return (
         <ResponsiveContainer width="100%" height={heightPx}>
@@ -1448,8 +1486,8 @@ export default function FlowPage() {
           <section className="rounded-xl border border-[var(--border-color)] bg-[var(--background-secondary)] p-4 relative">
             <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
               <div className="flex items-center gap-2 flex-wrap">
-                {detailToggle}
                 {chartToggle}
+                {chart === 'sankey' && detailToggle}
                 {chart === 'sankey' && kindChips}
                 {chart === 'sankey' && grossToggle}
               </div>
@@ -1631,7 +1669,7 @@ export default function FlowPage() {
                 </button>
               </div>
             </div>
-            <div className="mb-2 flex items-center gap-2 flex-wrap">{detailToggle}{chartToggle}{chart === 'sankey' && kindChips}{chart === 'sankey' && grossToggle}</div>
+            <div className="mb-2 flex items-center gap-2 flex-wrap">{chartToggle}{chart === 'sankey' && detailToggle}{chart === 'sankey' && kindChips}{chart === 'sankey' && grossToggle}</div>
             <div className="flex-1 min-h-0 overflow-auto rounded-xl border border-[var(--border-color)] bg-[var(--background-secondary)] p-2">
               {/* minHeight keeps the chart usable on short/landscape screens — it scrolls in
                   the overflow-auto parent instead of being crushed to a few pixels. */}
