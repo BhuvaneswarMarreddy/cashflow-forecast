@@ -2,7 +2,7 @@
 
 monarch_sync      daily 07:30 America/Chicago scheduled Monarch -> Firestore sync
 monarch_sync_now  manual trigger, guarded by the SYNC_TRIGGER_KEY shared secret
-simplefin_sync    daily 07:30 America/Chicago scheduled SimpleFIN -> Firestore sync
+simplefin_sync    07:00/13:00/19:00 America/Chicago scheduled SimpleFIN -> Firestore sync
 """
 import asyncio
 import hmac
@@ -91,7 +91,10 @@ def monarch_sync_now(req: https_fn.Request) -> https_fn.Response:
 
 
 @scheduler_fn.on_schedule(
-    schedule="every day 07:30",
+    # Three pickups a day. Bridge refreshes bank data roughly once daily at an hour
+    # it chooses; a single 07:30 poll could sit on yesterday's refresh for a full
+    # day. Morning/midday/evening bounds the staleness the owner sees to hours.
+    schedule="0 7,13,19 * * *",
     timezone=scheduler_fn.Timezone("America/Chicago"),
     secrets=["SIMPLEFIN_ACCESS_URL"],
     memory=options.MemoryOption.MB_512,
