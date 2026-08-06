@@ -1,228 +1,140 @@
-# 💰 CashFlow Forecast
+# CashFlow Forecast
 
-**A Personal Finance Management System for the Next Generation**
+A personal-finance application that answers one question honestly: **where did my money actually go, and what happens to me in the next 90 days?**
 
-> *"If I spend money today, what will happen to me in the next 30-90 days?"*
+**Live:** https://marreddy-cashflow.web.app · **Licence:** MIT
 
-CashFlow Forecast is a forward-looking personal finance application designed specifically for **young adults (20-29 years old)** who want to take control of their finances, build financial resilience, and prepare for economic uncertainties like the potential 2026 recession.
-
-**🌐 Live Application:** https://marreddy-cashflow.web.app
+Built and operated solo against my own real bank data — four institutions, ~1,800 transactions, two years of history. That constraint shapes every decision in here: when a number is wrong, I am the one who notices, and the fix has to be at the root rather than the symptom.
 
 ---
 
-## 📚 Documentation
+## The problem this codebase is really about
 
-This README is the product overview. Deep detail lives in four focused docs:
+Personal-finance apps are easy to build and hard to make *true*. The same $1,200 credit-card payment can plausibly be read as spending, as a transfer, or as both — and if two screens read it differently, the app has quietly lied to its user.
 
-| Doc | What's inside |
-|---|---|
-| **[FLOW_ENGINE.md](FLOW_ENGINE.md)** ⭐ | The money-trace pipeline end-to-end: import → classify → pair → reconcile → visualize, plus the verification guarantees. |
-| **[ARCHITECTURE.md](ARCHITECTURE.md)** | Page-by-page guide, components, the Firestore data model, contexts, project structure, and the Ink & Gold brand. |
-| **[AI.md](AI.md)** | The AI features (decision check, Q&A, monthly insights, receipt scanning) and configuration. |
-| **[CONTRIBUTING.md](CONTRIBUTING.md)** | Setup, environment variables, testing, the deploy gate, admin data ops, and coding conventions. |
+Three defects from this project's history, each found by tracing a single number a user questioned:
 
-### Quick start
+| Symptom | Root cause | Fix |
+|---|---|---|
+| Spending read **$357,639.72** over two years | Bank-provided rows carried no notion of transfers, so every card payment counted as spending *and* as the purchases it settled | A transfer means movement **between the owner's own accounts** — nothing else — matched on the provider's *detailed* category, never its broad one |
+| Earned income lost **half its value** | The first version of that fix trusted the provider's `TRANSFER_IN` label, which it also applies to payroll ACH credits | 18 of 36 paychecks recovered; mistyped inflows also stopped bypassing the review queue |
+| Monthly income off by **$723/month** | The biweekly→monthly formula (×26÷12) was hand-copied across five screens and drifted | One `monthlyIncomeOf()`; five copies deleted |
+
+The architecture below exists to make that class of bug structurally hard.
+
+---
+
+## Four ideas that hold the system together
+
+### 1. Classification is derived on read, never stored
+
+No transaction document ever gains a computed category, meaning, or type. Provider description, amount, id and posted date are immutable; the owner's decisions live *beside* the row in `users/{uid}/reviews/{txnId}`.
+
+This means re-classifying two years of history is a code change, not a migration — and a test asserts the invariant directly, comparing rows byte-for-byte before and after classification runs.
+
+### 2. One interpretation, one total
+
+`interpretTransaction()` is the single answer to "what is this row", returning direction, ledger meaning, financial meaning, and an explicit `counted | excluded` treatment for *each* total — income, expense, forecast, budget. Omission is never accidental.
+
+`sumIncomeCents()` and `sumExpenseCents()` are the only income and spending totals any screen may compute, in integer cents, posted rows only.
+
+> Before this existed, Flow/Analytics/History used the classifier while Calendar/Dashboard/Budgets/Export read the stored type — so a credit-card payment was a transfer on one screen and *both income and expense* on another.
+
+### 3. The app does not guess money into existence
+
+A deposit becomes **earned income** only when it matches an approved income source the owner configured, or the owner confirmed it. Not because it is large, recurring, called "deposit", arrived by Zelle, landed near payday, or was tagged "Paychecks" by an importer.
+
+Everything else is an `unknown_inflow`: **real cash that moves the balance and counts for nothing** in income analytics or forecasts, and appears in a review queue that asks. Two or more matching sources also resolve to unknown — *"yours to decide, not ours to guess."*
+
+Provider categories suggest. `users/{uid}/income` is authoritative.
+
+### 4. The model proposes; the application writes
+
+Every AI action goes through a **closed parser** into a fixed action set, renders as a confirmation card, and is applied only by a button press. The model cannot write to the ledger, cannot name an account (names resolve client-side against the real list, ambiguity renders no button), and cannot supply a figure: when it proposes an income source, the pay amount and cadence are derived from the deposits that actually match — median amount, median gap — because a wrong frequency multiplies income by 2.17×.
+
+The parser rejects rather than truncates or clamps, and runs a prototype-pollution check before reading a single key.
+
+---
+
+## Architecture
+
+```
+Plaid (live, 3×/day)  ─┐
+CSV / statements      ─┼─►  ingest ──►  Firestore (immutable rows)
+Receipt scan          ─┘    │                    │
+                            │                    ├─ reviews/   owner's decisions
+                   fingerprint dedupe            ├─ income/    approved sources
+                   never-guess matching          └─ rules/     mapping rules
+                   balance anchoring                     │
+                                                         ▼
+                                        interpretTransaction()  ← the one engine
+                                                         │
+                        ┌────────────────┬───────────────┼─────────────┐
+                        ▼                ▼               ▼             ▼
+                   Flow (Sankey)    Forecast        Analytics      AI chat
+```
+
+**Stack:** Next.js 16 · React 19 · TypeScript · Firebase (Firestore, Auth, Hosting) · Cloud Functions in both TypeScript and Python · Recharts.
+
+**Ingest** is multi-source and de-duplicating. The same real charge arriving from two providers with different identities is matched on a content fingerprint (account + signed cents, ±3 days, strictly one-to-one) and *enriches* the existing row rather than inserting a twin. Import ids are bijective and content-keyed, so re-importing a cumulative export overwrites instead of duplicating. An account match that is ambiguous demotes **all** its claimants rather than guessing.
+
+**Balance anchoring** re-bases an account's opening balance from the bank's own figure, guarded four ways. It is dated to the balance's *own* timestamp, not to today — a stale balance stamped with a fresh date once put an account $2,000 wrong by going blind to the withdrawals in between.
+
+**The money-flow graph** (`/flow`) turns the ledger into a conserving Sankey: every account node balances, and any residual is explained by a *named* stub rather than silently absorbed. Lanes keep a refund, a cashback credit and a card charge out of the column where paychecks live. The residual category states its own size (*"63 smaller categories"*) instead of hiding a quarter of spending behind the word "other".
+
+Deeper detail: **[FLOW_ENGINE.md](FLOW_ENGINE.md)** · **[ARCHITECTURE.md](ARCHITECTURE.md)** · **[AI.md](AI.md)** · **[docs/DECISIONS.md](docs/DECISIONS.md)**
+
+---
+
+## Verification
+
+**~1,300 tests across four runners**, because the money paths deserve more than one kind of proof:
+
+| Suite | Count | What it protects |
+|---|---|---|
+| Web (Jest) | **1,068** | classification, flow graph, formatting, components |
+| Firestore rules (emulator) | **~180** | per-user isolation, deny-by-default, shape on update |
+| Python (`functions-sync`) | **87** | ingest mapping, sign conventions, dedupe, anchoring |
+| Functions (Jest) | **28** | prompt construction, bounds, callable contracts |
+
+Beyond count, three habits matter more:
+
+- **Invariants are pinned against real exports**, not only synthetic fixtures — the CSV audit replay reconciles to the cent.
+- **Every non-obvious rule carries the measurement that motivated it** in the source comment (`this cost $2,000`, `understated by $723/month`), so the next reader knows what breaks if they "simplify" it.
+- **CI gates in order**, and what deliberately does *not* auto-deploy: Firestore rules ship by a human hand, because a bad ruleset locks you out of your own financial data and the rollback is a console visit, not a git revert.
 
 ```bash
 npm install
-cp .env.example .env.local     # add OPENAI_API_KEY (see CONTRIBUTING.md)
+cp .env.example .env.local     # see CONTRIBUTING.md
 npm run dev                    # http://localhost:3000
-npm test                       # full suite, incl. the CSV audit replay
-npm run deploy                 # gated deploy (tsc + tests + hooks-check → firebase)
+npm test                       # web suite, incl. the CSV audit replay
+npm run test:rules             # Firestore rules against the emulator
 ```
 
 ---
 
-## 🎯 Purpose & Philosophy
+## Security posture
 
-### Core Question
-This app exists to answer **ONE question at any moment**:
-> "If I spend money today, what will happen to me in the next 30-90 days?"
+Read-only financial data, single-owner deployment, and a few rules held firmly:
 
-### Foundational Concepts
-
-| Concept | Explanation |
-|---------|-------------|
-| **Money has TIME** | $100 today ≠ $100 on Feb 5. Every transaction lives on a date. |
-| **Fixed vs Flexible** | Bills ≠ food ≠ Amazon ≠ fun. They must never mix. |
-| **Certainty > Precision** | Estimates are okay. Forecasts beat exact math. Manual override > bank sync. |
-| **Trust the balance, not the flow** | User-entered balances are truth; CSV exports drop rows, so they're authoritative for *flows* only (see [FLOW_ENGINE.md](FLOW_ENGINE.md)). |
-
-### Design Philosophy
-- **Non-judgmental**: Never shames you for spending
-- **Forward-looking**: Shows what's COMING, not just what happened
-- **Decision-focused**: Helps you make choices BEFORE spending
-- **Calm & Clear**: No anxiety-inducing charts or red warnings everywhere
+- Bank credentials and access tokens live in Secret Manager and server-side documents the browser cannot read; the client only ever learns an institution's *name*.
+- Sync status and credentials are deliberately **separate documents**, so a status write can never leak a token.
+- Firestore rules are uid-scoped and deny-by-default, with document shape re-asserted on update.
+- LLM calls sit behind authenticated callables with per-user daily limits — an earlier unauthenticated route was removed, and a post-deploy smoke test asserts it stays gone.
 
 ---
 
-## 👤 Who This Is For
+## Status and honest limitations
 
-### Target Audience: Young Adults (20-29)
+Working: live bank sync, two years of history, the flow graph, forecasting, the review queue, AI chat with confirmations, CSV/statement import for issuers no aggregator reaches (Apple Card, Synchrony).
 
-This app is designed for someone who:
-- Is just starting to manage their own finances
-- Has income (salary, freelance, gig work)
-- Has recurring bills (rent, subscriptions, loans)
-- Wants to see where their money goes
-- Needs to prepare for economic uncertainty
-- Doesn't want a complicated banking app
+Known gaps, stated plainly:
 
-### Common Scenarios This Solves
-
-| Scenario | How This App Helps |
-|----------|-------------------|
-| "Where did every dollar go?" | **Flow page** traces income → accounts → out (see FLOW_ENGINE.md) |
-| "Can I afford to buy this?" | Decision Check Panel simulates spending impact |
-| "When will I run out of money?" | Runway Calculator shows days/months of expenses covered |
-| "I don't know where my money goes" | History page shows spending by category & merchant |
-| "I have too many subscriptions" | Recurring-payment detector on the Flow page |
-| "I'm scared about the recession" | Emergency Fund Panel helps you build 3-6 months buffer |
-| "I get paid Friday, can I survive till then?" | Forecast Timeline shows daily balance projections |
+- Apple Card has **no** aggregator path anywhere — monthly statement import is the only route, by Apple's design.
+- The forecast is deterministic (recurring detection + approved income), not probabilistic.
+- Multi-currency is not modelled yet; the cross-border case (US + India) is designed but unbuilt.
+- Built for one operator. The multi-tenant story — per-user provider credentials, onboarding, billing — is designed, not shipped.
 
 ---
 
-## ✨ Key Features Overview
-
-### 🔀 Money-Flow Trace ⭐
-- Every dollar from income → between accounts → out, as a clickable Sankey
-- Treemap and waterfall views; the waterfall lands on exactly $0 (proof it all adds up)
-- Reconciles to your real net worth to the cent; missing export rows shown as ⚠ nodes
-- → **[FLOW_ENGINE.md](FLOW_ENGINE.md)**
-
-### 🔮 Forward-Looking Forecast
-- See your projected balance for the next 30, 90, 180, or 365 days
-- Know your lowest balance point BEFORE it happens
-- Get warnings before you hit unsafe territory
-
-### 🤖 AI-Powered Insights
-- Ask questions: "Why is next month tight?"
-- Get trend analysis: "Your spending increased 15%"
-- Receive actionable suggestions without judgment
-- → **[AI.md](AI.md)**
-
-### 📊 Smart Transaction Classification
-- Automatically detects transfers (not income/expense)
-- Recognizes credit card payments (reduces debt, not income)
-- Identifies merchants and categories automatically
-
-### 📱 Multi-Platform
-- Full desktop experience
-- Mobile-responsive design
-- Quick-add floating button on mobile
-- Receipt scanner with camera support
-
-### 🔐 Secure & Private
-- Firebase Authentication
-- Data stored in Firestore (your data, your account)
-- No bank connections required
-- Manual control over all data
-
----
-
-## 🛡️ Recession Preparation Guide
-
-### Why This Matters (2026 Preparation)
-
-Economic downturns are cyclical. The app helps you:
-1. **Know Your Runway** - How many months can you survive without income?
-2. **Build Emergency Fund** - Goal: 3-6 months of expenses
-3. **Track Spending** - Know where to cut if needed
-4. **See the Future** - Don't get surprised by bills
-
-### Recommended Actions
-
-| Action | How to Use the App |
-|--------|-------------------|
-| **Build 3-6 month emergency fund** | Use Emergency Fund Panel to track progress |
-| **Reduce unnecessary subscriptions** | Recurring-payment detector on the Flow page |
-| **Track all spending** | Import CSV from all bank accounts |
-| **Know your monthly expenses** | Analytics page shows average spending |
-| **Simulate job loss** | Runway Calculator "what-if" scenarios |
-| **Pay down high-interest debt** | Track balances & APRs; Debt Payoff Planner |
-
-### Emergency Fund Goals
-
-| Safety Level | Months of Expenses | Who Needs This |
-|--------------|-------------------|----------------|
-| Minimum | 1 month | Stable job, dual income |
-| Standard | 3 months | Most people |
-| Comfortable | 6 months | Single income, gig workers |
-| Recession-Ready | 12 months | High-risk job, preparing for downturn |
-
----
-
-## ✅ Recently Added
-
-| Feature | Description | Location |
-|---------|-------------|----------|
-| **Money-Flow Trace (NEW!)** | Full dollar-tracing pipeline + Flow page — Sankey / treemap / waterfall, reconciliation to net worth, recurring detection, 12-month projection | `/flow` — see FLOW_ENGINE.md |
-| **Ink & Gold rebrand** | Gold-coin logo (animated gleam) on graphite surfaces, gold accent, CVD-validated chart palette. Replaces the earlier deep-blue theme | App-wide |
-| **Native Monarch CSV import** | Deterministic ids make monthly re-uploads overwrite instead of duplicate; auto-creates accounts | History → Import CSV |
-| **Transfer detection & pairing** | Internal moves matched leg-to-leg and excluded from income/spending — the feature Monarch lacks | Flow + History |
-| **Planned Payments** | Financial todo list — estimated monthly payments, status tracking, mark-complete to create a transaction | Forecast page |
-| **Category Budgets** | Monthly spending limits per category with real-time tracking and projections | Accounts → Category Budgets |
-| **Bill Reminders** | Auto-generated from card due dates, loans, and recurring transactions (next 14 days) | Forecast page |
-| **Savings Goals** | Track goals with targets, dates, priority, quick-add amounts | Forecast + Accounts |
-| **Debt Payoff Planner** | Snowball & Avalanche calculator: payoff timeline, interest saved, debt-free date | Accounts → Debt Planner |
-| **Excel Export** | Download all data as a multi-sheet .xlsx | Settings → Export Data |
-
-## 🚧 What's Still Missing
-
-### High Priority (Should Add)
-
-| Feature | Description | Why Important |
-|---------|-------------|---------------|
-| **Push Notifications** | Browser/mobile push for bill reminders | Never miss a payment |
-| **Recurring Transaction Templates** | Quick-add common transactions | Faster data entry |
-| **Bank Connection (Plaid)** | Auto-import transactions | Less manual work (optional — manual-first by design) |
-
-### Medium Priority (Nice to Have)
-
-| Feature | Description |
-|---------|-------------|
-| **Multi-Currency Support** | For international users |
-| **Shared Accounts** | Joint finance tracking with partner |
-| **Investment Tracking** | Portfolio value and returns |
-| **Tax Category Tagging** | Mark deductible expenses |
-| **Custom Reports** | Generate spending reports PDF |
-| **Dark/Light Theme Toggle** | User preference |
-
-### Low Priority (Future)
-
-| Feature | Description |
-|---------|-------------|
-| **Mobile App (React Native)** | Native iOS/Android app |
-| **Apple/Google Wallet Integration** | Auto-capture transactions |
-| **Receipt OCR Improvements** | Better extraction accuracy |
-| **Financial Education** | Tips and tutorials |
-| **Community Insights** | Anonymous spending comparisons |
-
-### For Young Adults Specifically
-
-| Feature | Why They Need It |
-|---------|------------------|
-| **Student Loan Tracker** | Track federal/private loan payments |
-| **Rent Split Calculator** | For roommates |
-| **Side Hustle Income Tracker** | Multiple income streams |
-| **"Latte Factor" Calculator** | Show impact of daily small purchases |
-| **First Apartment Checklist** | Budget for moving out |
-| **Credit Score Education** | How spending affects credit |
-
----
-
-## 📜 License
-
-MIT License — Use freely for personal and commercial projects.
-
-## 🙏 Acknowledgments
-
-Built with **Next.js 16**, **React 19**, **Firebase**, **OpenAI GPT-4o-mini**,
-**Recharts**, **Tailwind CSS**, and **Lucide Icons**.
-
----
-
-**Remember:** The goal is not to track every penny. The goal is to **know what's coming**
-and **make confident decisions**.
-
-*Build your safety net. See your future. Control your money.*
+*Author: Bhuvaneswar Marreddy · MIT licensed · built with [Claude Code](https://claude.com/claude-code)*

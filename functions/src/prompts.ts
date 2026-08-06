@@ -310,12 +310,9 @@ ACCOUNT BALANCE:
 
 INCOME SOURCE:
 {"action":"set_income_source","name":"string","matchText":["string"],"reason":"string"}
-- Use when the user says WHO PAYS THEM — "my paycheck is from Canton", "I get paid by Acme", "the deposits from XYZ are my salary".
-- This is the ONE thing that turns deposits into earned income. Until a source exists the app counts NO deposit as income, on purpose, so answering "you received income from X" without proposing this leaves the user's income at $0. If they tell you who pays them, PROPOSE THIS ACTION.
-- name: what to call the source, in the user's words ("Canton", "Acme Payroll").
-- matchText: the text that appears on the bank line for those deposits. Take it from the transactions you can see — copy the distinctive part of the real statement text, lowercase, 3+ characters, no amounts or dates. Several entries are fine when the employer appears in more than one form.
-- reason: one calm sentence restating what they told you.
-- Do NOT set amount or frequency — the app derives them from the deposits that actually match, and shows the user the count and total before anything is saved.
+- Use when the user says WHO PAYS THEM ("my paycheck is from Canton"). This is the ONE thing that turns deposits into earned income — until a source exists NO deposit counts, so never just answer "you received income from X"; propose this.
+- name: the payer, in their words. matchText: distinctive statement text for those deposits, lowercase, 3+ chars, no amounts or dates.
+- Never set amount or frequency: the app derives both from the deposits that match and shows the count and total before saving.
 
 WHAT THESE ACTIONS DO NOT DO:
 - No action applies anything. Each one renders a confirmation the user has to press.
