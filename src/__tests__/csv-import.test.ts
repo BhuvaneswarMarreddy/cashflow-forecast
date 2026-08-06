@@ -24,32 +24,6 @@ function parseCSVLine(line: string): string[] {
   return result;
 }
 
-function detectFormat(headers: string[]): string {
-  const headerStr = headers.join(',').toLowerCase();
-  
-  if (headerStr.includes('principal') && headerStr.includes('interest')) {
-    return 'upstart';
-  }
-  if (headerStr.includes('transaction date') && headerStr.includes('posted date')) {
-    return 'chase';
-  }
-  if (headerStr.includes('debit') && headerStr.includes('credit') && headerStr.includes('trans. date')) {
-    return 'capital_one';
-  }
-  if (headerStr.includes('appears on your statement')) {
-    return 'amex';
-  }
-  if (headerStr.includes('reference number') && headerStr.includes('payee')) {
-    return 'bofa';
-  }
-  if (headerStr.includes('merchant') && headerStr.includes('account')) {
-    return 'monarch';
-  }
-  if (headerStr.includes('original description')) {
-    return 'mint';
-  }
-  return 'generic';
-}
 
 function determineTransactionType(
   amount: number,
@@ -297,7 +271,7 @@ describe('CSV Import', () => {
 // ---------------------------------------------------------------------------
 // These run against the REAL exported functions, not a copy of them.
 // ---------------------------------------------------------------------------
-import { importKey, parseAmount, isTransferCategory, isOutflow, inferAccountFromCsv, inferAccountType } from '@/components/CSVImportModal';
+import { importKey, parseAmount, isTransferCategory, isOutflow, inferAccountFromCsv, inferAccountType, detectFormat } from '@/components/CSVImportModal';
 
 describe('Amount parsing (trust boundary)', () => {
   test('accepts plain and currency-formatted values', () => {
@@ -429,5 +403,39 @@ describe('Account inference from CSV label (auto-create)', () => {
     const a = inferAccountFromCsv('Blue Cash Preferred® (...1001)');
     expect(a.type).toBe('credit_card');
     expect(a.provider).toBe('amex');
+  });
+});
+
+describe('card issuers that export charges as POSITIVE', () => {
+  // Apple Card and Synchrony (Amazon Store Card) follow the card convention, not
+  // the bank one. Reading them the wrong way books a whole statement as income.
+  it('treats an Apple Card purchase as money leaving', () => {
+    expect(isOutflow('apple', 42.5)).toBe(true);
+    expect(isOutflow('apple', -1200)).toBe(false); // a payment to the card
+  });
+
+  it('treats a Synchrony purchase as money leaving', () => {
+    expect(isOutflow('synchrony', 44.37)).toBe(true);
+    expect(isOutflow('synchrony', -500)).toBe(false);
+  });
+
+  it('leaves the bank convention untouched', () => {
+    expect(isOutflow('chase', -42.5)).toBe(true);
+    expect(isOutflow('monarch', -42.5)).toBe(true);
+    expect(isOutflow('chase', 4382.05)).toBe(false); // a paycheck
+  });
+});
+
+describe('issuers no aggregator reaches for this owner', () => {
+  it('recognises an Apple Card export by its Clearing Date column', () => {
+    expect(detectFormat(['transaction date', 'clearing date', 'description', 'merchant', 'category', 'type', 'amount (usd)'])).toBe('apple');
+  });
+
+  it('recognises it by the Amount (USD) column alone', () => {
+    expect(detectFormat(['date', 'description', 'amount (usd)'])).toBe('apple');
+  });
+
+  it('does not mistake a Chase export for Apple', () => {
+    expect(detectFormat(['transaction date', 'post date', 'description', 'category', 'type', 'amount'])).toBe('chase');
   });
 });

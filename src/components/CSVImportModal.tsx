@@ -120,10 +120,64 @@ export function isTransferCategory(category: string): boolean {
  * opposite of Monarch, Chase, Mint and everyone else. Assuming one universal
  * convention books an entire card statement as income.
  */
+/**
+ * Which bank/issuer wrote this file. ONE definition, exported so the tests
+ * exercise the real rules — a private copy in the test file drifted from this
+ * one the moment a new issuer was added.
+ */
+export function detectFormat(headers: string[]): string {
+  const headerStr = headers.join(',').toLowerCase();
+  
+  // Apple's export is identified by two headers nobody else writes together.
+  if (headerStr.includes('clearing date') || headerStr.includes('amount (usd)')) {
+    return 'apple';
+  }
+  if (headerStr.includes('principal') && headerStr.includes('interest') && headerStr.includes('balance')) {
+    return 'upstart';
+  }
+  // Debit+Credit columns before the date rules: Capital One writes them and
+  // Discover never does, so this is the stronger signal. Checked second, a
+  // Capital One export whose first column reads "Trans. Date" was read as
+  // Discover — and Discover's parser has no debit/credit pair to read.
+  if (headerStr.includes('card no') || (headerStr.includes('debit') && headerStr.includes('credit'))) {
+    return 'capital_one';
+  }
+  if (headerStr.includes('trans. date') || headerStr.includes('trans date')) {
+    return 'discover';
+  }
+  // "Post Date" and "Posted Date" are both Chase, depending on the product; the
+  // second spelling used to fall through to the generic reader.
+  if ((headerStr.includes('post date') || headerStr.includes('posted date'))
+      && headerStr.includes('transaction date')) {
+    return 'chase';
+  }
+  if (headerStr.includes('appears on your statement')) {
+    return 'amex';
+  }
+  if (headerStr.includes('reference number') && headerStr.includes('payee')) {
+    return 'bofa';
+  }
+  if (headerStr.includes('merchant') && headerStr.includes('account')) {
+    return 'monarch';
+  }
+  if (headerStr.includes('original description')) {
+    return 'mint';
+  }
+  return 'generic';
+}
+
 export function isOutflow(format: string, signedAmount: number): boolean {
-  const chargesArePositive = format === 'amex' || format === 'discover';
+  const chargesArePositive = CHARGES_POSITIVE.has(format);
   return chargesArePositive ? signedAmount > 0 : signedAmount < 0;
 }
+
+/**
+ * Card issuers that export a PURCHASE as a positive number and a payment as a
+ * negative one — the opposite of Monarch, Chase, Mint and every bank export.
+ * Apple Card and Synchrony (Amazon Store Card) follow the card convention, so
+ * they belong here; getting this wrong books a whole statement as income.
+ */
+const CHARGES_POSITIVE = new Set(['amex', 'discover', 'apple', 'synchrony']);
 
 /** Parses a money cell without trusting it. Returns null when the cell is not money. */
 export function parseAmount(raw: string): number | null {
@@ -148,6 +202,12 @@ const SUPPORTED_FORMATS = [
   { name: 'American Express', columns: ['Date', 'Description', 'Amount', 'Extended Details', 'Appears On Your Statement As'] },
   { name: 'Bank of America', columns: ['Posted Date', 'Reference Number', 'Payee', 'Address', 'Amount'] },
   { name: 'Discover', columns: ['Trans. Date', 'Post Date', 'Description', 'Amount', 'Category'] },
+  // Wallet -> Card Balance -> Statements -> Export Transactions. The ONLY machine
+  // -readable export Apple offers; no aggregator on earth reaches this card.
+  { name: 'Apple Card', columns: ['Transaction Date', 'Clearing Date', 'Description', 'Merchant', 'Category', 'Type', 'Amount (USD)'] },
+  // Synchrony issues the Amazon Store Card; its Plaid integration is unreliable,
+  // so the downloaded activity file is the dependable path.
+  { name: 'Synchrony / Amazon Store Card', columns: ['Date', 'Description', 'Type', 'Amount'] },
   { name: 'Generic', columns: ['Date', 'Description', 'Amount', 'Category'] },
 ];
 
@@ -255,36 +315,6 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
     return 'other';
   };
 
-  // Detect which format the CSV is in
-  const detectFormat = (headers: string[]): string => {
-    const headerStr = headers.join(',').toLowerCase();
-    
-    if (headerStr.includes('principal') && headerStr.includes('interest') && headerStr.includes('balance')) {
-      return 'upstart';
-    }
-    if (headerStr.includes('trans. date') || headerStr.includes('trans date')) {
-      return 'discover';
-    }
-    if (headerStr.includes('card no') || headerStr.includes('debit') && headerStr.includes('credit')) {
-      return 'capital_one';
-    }
-    if (headerStr.includes('post date') && headerStr.includes('transaction date')) {
-      return 'chase';
-    }
-    if (headerStr.includes('appears on your statement')) {
-      return 'amex';
-    }
-    if (headerStr.includes('reference number') && headerStr.includes('payee')) {
-      return 'bofa';
-    }
-    if (headerStr.includes('merchant') && headerStr.includes('account')) {
-      return 'monarch';
-    }
-    if (headerStr.includes('original description')) {
-      return 'mint';
-    }
-    return 'generic';
-  };
 
   const parseCSV = (content: string): ParsedTransaction[] => {
     // xlsx (already a dependency) is a real RFC4180 reader. The previous hand-rolled
