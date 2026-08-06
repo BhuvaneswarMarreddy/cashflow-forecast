@@ -7,6 +7,7 @@ import { useUserProfile } from '@/context/UserProfileContext';
 import { PAYMENT_METHODS, PaymentAccount, IncomeSource, AccountType, PaymentMethod } from '@/types';
 import { currentOf } from '@/lib/accounts';
 import { formatMoney, monthlyIncomeOf } from '@/lib/money';
+import { connectBankWithPlaid, syncNow } from '@/lib/sync-client';
 import {
   TrendingUp,
   CreditCard,
@@ -60,6 +61,10 @@ function OnboardingContent() {
   const [monthlyBudget, setMonthlyBudget] = useState('');
   const [dataLoaded, setDataLoaded] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  // Plaid-first onboarding state
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [connectedBanks, setConnectedBanks] = useState<string[]>([]);
+  const [connectError, setConnectError] = useState('');
   
   // Track counts of existing items to know what's new
   const [existingCounts, setExistingCounts] = useState({
@@ -525,6 +530,38 @@ function OnboardingContent() {
     }
   };
 
+  // THE fast path: connect a bank and let the sync create the accounts, the
+  // balances and up to two years of history. Typing accounts by hand is now the
+  // fallback for what no bank can supply (Apple Card, cash), not the way in.
+  const handleConnectBank = async () => {
+    setConnectError('');
+    setIsConnecting(true);
+    try {
+      const institution = await connectBankWithPlaid();
+      if (institution === null) return; // popup closed — say nothing
+      setConnectedBanks((prev) => [...prev, institution]);
+    } catch (e) {
+      setConnectError(e instanceof Error ? e.message : 'Could not connect that bank.');
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  // Done connecting: pull the data, then land on the dashboard already populated.
+  const handleFinishConnecting = async () => {
+    setIsConnecting(true);
+    setConnectError('');
+    try {
+      await syncNow();
+      await completeOnboarding();
+      router.push('/dashboard');
+    } catch (e) {
+      setConnectError(e instanceof Error ? e.message : 'Connected, but the first sync failed — try Refresh on the Accounts page.');
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
   // Skip all - go directly to dashboard without adding anything
   const handleSkipAll = async () => {
     setIsSaving(true);
@@ -679,15 +716,64 @@ function OnboardingContent() {
                 Welcome to CashFlow, {user?.name?.split(' ')[0]}!
               </h1>
               <p className="text-[var(--foreground-secondary)] mb-8 max-w-md mx-auto">
-                Let&apos;s set up your financial accounts. We&apos;ll start with your bank accounts, then credit cards, loans, and income.
+                Connect a bank and everything sets itself up — your accounts, today&apos;s
+                balances, and up to two years of history. No typing.
               </p>
+
+              {/* The fast path, first and biggest. */}
+              <div className="max-w-md mx-auto mb-6">
+                <button
+                  onClick={handleConnectBank}
+                  disabled={isConnecting || isSaving}
+                  className="btn-primary w-full inline-flex items-center justify-center gap-2 min-h-[52px] text-base disabled:opacity-60"
+                >
+                  {isConnecting ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                      Working…
+                    </>
+                  ) : (
+                    <>
+                      <Building2 className="w-5 h-5" />
+                      {connectedBanks.length ? 'Connect another bank' : 'Connect your bank'}
+                    </>
+                  )}
+                </button>
+
+                {connectedBanks.length > 0 && (
+                  <div className="mt-4 text-left">
+                    <ul className="space-y-1.5 mb-4">
+                      {connectedBanks.map((bank, i) => (
+                        <li key={`${bank}-${i}`} className="flex items-center gap-2 text-sm text-[var(--foreground)]">
+                          <Check className="w-4 h-4 text-[var(--accent-success)]" aria-hidden="true" />
+                          {bank} connected
+                        </li>
+                      ))}
+                    </ul>
+                    <button
+                      onClick={handleFinishConnecting}
+                      disabled={isConnecting}
+                      className="btn-primary w-full inline-flex items-center justify-center gap-2 min-h-[44px] disabled:opacity-60"
+                    >
+                      Done — bring in my data
+                      <ArrowRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+
+                {connectError && (
+                  <p role="alert" className="mt-3 text-sm text-[var(--accent-danger)]">{connectError}</p>
+                )}
+              </div>
+
+              <p className="text-sm text-[var(--foreground-muted)] mb-4">or set up by hand</p>
               <div className="flex flex-col sm:flex-row gap-3 justify-center">
                 <button
                   onClick={() => setCurrentStep('bank-accounts')}
-                  className="btn-primary inline-flex items-center justify-center gap-2"
-                  disabled={isSaving}
+                  className="btn-secondary inline-flex items-center justify-center gap-2"
+                  disabled={isSaving || isConnecting}
                 >
-                  Get Started
+                  Type my accounts
                   <ArrowRight className="w-5 h-5" />
                 </button>
                 <button
