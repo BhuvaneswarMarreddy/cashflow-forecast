@@ -188,6 +188,72 @@ PLAID_DOC_FIELDS = DOC_FIELDS + ("sourceCategory",)
 
 
 # ---------------------------------------------------------------------------
+# Auto-create: a bank you connect IS an account
+# ---------------------------------------------------------------------------
+#
+# The other two sources refuse to guess an account, because they arrive from a
+# batch job where a wrong guess silently misattributes money. Plaid is
+# different in kind: the owner just stood in front of Plaid Link and personally
+# authorised THIS account at THIS bank. That is not a guess, it is a consent
+# record — so a Plaid account that matches nothing gets CREATED rather than
+# skipped. Without this a fresh account had to hand-type every account before
+# any data could land, which is exactly backwards.
+
+PLAID_TYPE_TO_APP = {
+    "credit": "credit_card",
+    "loan": "personal_loan",
+    "depository": "bank_account",
+    "investment": "bank_account",   # app has no brokerage type yet
+    "brokerage": "bank_account",
+}
+
+# institution keyword -> (provider, colour) from PAYMENT_METHODS in src/types.
+PROVIDER_BY_KEYWORD = (
+    ("american express", ("amex", "#006fcf")),
+    ("amex", ("amex", "#006fcf")),
+    ("chase", ("chase", "#117aca")),
+    ("discover", ("discover", "#ff6000")),
+    ("apple", ("apple", "#a2aaad")),
+)
+
+
+def provider_for(institution: str, app_type: str):
+    """(provider, colour). Unknown issuers fall back to the generic bank/other
+    pair rather than inventing a brand."""
+    low = (institution or "").lower()
+    for needle, pair in PROVIDER_BY_KEYWORD:
+        if needle in low:
+            return pair
+    return ("bank-transfer", "#3b82f6") if app_type == "bank_account" else ("other", "#8b949e")
+
+
+def new_account_fields(adapted: dict, raw: dict, institution: str, today: str) -> dict:
+    """The app account doc for a freshly connected Plaid account.
+
+    The anchor is the load-bearing part: openingBalance is TODAY'S REAL balance
+    and openingDate is tomorrow, so the up-to-730 days of history that follow
+    are visible in History/Flow but are NOT re-added on top of a balance that
+    already contains them (deriveAccountBalance counts rows dated >= openingDate).
+    """
+    app_type = PLAID_TYPE_TO_APP.get(str(raw.get("type")), "bank_account")
+    provider, color = provider_for(institution, app_type)
+    name = (raw.get("official_name") or raw.get("name") or "Account").strip()
+    balance = adapted.get("currentBalance")
+    opening = sync_core.opening_balance_for(app_type, float(balance)) if balance is not None else 0.0
+    return {
+        "name": f"{institution} {name}".strip() if institution.lower() not in name.lower() else name,
+        "type": app_type,
+        "provider": provider,
+        "color": color,
+        "lastFourDigits": str(raw.get("mask") or "") or None,
+        "openingBalance": opening,
+        "openingDate": sync_core.anchor_when(adapted, today),
+        "isActive": True,
+        "createdBy": SOURCE,
+    }
+
+
+# ---------------------------------------------------------------------------
 # The sync
 # ---------------------------------------------------------------------------
 
@@ -241,7 +307,8 @@ async def run_plaid_sync(db, uid: str, client_id: str, secret: str,
     removed_ids: list[str] = []
     next_cursors: dict[str, str] = {}
     item_errors: list[str] = []
-    account_owner_item: dict[str, str] = {}
+    raw_by_id: dict[str, dict] = {}
+    institution_by_account: dict[str, str] = {}
     for item_id, item in items.items():
         label = item.get("institution") or item_id[:8]
         try:
@@ -250,7 +317,8 @@ async def run_plaid_sync(db, uid: str, client_id: str, secret: str,
                         "access_token": item["accessToken"]})
             for a in bal.get("accounts") or []:
                 adapted_accounts.append(adapt_pl_account(a, label))
-                account_owner_item[str(a.get("account_id"))] = item_id
+                raw_by_id[str(a.get("account_id"))] = a
+                institution_by_account[str(a.get("account_id"))] = label
             added, removed, next_cursor = _sync_item_transactions(
                 client_id, secret, item["accessToken"], str(item.get("cursor") or ""), post)
             for t in added:
@@ -264,6 +332,36 @@ async def run_plaid_sync(db, uid: str, client_id: str, secret: str,
     matched, unmatched, ambiguous = sync_core.resolve_matches(adapted_accounts, app_accounts)
     if ambiguous:
         log(f"AMBIGUOUS account matches (skipped, never guessed): {ambiguous}")
+
+    # An account the owner personally authorised in Plaid Link, matching nothing
+    # here, is a NEW account — created, not skipped (see the block comment above
+    # new_account_fields). Ambiguous ones are still refused: two app accounts
+    # claiming one Plaid account is a real conflict, and creating a third would
+    # make it worse.
+    created = []
+    for adapted in adapted_accounts:
+        aid = adapted["id"]
+        if aid in matched or adapted["displayName"] in ambiguous:
+            continue
+        raw = raw_by_id.get(aid) or {}
+        fields = new_account_fields(adapted, raw, institution_by_account.get(aid, ""), today)
+        if dry_run:
+            log(f"  would create account {fields['name']!r} "
+                f"({fields['type']}, opening {fields['openingBalance']} @ {fields['openingDate']})")
+            new_id = f"dryrun_{aid[:8]}"
+        else:
+            ref = acc_col.document()
+            ref.set({**fields, "createdAt": gcf.SERVER_TIMESTAMP,
+                     "updatedAt": gcf.SERVER_TIMESTAMP})
+            new_id = ref.id
+        app_account = {"id": new_id, **fields}
+        app_accounts.append(app_account)
+        matched[aid] = (adapted, app_account)
+        created.append(fields["name"])
+    unmatched = [a["displayName"] for a in adapted_accounts if a["id"] not in matched]
+    if created:
+        log(f"created {len(created)} account(s) from Plaid: {created}")
+
     log(f"plaid: {len(matched)} matched / {len(unmatched)} unmatched accounts, "
         f"{sum(len(v) for v in rows_by_account.values())} fetched rows")
 
@@ -419,6 +517,7 @@ async def run_plaid_sync(db, uid: str, client_id: str, secret: str,
         "pendingCleared": len(pending_deletes),
         "skippedUnmatched": skip_unmatched,
         "skippedAlreadySynced": skip_existing,
+        "createdAccounts": created,
         "unmatchedAccounts": sorted(set(unmatched)),
         "ambiguousAccounts": ambiguous,
         "untrustedBalances": balance_skips,

@@ -84,6 +84,46 @@ class LinkToken(unittest.TestCase):
         self.assertNotIn("products", body)
 
 
+class AutoCreateAccounts(unittest.TestCase):
+    """A Plaid account is a CONSENT record — the owner authorised it in Link — so
+    an unmatched one is created, not skipped. The anchor is what keeps 730 days
+    of imported history from being added on top of a balance that contains it."""
+
+    def test_credit_card_account_is_created_with_positive_owed_and_tomorrow_anchor(self):
+        raw = {"account_id": "p1", "name": "Blue Cash Preferred", "mask": "1005",
+               "type": "credit", "balances": {"current": 2568.37}}
+        adapted = plaid_ingest.adapt_pl_account(raw, "American Express")
+        fields = plaid_ingest.new_account_fields(adapted, raw, "American Express", "2026-08-06")
+        self.assertEqual(fields["type"], "credit_card")
+        self.assertEqual(fields["provider"], "amex")
+        self.assertEqual(fields["lastFourDigits"], "1005")
+        self.assertEqual(fields["openingBalance"], 2568.37)   # app stores debt positive
+        self.assertEqual(fields["openingDate"], "2026-08-07")  # day after the balance
+        self.assertTrue(fields["isActive"])
+
+    def test_checking_account_keeps_balance_sign_and_gets_bank_provider(self):
+        raw = {"account_id": "p2", "name": "TOTAL CHECKING", "mask": "0292",
+               "type": "depository", "subtype": "checking",
+               "balances": {"current": 790.19}}
+        adapted = plaid_ingest.adapt_pl_account(raw, "Chase")
+        fields = plaid_ingest.new_account_fields(adapted, raw, "Chase", "2026-08-06")
+        self.assertEqual(fields["type"], "bank_account")
+        self.assertEqual(fields["provider"], "chase")
+        self.assertEqual(fields["openingBalance"], 790.19)
+
+    def test_unknown_issuer_falls_back_rather_than_inventing_a_brand(self):
+        self.assertEqual(plaid_ingest.provider_for("Synchrony Bank", "credit_card")[0], "other")
+        self.assertEqual(plaid_ingest.provider_for("Bank of America", "bank_account")[0], "bank-transfer")
+
+    def test_institution_name_is_not_repeated_in_the_account_name(self):
+        raw = {"account_id": "p3", "name": "Chase Sapphire", "type": "credit",
+               "balances": {"current": 10.0}}
+        adapted = plaid_ingest.adapt_pl_account(raw, "Chase")
+        self.assertEqual(
+            plaid_ingest.new_account_fields(adapted, raw, "Chase", "2026-08-06")["name"],
+            "Chase Sapphire")
+
+
 class SyncWalk(unittest.TestCase):
     def test_cursor_walk_folds_modified_and_collects_removed(self):
         pages = [
