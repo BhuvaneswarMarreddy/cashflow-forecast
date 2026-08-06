@@ -2,11 +2,17 @@
 
 monarch_sync      daily 07:30 America/Chicago scheduled Monarch -> Firestore sync
 monarch_sync_now  manual trigger, guarded by the SYNC_TRIGGER_KEY shared secret
-simplefin_sync    07:00/13:00/19:00 America/Chicago scheduled SimpleFIN -> Firestore sync
 plaid_sync        07:00/13:00/19:00 America/Chicago scheduled Plaid -> Firestore sync
+
+SimpleFIN was RETIRED 2026-08-06. It read MX's once-a-day cache (3-5 day lag,
+no manual refresh possible) and, once Plaid covered the same four banks, every
+one of its 310 rows duplicated a Plaid row while none was unique — $122,194.67
+of phantom money. simplefin.py stays: plaid_ingest imports its mapping and
+fingerprint helpers, and _run_simplefin remains callable by hand if a bank ever
+needs it back.
 plaid_link_token  callable (owner only): Link token, incl. update mode
 plaid_exchange    callable (owner only): public_token -> stored access_token
-sync_now          callable (owner only): on-demand Plaid + SimpleFIN refresh
+sync_now          callable (owner only): on-demand Plaid refresh
 """
 import asyncio
 import hmac
@@ -111,20 +117,6 @@ def monarch_sync_now(req: https_fn.Request) -> https_fn.Response:
                              mimetype="application/json")
 
 
-@scheduler_fn.on_schedule(
-    # Three pickups a day. Bridge refreshes bank data roughly once daily at an hour
-    # it chooses; a single 07:30 poll could sit on yesterday's refresh for a full
-    # day. Morning/midday/evening bounds the staleness the owner sees to hours.
-    schedule="0 7,13,19 * * *",
-    timezone=scheduler_fn.Timezone("America/Chicago"),
-    secrets=["SIMPLEFIN_ACCESS_URL"],
-    memory=options.MemoryOption.MB_512,
-    timeout_sec=540,
-)
-def simplefin_sync(event: scheduler_fn.ScheduledEvent) -> None:
-    _run_simplefin(reraise=True)  # a failed sync must show as a FAILED invocation
-
-
 def _run_plaid(log=print, reraise: bool = False) -> dict:
     return _guarded("plaidSync", lambda db, uid, lg: plaid_ingest.run_plaid_sync(
         db, uid,
@@ -221,20 +213,10 @@ def sync_now(req: https_fn.CallableRequest) -> dict:
     the button already renders, so the client needs no change.
     """
     _require_owner(req)
-    plaid_status = _run_plaid()
-    sf_status = _run_simplefin()
-    merged = {}
-    for k in ("added", "enriched", "pendingLive", "pendingCleared"):
-        merged[k] = int(plaid_status.get(k) or 0) + int(sf_status.get(k) or 0)
-    merged["reanchored"] = list(plaid_status.get("reanchored") or []) + \
-        list(sf_status.get("reanchored") or [])
-    merged["unmatchedAccounts"] = sorted(
-        set(plaid_status.get("unmatchedAccounts") or [])
-        | set(sf_status.get("unmatchedAccounts") or []))
-    merged["lastSuccess"] = plaid_status.get("lastSuccess") or sf_status.get("lastSuccess")
+    status = _run_plaid()
     # Only what the button needs to render; never echo credentials.
-    errors = [e for e in (plaid_status.get("error"), sf_status.get("error")) if e]
-    merged["error"] = "; ".join(errors)
-    return merged
+    return {k: status.get(k) for k in
+            ("added", "enriched", "pendingLive", "pendingCleared", "reanchored",
+             "unmatchedAccounts", "createdAccounts", "lastSuccess", "error")}
 
 
