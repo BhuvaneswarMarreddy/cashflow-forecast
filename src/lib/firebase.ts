@@ -43,7 +43,11 @@ const firebaseConfig = {
   // Custom domain: popup shows the brand, and same-origin auth sidesteps
   // Safari/iOS third-party-cookie blocking. The /__/auth/* handler is served
   // by Firebase Hosting on this domain (verified 200).
-  authDomain: "cashflowforcast.com",
+  // The project's own domain — pre-registered with Google's OAuth client, so
+  // Google sign-in works without console surgery. "cashflowforcast.com" was the
+  // OLD project's custom domain; it is not connected here, and pointing
+  // authDomain at it made every Google sign-in die with redirect_uri_mismatch.
+  authDomain: "marreddy-cashflow.firebaseapp.com",
   projectId: "marreddy-cashflow",
   storageBucket: "marreddy-cashflow.firebasestorage.app",
   messagingSenderId: "958007946272",
