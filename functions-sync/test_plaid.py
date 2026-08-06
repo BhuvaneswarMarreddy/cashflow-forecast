@@ -61,12 +61,12 @@ class Transfers(unittest.TestCase):
                 "personal_finance_category": {"primary": primary, "detailed": detailed}}
 
     def test_transfer_out_becomes_a_transfer_not_an_expense(self):
-        row = plaid_ingest.map_pl_txn(self.pfc("TRANSFER_OUT"), "a", "chase")
+        row = plaid_ingest.map_pl_txn(self.pfc("TRANSFER_OUT", "TRANSFER_OUT_ACCOUNT_TRANSFER"), "a", "chase")
         self.assertEqual(row["type"], "transfer")
         self.assertEqual(row["transferDirection"], "out")
 
     def test_transfer_in_carries_direction_in(self):
-        t = self.pfc("TRANSFER_IN")
+        t = self.pfc("TRANSFER_IN", "TRANSFER_IN_ACCOUNT_TRANSFER")
         t["amount"] = -500.0  # Plaid negative = money arriving
         row = plaid_ingest.map_pl_txn(t, "a", "chase")
         self.assertEqual(row["type"], "transfer")
@@ -93,6 +93,31 @@ class Transfers(unittest.TestCase):
         row = plaid_ingest.map_pl_txn(
             {"transaction_id": "t", "amount": 10, "date": "2026-08-05", "name": "X"}, "a", "p")
         self.assertEqual(row["type"], "expense")
+
+    def test_a_payroll_deposit_plaid_filed_as_TRANSFER_IN_stays_income(self):
+        # Plaid files some direct deposits as TRANSFER_IN. Typing those as
+        # transfers cost the owner 18 of 36 paychecks and hid them from the
+        # unknown-inflow review queue.
+        t = self.pfc("TRANSFER_IN", "TRANSFER_IN_DEPOSIT")
+        t["amount"] = -4351.25
+        row = plaid_ingest.map_pl_txn(t, "a", "chase")
+        self.assertEqual(row["type"], "income")
+        self.assertIsNone(row["transferDirection"])
+
+    def test_zelle_to_a_person_is_real_money_leaving_not_a_transfer(self):
+        row = plaid_ingest.map_pl_txn(
+            self.pfc("TRANSFER_OUT", "TRANSFER_OUT_OTHER_TRANSFER_OUT"), "a", "chase")
+        self.assertEqual(row["type"], "expense")
+
+    def test_atm_cash_is_spending_not_a_transfer(self):
+        row = plaid_ingest.map_pl_txn(
+            self.pfc("TRANSFER_OUT", "TRANSFER_OUT_WITHDRAWAL"), "a", "chase")
+        self.assertEqual(row["type"], "expense")
+
+    def test_moving_money_to_your_own_savings_is_a_transfer(self):
+        row = plaid_ingest.map_pl_txn(
+            self.pfc("TRANSFER_OUT", "TRANSFER_OUT_SAVINGS"), "a", "chase")
+        self.assertEqual(row["type"], "transfer")
 
     def test_transferDirection_is_writable_to_the_doc(self):
         self.assertIn("transferDirection", plaid_ingest.PLAID_DOC_FIELDS)

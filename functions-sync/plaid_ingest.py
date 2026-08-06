@@ -122,19 +122,36 @@ def exchange_public_token(client_id: str, secret: str, public_token: str,
 # for — and a checking->savings move invents spending that never happened.
 # Measured on the owner's first import: 2,087 real rows read as $357,639.72 of
 # "spending" without this, against a true figure a fraction of that size.
-TRANSFER_PRIMARY = ("TRANSFER_IN", "TRANSFER_OUT")
-# LOAN_PAYMENTS is mostly real cost (mortgage, car, student) — only the credit-card
-# settlement inside it is a transfer, so it is matched on the DETAILED value.
-TRANSFER_DETAILED = ("LOAN_PAYMENTS_CREDIT_CARD_PAYMENT",)
+# A TRANSFER is money moving between the OWNER'S OWN accounts. Nothing else.
+#
+# Plaid's TRANSFER_IN/TRANSFER_OUT primaries are far broader than that: they also
+# cover payroll ACH credits, Zelle to a person, remittances and ATM cash. Trusting
+# the primary cost 18 of the owner's 36 paychecks — Plaid filed them as TRANSFER_IN,
+# so they stopped counting as income and the earned-income total lost half its
+# value. Worse, a mistyped inflow never reaches the unknown-inflow review queue,
+# so nobody is ever asked about it.
+#
+# The DETAILED value is the one that actually says "own account", so the whitelist
+# is detailed-only. Anything outside it stays income/expense and the app's engine
+# decides what it means — approved income source, person, or an unknown inflow the
+# queue will ask about.
+TRANSFER_DETAILED = (
+    "TRANSFER_IN_ACCOUNT_TRANSFER",
+    "TRANSFER_IN_SAVINGS",
+    "TRANSFER_IN_INVESTMENT_AND_RETIREMENT_FUNDS",
+    "TRANSFER_OUT_ACCOUNT_TRANSFER",
+    "TRANSFER_OUT_SAVINGS",
+    "TRANSFER_OUT_INVESTMENT_AND_RETIREMENT_FUNDS",
+    # Paying your own card is the same money moving, counted twice otherwise.
+    "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT",
+)
 
 
 def is_transfer_pfc(category) -> bool:
-    """True when Plaid's own categoriser says this row is money MOVING, not spent."""
+    """True only when Plaid names an OWN-ACCOUNT movement — see TRANSFER_DETAILED."""
     if not isinstance(category, dict):
         return False
-    primary = str(category.get("primary") or "").upper()
-    detailed = str(category.get("detailed") or "").upper()
-    return primary in TRANSFER_PRIMARY or detailed in TRANSFER_DETAILED
+    return str(category.get("detailed") or "").upper() in TRANSFER_DETAILED
 
 
 def prettify_pfc(category) -> str | None:
