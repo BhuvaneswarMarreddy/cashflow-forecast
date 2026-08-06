@@ -20,7 +20,7 @@ import { deriveAccountBalance, withDerivedBalances, monthlyAverages } from '@/li
 import { matchTransfers } from '@/lib/transfers';
 import { interpretTransaction } from '@/lib/classify';
 import { currentOf } from '@/lib/accounts';
-import { syncNow, describeSync } from '@/lib/sync-client';
+import { syncNow, describeSync, connectBankWithPlaid } from '@/lib/sync-client';
 import { useAccountsObservability } from '@/lib/obs/useAccountsObservability';
 import { safeSyncResult } from '@/lib/obs/sync-metadata';
 import {
@@ -179,6 +179,22 @@ export default function AccountsPage() {
     }
   };
 
+
+  // Plaid Link: connect a new bank. The popup is Plaid's own; we get back only
+  // the institution name. First data arrives on the next refresh (Plaid needs
+  // a moment to prepare history after linking), so one is kicked off after.
+  const handleConnectBank = async () => {
+    setSyncErr(false); setSyncMsg(null);
+    try {
+      const institution = await connectBankWithPlaid();
+      if (institution === null) return; // user closed the popup — say nothing
+      setSyncMsg(`${institution} connected — pulling your data…`);
+      await handleRefresh();
+    } catch (e) {
+      setSyncErr(true);
+      setSyncMsg(e instanceof Error ? e.message : 'Could not connect the bank.');
+    }
+  };
 
   // Pulls straight from the banks (10-20s), then reloads so every derived number
   // on the page reflects the new rows and re-anchored balances.
@@ -411,15 +427,26 @@ export default function AccountsPage() {
             </p>
           </div>
           <div className="sm:text-right">
-            <button
-              onClick={handleRefresh}
-              disabled={syncing}
-              aria-label="Refresh balances and transactions from your banks"
-              className="btn-secondary inline-flex items-center gap-2 min-h-[44px] disabled:opacity-60"
-            >
-              <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} aria-hidden="true" />
-              {syncing ? 'Refreshing…' : 'Refresh from banks'}
-            </button>
+            <div className="inline-flex items-center gap-2 flex-wrap">
+              <button
+                onClick={handleConnectBank}
+                disabled={syncing}
+                aria-label="Connect a bank through Plaid"
+                className="btn-secondary inline-flex items-center gap-2 min-h-[44px] disabled:opacity-60"
+              >
+                <Plus className="w-4 h-4" aria-hidden="true" />
+                Connect bank
+              </button>
+              <button
+                onClick={handleRefresh}
+                disabled={syncing}
+                aria-label="Refresh balances and transactions from your banks"
+                className="btn-secondary inline-flex items-center gap-2 min-h-[44px] disabled:opacity-60"
+              >
+                <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} aria-hidden="true" />
+                {syncing ? 'Refreshing…' : 'Refresh from banks'}
+              </button>
+            </div>
             {syncMsg && (
               <p role="status" aria-live="polite"
                  className={`text-xs mt-1.5 ${syncErr ? 'text-[var(--accent-danger)]' : 'text-[var(--foreground-muted)]'}`}>
