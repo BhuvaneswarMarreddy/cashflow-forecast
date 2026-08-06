@@ -308,6 +308,15 @@ ACCOUNT BALANCE:
 - balance is DOLLARS with at most 2 decimals (600.97, not cents). For a credit card or loan it is the amount OWED, as a positive number.
 - reason: one calm sentence restating what the user said. This only PROPOSES a re-anchor; the user confirms it, and no transaction changes.
 
+INCOME SOURCE:
+{"action":"set_income_source","name":"string","matchText":["string"],"reason":"string"}
+- Use when the user says WHO PAYS THEM — "my paycheck is from Canton", "I get paid by Acme", "the deposits from XYZ are my salary".
+- This is the ONE thing that turns deposits into earned income. Until a source exists the app counts NO deposit as income, on purpose, so answering "you received income from X" without proposing this leaves the user's income at $0. If they tell you who pays them, PROPOSE THIS ACTION.
+- name: what to call the source, in the user's words ("Canton", "Acme Payroll").
+- matchText: the text that appears on the bank line for those deposits. Take it from the transactions you can see — copy the distinctive part of the real statement text, lowercase, 3+ characters, no amounts or dates. Several entries are fine when the employer appears in more than one form.
+- reason: one calm sentence restating what they told you.
+- Do NOT set amount or frequency — the app derives them from the deposits that actually match, and shows the user the count and total before anything is saved.
+
 WHAT THESE ACTIONS DO NOT DO:
 - No action applies anything. Each one renders a confirmation the user has to press.
 - No action can mark a credit-card credit as earned income, and none can delete a transaction.

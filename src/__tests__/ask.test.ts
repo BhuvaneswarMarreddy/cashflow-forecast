@@ -4,7 +4,7 @@
  * keyed differently — and quietly answers about a DIFFERENT set of rows than the ones
  * on screen. These pin the facts into the sentence.
  */
-import { askAboutNode, askAboutTransaction } from '@/lib/ask';
+import { askAboutNode, askAboutTransaction, matchIncomeDeposits } from '@/lib/ask';
 
 const row = (o: Partial<Parameters<typeof askAboutNode>[1][number]>) => ({
   date: '2026-03-01', amount: 100, ...o,
@@ -103,5 +103,38 @@ describe('askAboutTransaction — one row, plus the neighbours that make follow-
     const other = t('x', '2026-08-02', 99, { accountId: 'other' });
     const q = askAboutTransaction(ALL[1] as never, acct, [...ALL, other] as never);
     expect(q).not.toContain('M-x');
+  });
+});
+
+describe('matchIncomeDeposits', () => {
+  const t = (date: string, amount: number, title: string, type = 'income') =>
+    ({ date, amount, type, title }) as never;
+
+  it('derives biweekly cadence and a median amount from the rows, not from the model', () => {
+    const rows = [
+      t('2026-06-05', 4382.05, 'CANTON PAYROLL PPD'),
+      t('2026-06-19', 4382.05, 'CANTON PAYROLL PPD'),
+      t('2026-07-03', 9000.00, 'CANTON PAYROLL PPD'), // a bonus must not move the median
+      t('2026-07-17', 4382.05, 'CANTON PAYROLL PPD'),
+    ];
+    const s = matchIncomeDeposits(rows, ['canton']);
+    expect(s.count).toBe(4);
+    expect(s.frequency).toBe('biweekly');
+    expect(s.amount).toBe(4382.05);
+    expect(s.total).toBe(22146.15);
+    expect(s.latest).toBe('2026-07-17');
+  });
+
+  it('counts only INCOME rows — a payment to the same payee is not a paycheck', () => {
+    const rows = [t('2026-06-05', 4382.05, 'CANTON PAYROLL'), t('2026-06-06', 50, 'CANTON CAFE', 'expense')];
+    expect(matchIncomeDeposits(rows, ['canton']).count).toBe(1);
+  });
+
+  it('returns zero matches rather than guessing when nothing matches', () => {
+    expect(matchIncomeDeposits([t('2026-06-05', 100, 'ACME')], ['canton']).count).toBe(0);
+  });
+
+  it('a single deposit falls back to monthly rather than inventing a cadence', () => {
+    expect(matchIncomeDeposits([t('2026-06-05', 4382.05, 'CANTON')], ['canton']).frequency).toBe('monthly');
   });
 });

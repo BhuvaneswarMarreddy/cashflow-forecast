@@ -30,6 +30,12 @@ export async function syncNow(): Promise<SyncResult> {
 // callable and gets back only the institution name.
 // ---------------------------------------------------------------------------
 
+interface PlaidHandler {
+  open: () => void;
+  /** Removes Link's iframes. Not optional in practice — see ONE_AT_A_TIME below. */
+  destroy: () => void;
+}
+
 declare global {
   interface Window {
     Plaid?: {
@@ -37,9 +43,28 @@ declare global {
         token: string;
         onSuccess: (publicToken: string, metadata: { institution?: { name?: string } }) => void;
         onExit: (err: unknown) => void;
-      }) => { open: () => void };
+      }) => PlaidHandler;
     };
   }
+}
+
+/**
+ * ONE_AT_A_TIME. Plaid.create() appends its own iframes to the document; calling
+ * it again without destroying the previous handler leaves TWO overlapping Link
+ * instances, and the older one steals focus from the visible one — typing into
+ * the phone or bank-search field then does nothing and the caret vanishes. So
+ * exactly one handler exists at a time, and it is destroyed on success, on exit,
+ * and before any new one is created.
+ */
+let activeHandler: PlaidHandler | null = null;
+
+function closeActiveLink(): void {
+  try {
+    activeHandler?.destroy();
+  } catch {
+    // destroy() on an already-torn-down handler is not a failure worth surfacing
+  }
+  activeHandler = null;
 }
 
 const PLAID_LINK_SRC = 'https://cdn.plaid.com/link/v2/stable/link-initialize.js';
@@ -72,10 +97,13 @@ export async function connectBankWithPlaid(itemId?: string): Promise<string | nu
   await loadPlaidScript();
   if (!window.Plaid) throw new Error('Plaid Link did not initialize.');
 
+  closeActiveLink(); // never let two Link instances exist at once
+
   return new Promise((resolve, reject) => {
-    window.Plaid!.create({
+    const handler = window.Plaid!.create({
       token: linkToken,
       onSuccess: (publicToken, metadata) => {
+        closeActiveLink();
         httpsCallable(fns, 'plaid_exchange')({
           publicToken,
           institution: metadata?.institution?.name ?? 'Bank',
@@ -83,8 +111,13 @@ export async function connectBankWithPlaid(itemId?: string): Promise<string | nu
           .then((r) => resolve((r.data as { institution?: string })?.institution ?? 'Bank'))
           .catch(reject);
       },
-      onExit: () => resolve(null),
-    }).open();
+      onExit: () => {
+        closeActiveLink();
+        resolve(null);
+      },
+    });
+    activeHandler = handler;
+    handler.open();
   });
 }
 

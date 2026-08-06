@@ -15,6 +15,55 @@
 export const ASK_EVENT = 'cashflow:ask';
 
 /** Phrase the question for the owner and open the chat with it. */
+/**
+ * The deposits an income-source proposal would actually claim, and what they say
+ * about pay size and cadence.
+ *
+ * The MODEL never supplies amount or frequency — it cannot count, and a wrong
+ * frequency silently multiplies the owner's income (biweekly vs monthly is a
+ * 2.17x error). The rows do: median deposit for the amount, median gap between
+ * consecutive deposits for the cadence. Median, not mean, so one bonus or one
+ * missed fortnight cannot move it.
+ */
+export function matchIncomeDeposits(
+  transactions: ReadonlyArray<{ date: string; amount: number; type: string; title?: string; description?: string; merchant?: string }>,
+  matchText: readonly string[]
+): { count: number; total: number; amount: number; frequency: 'weekly' | 'biweekly' | 'monthly' | 'yearly'; latest?: string } {
+  const needles = matchText.map((m) => m.toLowerCase()).filter(Boolean);
+  const hay = (t: { title?: string; description?: string; merchant?: string }) =>
+    `${t.title ?? ''} ${t.description ?? ''} ${t.merchant ?? ''}`.toLowerCase();
+  const hits = transactions
+    .filter((t) => t.type === 'income' && needles.some((n) => hay(t).includes(n)))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const median = (xs: number[]) => {
+    if (!xs.length) return 0;
+    const s = [...xs].sort((a, b) => a - b);
+    const mid = Math.floor(s.length / 2);
+    return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+  };
+  const amount = Math.round(median(hits.map((t) => t.amount)) * 100) / 100;
+  const gaps: number[] = [];
+  for (let i = 1; i < hits.length; i += 1) {
+    const days = (Date.parse(hits[i].date.slice(0, 10)) - Date.parse(hits[i - 1].date.slice(0, 10))) / 86_400_000;
+    if (days > 0) gaps.push(days);
+  }
+  const gap = median(gaps);
+  // Bands, not exact numbers: real paydays drift over weekends and holidays.
+  const frequency = !gap ? 'monthly'
+    : gap <= 10 ? 'weekly'
+    : gap <= 20 ? 'biweekly'
+    : gap <= 45 ? 'monthly'
+    : 'yearly';
+  return {
+    count: hits.length,
+    total: Math.round(hits.reduce((s, t) => s + t.amount, 0) * 100) / 100,
+    amount,
+    frequency,
+    latest: hits.length ? hits[hits.length - 1].date.slice(0, 10) : undefined,
+  };
+}
+
 export function askAbout(question: string): void {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new CustomEvent(ASK_EVENT, { detail: question }));

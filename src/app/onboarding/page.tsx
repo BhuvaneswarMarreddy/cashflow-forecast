@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useUserProfile } from '@/context/UserProfileContext';
+import { useTransactions } from '@/context/TransactionContext';
 import { PAYMENT_METHODS, PaymentAccount, IncomeSource, AccountType, PaymentMethod } from '@/types';
 import { currentOf } from '@/lib/accounts';
 import { formatMoney, monthlyIncomeOf } from '@/lib/money';
@@ -46,8 +47,10 @@ function OnboardingContent() {
     addIncomeSource,
     deleteIncomeSource,
     updateProfile,
-    completeOnboarding 
+    completeOnboarding,
+    refreshProfile,
   } = useUserProfile();
+  const { refreshTransactions } = useTransactions();
   const router = useRouter();
   const searchParams = useSearchParams();
   const isContinuing = searchParams?.get('continue') === 'true';
@@ -553,6 +556,10 @@ function OnboardingContent() {
     setConnectError('');
     try {
       await syncNow();
+      // The sync wrote accounts and rows SERVER-side; the client is still holding
+      // the empty snapshot it cached at signup. Pull both before navigating, or
+      // the dashboard opens on "0 accounts / 0 transactions" from localStorage.
+      await Promise.all([refreshProfile(), refreshTransactions()]);
       await completeOnboarding();
       router.push('/dashboard');
     } catch (e) {

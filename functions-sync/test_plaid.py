@@ -52,6 +52,52 @@ class MapTxn(unittest.TestCase):
         self.assertEqual(row["description"], "ZELLE TO LOK JULY")
 
 
+class Transfers(unittest.TestCase):
+    """Movement is not spending. A card payment counted as an expense is charged
+    twice — once as the payment, once as the purchases it settled."""
+
+    def pfc(self, primary, detailed=""):
+        return {"transaction_id": "t", "amount": 500.0, "date": "2026-08-05", "name": "X",
+                "personal_finance_category": {"primary": primary, "detailed": detailed}}
+
+    def test_transfer_out_becomes_a_transfer_not_an_expense(self):
+        row = plaid_ingest.map_pl_txn(self.pfc("TRANSFER_OUT"), "a", "chase")
+        self.assertEqual(row["type"], "transfer")
+        self.assertEqual(row["transferDirection"], "out")
+
+    def test_transfer_in_carries_direction_in(self):
+        t = self.pfc("TRANSFER_IN")
+        t["amount"] = -500.0  # Plaid negative = money arriving
+        row = plaid_ingest.map_pl_txn(t, "a", "chase")
+        self.assertEqual(row["type"], "transfer")
+        self.assertEqual(row["transferDirection"], "in")
+
+    def test_credit_card_payment_is_a_transfer_via_the_detailed_value(self):
+        row = plaid_ingest.map_pl_txn(
+            self.pfc("LOAN_PAYMENTS", "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT"), "a", "chase")
+        self.assertEqual(row["type"], "transfer")
+
+    def test_other_loan_payments_stay_a_real_cost(self):
+        # a car or student loan payment IS money leaving for good
+        row = plaid_ingest.map_pl_txn(
+            self.pfc("LOAN_PAYMENTS", "LOAN_PAYMENTS_CAR_PAYMENT"), "a", "chase")
+        self.assertEqual(row["type"], "expense")
+        self.assertIsNone(row["transferDirection"])
+
+    def test_ordinary_spending_is_untouched(self):
+        row = plaid_ingest.map_pl_txn(self.pfc("FOOD_AND_DRINK"), "a", "chase")
+        self.assertEqual(row["type"], "expense")
+        self.assertIsNone(row["transferDirection"])
+
+    def test_missing_category_never_guesses_transfer(self):
+        row = plaid_ingest.map_pl_txn(
+            {"transaction_id": "t", "amount": 10, "date": "2026-08-05", "name": "X"}, "a", "p")
+        self.assertEqual(row["type"], "expense")
+
+    def test_transferDirection_is_writable_to_the_doc(self):
+        self.assertIn("transferDirection", plaid_ingest.PLAID_DOC_FIELDS)
+
+
 class AdaptAccount(unittest.TestCase):
     def test_credit_balance_flips_to_liability_negative_convention(self):
         a = plaid_ingest.adapt_pl_account(

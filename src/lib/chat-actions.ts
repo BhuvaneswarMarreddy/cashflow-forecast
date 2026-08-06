@@ -82,6 +82,11 @@ export type ChatAction =
   /** Proposes a balance re-anchor. accountName resolves CLIENT-side against the
    *  owner's real account list; an ambiguous or unknown name renders no button. */
   | { action: 'set_account_balance'; accountName: string; balance: number; reason: string }
+  /** Proposes an APPROVED INCOME SOURCE. Until one exists the engine calls no
+   *  deposit income — deliberately, since guessing is what inflated the old
+   *  figures. amount/frequency are DERIVED client-side from the deposits that
+   *  actually match, never taken from the model. */
+  | { action: 'set_income_source'; name: string; matchText: string[]; reason: string }
   | RecoveryAction;
 
 /**
@@ -472,6 +477,23 @@ export function parseChatAction(raw: unknown, ctx?: RecoveryContext): ChatAction
     if (!accountName || !reason) return null;
     if (typeof balance !== 'number' || !Number.isFinite(balance) || Math.abs(balance) > 5_000_000) return null;
     return { action: 'set_account_balance', accountName, balance: Math.round(balance * 100) / 100, reason };
+  }
+
+  if (action === 'set_income_source') {
+    const o = record(raw, ['action', 'name', 'matchText', 'reason']);
+    if (!o) return null;
+    const name = str(o.name, MAX.str);
+    const reason = str(o.reason, MAX.explanation);
+    if (!name || !reason) return null;
+    // A 1-2 character alias matches nearly every statement line, which would turn
+    // one sloppy source into "everything is my salary" — the same MIN_ALIAS floor
+    // classify.ts enforces, applied before the proposal is ever shown.
+    const raws = Array.isArray(o.matchText) ? o.matchText : [o.matchText];
+    const matchText = [...new Set(
+      raws.map((x) => (str(x, MAX.str) ?? '').toLowerCase()).filter((x) => x.length >= 3)
+    )].slice(0, 12);
+    if (!matchText.length) return null;
+    return { action: 'set_income_source', name, matchText, reason };
   }
 
   if (action in CANDIDATE_ACTIONS || action in TRANSACTION_ACTIONS) {

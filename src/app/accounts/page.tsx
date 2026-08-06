@@ -59,8 +59,9 @@ export default function AccountsPage() {
     deleteIncomeSource,
     updateProfile,
     incomeContext,
+    refreshProfile,
   } = useUserProfile();
-  const { transactions, isLoading: transactionsLoading, error: transactionsError } = useTransactions();
+  const { transactions, isLoading: transactionsLoading, error: transactionsError, refreshTransactions } = useTransactions();
   const router = useRouter();
   
   const [activeTab, setActiveTab] = useState<'accounts' | 'subscriptions' | 'spending' | 'transfers' | 'income' | 'budget' | 'budgets' | 'debt'>('accounts');
@@ -208,7 +209,9 @@ export default function AccountsPage() {
       // Counters only — safeSyncResult() strips everything the callable did not
       // already whitelist, and would strip an access URL if one ever appeared.
       obs.trackRefreshResult({ ok: !r.error, counts: safeSyncResult(r as Record<string, unknown>).counters });
-      if (!r.error) setTimeout(() => window.location.reload(), 1200);
+      // Pull the server-written accounts/rows into the client. A full page reload
+      // would re-serve the stale localStorage snapshot first and flash "0 accounts".
+      if (!r.error) await Promise.all([refreshProfile(), refreshTransactions()]);
     } catch (e) {
       setSyncErr(true);
       setSyncMsg(e instanceof Error ? e.message : 'Refresh failed — try again.');

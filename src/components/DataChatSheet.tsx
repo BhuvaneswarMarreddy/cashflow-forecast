@@ -9,8 +9,9 @@ import { describeRule, rulePreview, MappingRule, NewMappingRule } from '@/lib/ma
 import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import { formatMoney } from '@/lib/money';
+import { matchIncomeDeposits } from '@/lib/ask';
 import { currentOf } from '@/lib/accounts';
-import { PaymentAccount, displayCategory } from '@/types';
+import { PaymentAccount, Transaction, displayCategory } from '@/types';
 
 /**
  * "Ask about your data" — the owner types plain English ("anything from Instacart is
@@ -37,6 +38,8 @@ interface ChatMessage {
   rule?: NewMappingRule;
   /** Set when the assistant proposed a balance re-anchor — renders that card. */
   balance?: { accountName: string; balance: number };
+  /** Set when the assistant proposed an approved income source. */
+  income?: { name: string; matchText: string[] };
   status?: 'pending' | 'applied';
 }
 
@@ -62,7 +65,7 @@ export default function DataChatSheet({ open, onClose, seed }: {
   seed?: string;
 }) {
   const { transactions, addRule } = useTransactions();
-  const { profile, reconcileAccount } = useUserProfile();
+  const { profile, reconcileAccount, addIncomeSource } = useUserProfile();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -172,6 +175,11 @@ export default function DataChatSheet({ open, onClose, seed }: {
                 balance: { accountName: reply.accountName, balance: reply.balance },
                 status: 'pending',
               })
+          : reply?.action === 'set_income_source'
+            ? mk('assistant', reply.reason, {
+                income: { name: reply.name, matchText: reply.matchText },
+                status: 'pending',
+              })
             : mk('assistant', explanation
               || "I got a reply I couldn't read. Try saying it as a rule — for example “Turo is Travel”."),
       ]);
@@ -201,7 +209,7 @@ export default function DataChatSheet({ open, onClose, seed }: {
   };
 
   const dismiss = (id: string) =>
-    setMessages((prev) => prev.map((x) => (x.id === id ? { ...x, rule: undefined, balance: undefined, status: undefined } : x)));
+    setMessages((prev) => prev.map((x) => (x.id === id ? { ...x, rule: undefined, balance: undefined, income: undefined, status: undefined } : x)));
 
   /** THE one path from a balance proposal to the store — a button press, same
    *  reconcile() the accounts screen used before its manual knob was removed. */
@@ -215,6 +223,32 @@ export default function DataChatSheet({ open, onClose, seed }: {
       setMessages((prev) => [
         ...prev.map((x) => (x.id === m.id ? { ...x, status: 'applied' as const } : x)),
         mk('assistant', `Saved — ${account.name} reads ${formatMoney(m.balance!.balance, profile?.currency, 2)} as of today. No transaction changed.`),
+      ]);
+    } catch {
+      setMessages((prev) => [...prev, mk('assistant', 'That could not be saved. Please try again.')]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Income proposal -> an APPROVED SOURCE. amount/frequency come from the rows
+   *  that match, never from the model — see matchIncomeDeposits(). */
+  const applyIncome = async (m: ChatMessage) => {
+    if (!m.income || busy) return;
+    const stats = matchIncomeDeposits(transactions, m.income.matchText);
+    if (!stats.count) return;
+    setBusy(true);
+    try {
+      await addIncomeSource({
+        name: m.income.name,
+        amount: stats.amount,
+        frequency: stats.frequency,
+        isActive: true,
+        matchAliases: m.income.matchText,
+      });
+      setMessages((prev) => [
+        ...prev.map((x) => (x.id === m.id ? { ...x, status: 'applied' as const } : x)),
+        mk('assistant', `Saved — ${stats.count} deposit${stats.count === 1 ? '' : 's'} now count as income from ${m.income!.name}, about ${formatMoney(stats.amount, profile?.currency, 2)} ${stats.frequency}.`),
       ]);
     } catch {
       setMessages((prev) => [...prev, mk('assistant', 'That could not be saved. Please try again.')]);
@@ -302,6 +336,17 @@ export default function DataChatSheet({ open, onClose, seed }: {
             }`}>
               <p className="whitespace-pre-wrap break-words">{m.text}</p>
               {m.rule && <RulePreviewCard rule={m.rule} pending={m.status === 'pending'} busy={busy} money={money} onApply={() => apply(m)} onCancel={() => dismiss(m.id)} />}
+              {m.income && (
+                <IncomeProposalCard
+                  proposal={m.income}
+                  transactions={transactions}
+                  currency={profile?.currency}
+                  pending={m.status === 'pending'}
+                  busy={busy}
+                  onApply={() => applyIncome(m)}
+                  onCancel={() => dismiss(m.id)}
+                />
+              )}
               {m.balance && (
                 <BalanceProposalCard
                   proposal={m.balance}
@@ -413,6 +458,63 @@ function RulePreviewCard({ rule, pending, busy, money, onApply, onCancel }: {
  * numbers, and what does NOT change. An unknown or ambiguous account name gets
  * words and no button — the model picked the name, the owner's list decides.
  */
+/**
+ * "Those deposits are my paycheck" — shown BEFORE anything is saved, with the
+ * count and total of the rows it would claim. The owner is confirming a fact
+ * about their own money, so the card states the evidence rather than asserting
+ * a conclusion: how many deposits matched, how much they add up to, and the
+ * pay size and cadence DERIVED from them (never from the model).
+ */
+function IncomeProposalCard({ proposal, transactions, currency, pending, busy, onApply, onCancel }: {
+  proposal: { name: string; matchText: string[] };
+  transactions: Transaction[];
+  currency?: string;
+  pending: boolean;
+  busy: boolean;
+  onApply: () => void;
+  onCancel: () => void;
+}) {
+  const stats = matchIncomeDeposits(transactions, proposal.matchText);
+  const m2 = (n: number) => formatMoney(n, currency, 2);
+  if (!stats.count) {
+    return (
+      <p className="mt-3 text-xs text-[var(--foreground-muted)]">
+        Nothing in your deposits matches &ldquo;{proposal.matchText.join('", "')}&rdquo;, so there is
+        nothing to approve yet. Tell me the wording that appears on the bank line.
+      </p>
+    );
+  }
+  return (
+    <div className="mt-3 rounded-xl border border-[var(--border-color)] bg-[var(--background)] p-3">
+      <p className="font-medium text-[var(--foreground)]">
+        {`Count ${stats.count} deposit${stats.count === 1 ? '' : 's'} as income from ${proposal.name}`}
+      </p>
+      <p className="mt-1 text-xs text-[var(--foreground-muted)] tabular-nums">
+        {`${m2(stats.total)} in total · about ${m2(stats.amount)} ${stats.frequency}`}
+        {stats.latest ? ` · latest ${stats.latest}` : ''}
+      </p>
+      {pending && (
+        <div className="mt-3 flex gap-2">
+          <button
+            onClick={onApply}
+            disabled={busy}
+            className="btn-primary min-h-[44px] px-3 text-sm disabled:opacity-60"
+          >
+            Yes, that&apos;s my paycheck
+          </button>
+          <button
+            onClick={onCancel}
+            disabled={busy}
+            className="btn-secondary min-h-[44px] px-3 text-sm disabled:opacity-60"
+          >
+            No
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BalanceProposalCard({ proposal, currency, accounts, pending, busy, money, onApply, onCancel }: {
   proposal: { accountName: string; balance: number };
   accounts: readonly PaymentAccount[];

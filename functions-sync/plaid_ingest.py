@@ -116,6 +116,27 @@ def exchange_public_token(client_id: str, secret: str, public_token: str,
 # Mapping
 # ---------------------------------------------------------------------------
 
+# Plaid's personal_finance_category values that are MOVEMENT, not spending.
+# Getting this wrong is the expensive kind of wrong: a card payment counted as an
+# expense is charged twice — once as the payment, once as the purchases it paid
+# for — and a checking->savings move invents spending that never happened.
+# Measured on the owner's first import: 2,087 real rows read as $357,639.72 of
+# "spending" without this, against a true figure a fraction of that size.
+TRANSFER_PRIMARY = ("TRANSFER_IN", "TRANSFER_OUT")
+# LOAN_PAYMENTS is mostly real cost (mortgage, car, student) — only the credit-card
+# settlement inside it is a transfer, so it is matched on the DETAILED value.
+TRANSFER_DETAILED = ("LOAN_PAYMENTS_CREDIT_CARD_PAYMENT",)
+
+
+def is_transfer_pfc(category) -> bool:
+    """True when Plaid's own categoriser says this row is money MOVING, not spent."""
+    if not isinstance(category, dict):
+        return False
+    primary = str(category.get("primary") or "").upper()
+    detailed = str(category.get("detailed") or "").upper()
+    return primary in TRANSFER_PRIMARY or detailed in TRANSFER_DETAILED
+
+
 def prettify_pfc(category) -> str | None:
     """FOOD_AND_DRINK -> 'Food And Drink'. Feeds sourceCategory (the label the
     charts prefer); coarse enum category still comes from map_category."""
@@ -139,10 +160,19 @@ def map_pl_txn(t: dict, account_id: str, provider: str):
     merchant = (t.get("merchant_name") or "").strip()
     statement = (t.get("original_description") or t.get("name") or "").strip()
     title = merchant or statement or "Transaction"
+
+    # Movement vs money earned/spent. Same shape the Monarch path writes, so the
+    # classifier, the transfer pairer and every total agree across sources.
+    pfc = t.get("personal_finance_category")
+    if is_transfer_pfc(pfc):
+        ttype, direction = "transfer", ("in" if cents > 0 else "out")
+    else:
+        ttype, direction = ("income" if cents > 0 else "expense"), None
+
     row = {
         "title": title,
         "amount": abs(cents) / 100,
-        "type": "income" if cents > 0 else "expense",
+        "type": ttype,
         "category": sync_core.map_category(title),
         "merchant": merchant or None,
         # Raw statement text — personFrom() Zelle attribution reads this field.
@@ -151,6 +181,7 @@ def map_pl_txn(t: dict, account_id: str, provider: str):
         "accountId": account_id,
         "date": dt.datetime(y, m, d, tzinfo=sync_core.TZ),
         "fingerprint": fingerprint(account_id, cents, date_key),
+        "transferDirection": direction,
         # bookkeeping (never written — DOC_FIELDS filters)
         "pl_id": str(t.get("transaction_id")),
         "signed_cents": cents,
@@ -184,7 +215,7 @@ def adapt_pl_account(acct: dict, institution: str) -> dict:
 
 # PLAID_DOC_FIELDS: DOC_FIELDS plus sourceCategory (SimpleFIN deliberately never
 # writes it; Plaid's personal_finance_category is real evidence and may).
-PLAID_DOC_FIELDS = DOC_FIELDS + ("sourceCategory",)
+PLAID_DOC_FIELDS = DOC_FIELDS + ("sourceCategory", "transferDirection")
 
 
 # ---------------------------------------------------------------------------
