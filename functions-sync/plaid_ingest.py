@@ -417,6 +417,7 @@ async def run_plaid_sync(db, uid: str, client_id: str, secret: str,
     all_dates = [str(t.get("date") or "")[:10]
                  for ts in rows_by_account.values() for t in ts if t.get("date")]
     writes, pending_writes = [], []
+    pending_seen: set[str] = set()   # pending_ ids present in THIS fetch
     added_n = enriched_n = skip_existing = skip_unmatched = 0
     pending_n = 0
     max_written_date = ""
@@ -452,8 +453,8 @@ async def run_plaid_sync(db, uid: str, client_id: str, secret: str,
             if row is None:
                 continue
             if row["pending"]:
-                # Pending is a SET, refreshed every run; /transactions/sync's
-                # `removed` list clears entries when they post or are declined.
+                # Pending is a SET, refreshed every run.
+                pending_seen.add("pending_pl_" + row["pl_id"])
                 fields = {k: row[k] for k in PLAID_DOC_FIELDS if row.get(k) is not None}
                 fields.update({"pending": True, "sources": [SOURCE],
                                "updatedAt": gcf.SERVER_TIMESTAMP})
@@ -496,9 +497,19 @@ async def run_plaid_sync(db, uid: str, client_id: str, secret: str,
                     f"{row['signed_cents'] / 100:>10.2f} {row['type']:<8} "
                     f"{row['title'][:32]!r} -> {app.get('name')}")
 
-    # removed deltas: clear pending docs; a removed POSTED row is a bank-side
-    # reversal — logged, never auto-deleted (history is the owner's to edit).
-    pending_deletes = ["pending_pl_" + rid for rid in removed_ids]
+    # Pending reconciliation. `removed` alone is not enough: Plaid reports a
+    # removal ONCE, so any cursor reset (or a missed run) orphans the pending row
+    # forever and it sits beside its posted twin. The audit caught exactly that.
+    # So the rule is set-based — delete every pending_ doc we previously wrote
+    # that is absent from THIS fetch — with the removed list still honoured for
+    # rows that vanish without ever being re-reported.
+    #
+    # A removed POSTED row is a bank-side reversal: logged, never auto-deleted,
+    # because history is the owner's to edit.
+    stale_pending = [i for i in existing_ids
+                     if i.startswith("pending_pl_") and i not in pending_seen]
+    pending_deletes = sorted(set(stale_pending)
+                             | {"pending_pl_" + rid for rid in removed_ids})
 
     if not dry_run:
         for i in range(0, len(writes) + len(pending_writes), 450):
