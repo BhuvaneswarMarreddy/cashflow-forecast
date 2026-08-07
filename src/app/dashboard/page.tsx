@@ -52,6 +52,7 @@ import {
 import { format, parseISO, isAfter, startOfDay, addDays, isWithinInterval, startOfMonth, endOfMonth } from 'date-fns';
 import { generateForecast, calculateCurrentCash, withDerivedBalances, monthlyAverages } from '@/lib/forecast';
 import { currentOf } from '@/lib/accounts';
+import { clampedMonthlyDate } from '@/lib/dates';
 
 export default function DashboardPage() {
   const { isAuthenticated, isLoading: authLoading, user } = useAuth();
@@ -192,11 +193,13 @@ export default function DashboardPage() {
     return derivedAccounts
       .filter((a) => a.type === 'credit_card' && a.dueDate && currentOf(a) > 0)
       .map((account) => {
-        let dueDate = new Date(currentYear, currentMonth, account.dueDate!);
-        
+        // #30: clamp the due DAY to the month's length — new Date(y, m, 31) in a
+        // 30-day month silently rolls into next month and shows a wrong due date.
+        let dueDate = clampedMonthlyDate(currentYear, currentMonth, account.dueDate!);
+
         // If due date has passed this month, move to next month
         if (account.dueDate! < currentDay) {
-          dueDate = new Date(currentYear, currentMonth + 1, account.dueDate!);
+          dueDate = clampedMonthlyDate(currentYear, currentMonth + 1, account.dueDate!);
         }
         
         const daysUntilDue = Math.ceil((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
@@ -739,7 +742,10 @@ export default function DashboardPage() {
               </button>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {profile.incomeSources.map((income) => (
+              {/* #30: active only — the Monthly Income stat above excludes paused
+                  sources, so this panel must too or the same screen disagrees with
+                  itself. Paused sources remain manageable on /accounts. */}
+              {profile.incomeSources.filter((i) => i.isActive).map((income) => (
                 <div
                   key={income.id}
                   className="p-4 rounded-xl bg-[var(--background-tertiary)] border border-[var(--border-color)] border-l-4 border-l-[var(--accent-success)]"
@@ -835,13 +841,15 @@ export default function DashboardPage() {
           </div>
 
           {transactions.length > 8 && (
-            <button
-              onClick={() => router.push('/calendar')}
+            // #30: the label promises the transactions list — send it there (and as a
+            // real link, not a button pretending to be one).
+            <Link
+              href="/history"
               className="w-full mt-4 py-3 rounded-xl bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-secondary)] transition-all flex items-center justify-center gap-2"
             >
               View All Transactions
               <ChevronRight className="w-4 h-4" />
-            </button>
+            </Link>
           )}
         </div>
       </main>
