@@ -12,7 +12,12 @@ import { join } from 'node:path';
 
 const devDir = join(process.cwd(), 'src/app/dev');
 const routes = existsSync(devDir)
-  ? readdirSync(devDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)
+  ? readdirSync(devDir, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      // `_`-prefixed folders are private in the App Router — shared fixture
+      // plumbing, not routes, so there is no page.tsx to hold a gate.
+      .filter((e) => !e.name.startsWith('_'))
+      .map((e) => e.name)
   : [];
 
 describe('/dev fixture routes are unreachable in production', () => {

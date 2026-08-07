@@ -32,6 +32,12 @@ const TARGETS = [
   { name: 'accounts:bills-subs', url: '/dev/accounts-fixture', steps: ['Bills & Subs'] },
   { name: 'accounts:budget', url: '/dev/accounts-fixture', steps: ['Budget'] },
   { name: 'accounts:debt', url: '/dev/accounts-fixture', steps: ['Debt'] },
+  { name: 'forecast:timeline', url: '/dev/forecast-fixture' },
+  { name: 'forecast:cashflow', url: '/dev/forecast-fixture', steps: ['Cashflow'] },
+  { name: 'activity:transactions', url: '/dev/activity-fixture' },
+  { name: 'activity:insights', url: '/dev/activity-fixture', steps: ['Insights'] },
+  { name: 'activity:runway', url: '/dev/activity-fixture', steps: ['Runway'] },
+  { name: 'flow', url: '/dev/flow-fixture' },
   { name: 'login', url: '/login' },
   { name: 'signup', url: '/signup' },
   { name: 'forgot-password', url: '/forgot-password' },
@@ -109,6 +115,9 @@ function collectFindings({ ALLOWED_RADII, TOUCH_MIN }) {
   /* --- 2. Something is painted over readable text ------------------ */
   const textLeaves = [...document.querySelectorAll('body *')].filter((el) => {
     if (el.children.length > 0) return false;
+    // .sr-only is clipped to 1px on purpose — it is meant to be unreadable by
+    // eye and read by a screen reader, so "something covers it" is not a defect.
+    if (el.closest('.sr-only, [aria-hidden="true"]')) return false;
     const t = (el.textContent || '').trim();
     return t.length > 1 && visible(el);
   });
@@ -228,12 +237,21 @@ for (const target of targets) {
       const page = await ctx.newPage();
       let surface = `${target.name} · ${theme} · ${vp.label}`;
       try {
-        await page.goto(`${BASE}${target.url}`, { waitUntil: 'networkidle', timeout: 60000 });
+        // NOT networkidle: a fixture user id makes screens that call Firestore
+        // directly retry forever, so the network never goes idle and the whole
+        // surface times out — and a timed-out surface reports zero findings,
+        // which reads as "clean". Load, then settle on a fixed budget.
+        await page.goto(`${BASE}${target.url}`, { waitUntil: 'domcontentloaded', timeout: 45000 });
+        await page.waitForTimeout(2500);
         for (const step of target.steps || []) {
           await page.getByRole('button', { name: step }).first().click({ timeout: 10000 });
-          await page.waitForTimeout(400);
+          await page.waitForTimeout(800);
         }
         await page.waitForTimeout(600);
+        const rendered = await page.evaluate(() => document.body.innerText.trim().length);
+        if (rendered < 40) {
+          throw new Error(`surface rendered only ${rendered} chars — nothing to audit`);
+        }
         const findings = await page.evaluate(collectFindings, { ALLOWED_RADII, TOUCH_MIN });
         for (const f of findings) all.push({ surface, ...f });
         console.log(`${findings.length ? '✗' : '✓'} ${surface.padEnd(34)} ${findings.length} finding(s)`);
@@ -268,6 +286,16 @@ for (const [check, items] of Object.entries(byCheck).sort((a, b) => b[1].length 
   if (distinct.size > 8) console.log(`  … and ${distinct.size - 8} more`);
 }
 console.log(`\nTOTAL: ${all.length} findings across ${targets.length} targets × ${THEMES.length} themes × ${VIEWPORTS.length} widths`);
+
+// A surface that failed to load contributes no findings, which reads exactly
+// like a clean surface. Say so loudly, and exit non-zero, or the audit quietly
+// reports the screens it never saw as the healthiest ones.
+const failed = [...new Set(all.filter((f) => f.check === 'audit-error').map((f) => f.surface.split(' · ')[0]))];
+if (failed.length) {
+  console.log(`\n⚠ ${failed.length} surface(s) COULD NOT BE AUDITED — their zero counts mean nothing:`);
+  for (const s of failed) console.log(`    ${s}`);
+  process.exitCode = 1;
+}
 
 if (jsonPath) {
   writeFileSync(jsonPath, JSON.stringify(all, null, 2));
