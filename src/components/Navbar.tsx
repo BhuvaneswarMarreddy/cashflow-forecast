@@ -1,33 +1,25 @@
 'use client';
 
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import LogoMark from '@/components/LogoMark';
 import { useAuth } from '@/context/AuthContext';
-import { useUserProfile } from '@/context/UserProfileContext';
-import { useTransactions } from '@/context/TransactionContext';
-import { withDerivedBalances } from '@/lib/forecast';
-import { currentOf } from '@/lib/accounts';
-import { formatMoney } from '@/lib/money';
 import {
   CreditCard,
   LogOut,
   Menu,
   X,
   Settings,
-  User,
   ChevronDown,
   Sparkles,
 } from 'lucide-react';
-import { NAV_ITEMS } from '@/lib/nav';
+import { NAV_ITEMS, SECONDARY_ITEMS } from '@/lib/nav';
 import DataChatSheet from '@/components/DataChatSheet';
 import { onAsk } from '@/lib/ask';
 
 export default function Navbar() {
   const { user, logout } = useAuth();
-  const { profile } = useUserProfile();
-  const { transactions } = useTransactions();
   const pathname = usePathname();
   const router = useRouter();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -51,18 +43,6 @@ export default function Navbar() {
     router.push('/login');
   };
 
-  // Calculate total balance across all accounts, from balances derived off linked
-  // transactions (opening balance + past effects) rather than the stored opening figure.
-  const totalBalance = useMemo(() =>
-    withDerivedBalances(profile?.paymentAccounts || [], transactions).reduce((sum, acc) => {
-      // Cards AND loans are debt (balance = what you owe), so they subtract from net worth.
-      if (acc.type === 'credit_card' || acc.type === 'personal_loan') {
-        return sum - currentOf(acc);
-      }
-      return sum + currentOf(acc);
-    }, 0),
-    [profile?.paymentAccounts, transactions]);
-
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 bg-[var(--background)]/80 backdrop-blur-xl border-b border-[var(--border-color)]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -73,12 +53,9 @@ export default function Navbar() {
               <LogoMark size={36} />
             </div>
             <div className="hidden sm:block">
-              <span className="text-lg font-bold text-[var(--foreground)]">Cash<span style={{ color: '#b08d3f' }}>Flow</span></span>
-              {profile?.monthlyBudget ? (
-                <p className="text-xs text-[var(--foreground-muted)] tabular-nums">
-                  Budget: {formatMoney(profile.monthlyBudget, profile?.currency, 2)}/mo
-                </p>
-              ) : null}
+              {/* UI-101: chrome carries no numbers — the budget lives on the screens
+                  that compute it, not in a second copy up here. */}
+              <span className="text-lg font-bold text-[var(--foreground)]">Cash<span style={{ color: 'var(--accent-secondary)' }}>Flow</span></span>
             </div>
           </Link>
 
@@ -113,16 +90,9 @@ export default function Navbar() {
               <Sparkles className="w-5 h-5" aria-hidden="true" />
             </button>
 
-            {/* Balance Display */}
-            {profile?.paymentAccounts && profile.paymentAccounts.length > 0 && (
-              <div className="text-right px-4 py-2 rounded-lg bg-[var(--background-tertiary)]">
-                <p className="text-xs text-[var(--foreground-muted)]">Net Balance</p>
-                <p className={`font-semibold tabular-nums ${totalBalance >= 0 ? 'text-[var(--accent-success)]' : 'text-[var(--accent-danger)]'}`}>
-                  {/* #29: raw value — the minus must be visible, color is reinforcement only */}
-                  {formatMoney(totalBalance, profile?.currency, 2)}
-                </p>
-              </div>
-            )}
+            {/* UI-101: the balance pill is gone — it was a SECOND computation of the
+                dashboard's figure (two reducers, one number, guaranteed drift).
+                Numbers live on screens; chrome navigates. */}
 
             {/* User Dropdown */}
             <div className="relative">
@@ -173,6 +143,20 @@ export default function Navbar() {
                         <CreditCard className="w-4 h-4" />
                         <span className="text-sm">Manage Accounts</span>
                       </Link>
+                      {/* UI-101: interim home for the routes the FAB used to carry —
+                          each disappears as UI-103/104 fold its body into a tab. */}
+                      <div className="my-1 border-t border-[var(--border-color)]" />
+                      {SECONDARY_ITEMS.map(({ href, label, icon: SecIcon }) => (
+                        <Link
+                          key={href}
+                          href={href}
+                          onClick={() => setIsUserMenuOpen(false)}
+                          className="flex items-center gap-3 px-3 py-2 rounded-lg text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] hover:text-[var(--foreground)] transition-colors"
+                        >
+                          <SecIcon className="w-4 h-4" />
+                          <span className="text-sm">{label}</span>
+                        </Link>
+                      ))}
                     </div>
                     <div className="p-2 border-t border-[var(--border-color)]">
                       <button
@@ -249,6 +233,19 @@ export default function Navbar() {
                 </div>
               </div>
               
+              {/* UI-101: interim home for the ex-FAB routes (die with UI-103/104) */}
+              {SECONDARY_ITEMS.map(({ href, label, icon: SecIcon }) => (
+                <Link
+                  key={href}
+                  href={href}
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className="flex items-center gap-3 px-4 py-3 rounded-xl text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)] transition-all"
+                >
+                  <SecIcon className="w-5 h-5" />
+                  <span className="font-medium">{label}</span>
+                </Link>
+              ))}
+
               <Link
                 href="/settings"
                 onClick={() => setIsMobileMenuOpen(false)}

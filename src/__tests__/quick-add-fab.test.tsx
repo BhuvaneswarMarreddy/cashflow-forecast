@@ -1,51 +1,41 @@
 /**
- * The four screens that left the nav bar must stay reachable. They sat at the bottom
- * of /flow — one page — and now ride the app-wide FAB. nav.ts owns the list, so a
- * screen added there must appear here without a second edit; that is the property
- * worth testing, not the markup.
+ * UI-101 — the FAB is ONE action. Its predecessor was a six-item menu
+ * (2 actions + 4 navigation links) behind a grid icon; the design audit and
+ * the owner both called it: navigation must not hide inside an add button.
+ * The ex-menu routes' app-wide reachability now lives in the Navbar menus
+ * (pinned by chrome-contract.test.ts) until UI-103/104 retire the routes.
  */
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import QuickAddFAB from '@/components/QuickAddFAB';
-import { SECONDARY_ITEMS } from '@/lib/nav';
 
-jest.mock('next/navigation', () => ({ usePathname: () => '/dashboard' }));
-jest.mock('@/components/AddTransactionModal', () => () => null);
-jest.mock('@/components/ReceiptScannerModal', () => () => null);
+let modalOpen: boolean | undefined;
+jest.mock('@/components/AddTransactionModal', () => (props: { isOpen: boolean }) => {
+  modalOpen = props.isOpen;
+  return null;
+});
 
 describe('QuickAddFAB', () => {
-  const open = () => {
+  beforeEach(() => {
+    modalOpen = undefined;
+  });
+
+  it('is a single button named for the one thing it does', () => {
     render(<QuickAddFAB />);
-    fireEvent.click(screen.getByRole('button', { name: /Add a transaction, scan a receipt/i }));
-  };
+    expect(screen.getByRole('button', { name: 'Add transaction' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button')).toHaveLength(1);
+  });
 
-  it('hides every view link until opened', () => {
+  it('never renders navigation links', () => {
     render(<QuickAddFAB />);
-    for (const item of SECONDARY_ITEMS) {
-      expect(screen.queryByRole('link', { name: item.label })).not.toBeInTheDocument();
-    }
+    fireEvent.click(screen.getByRole('button', { name: 'Add transaction' }));
+    expect(screen.queryAllByRole('link')).toHaveLength(0);
   });
 
-  it('offers every SECONDARY_ITEM, pointing at its real href', () => {
-    open();
-    expect(SECONDARY_ITEMS.length).toBeGreaterThan(0);
-    for (const item of SECONDARY_ITEMS) {
-      expect(screen.getByRole('link', { name: item.label })).toHaveAttribute('href', item.href);
-    }
-  });
-
-  it('keeps the two actions alongside the links', () => {
-    open();
-    expect(screen.getByText('Add Expense')).toBeInTheDocument();
-    expect(screen.getByText('Scan Receipt')).toBeInTheDocument();
-  });
-
-  it('marks the current page so the menu says where you are', () => {
-    // usePathname is mocked to /dashboard, which is a PRIMARY destination — so no
-    // secondary link should claim to be current.
-    open();
-    for (const item of SECONDARY_ITEMS) {
-      expect(screen.getByRole('link', { name: item.label })).not.toHaveAttribute('aria-current');
-    }
+  it('opens the add-transaction modal on tap', () => {
+    render(<QuickAddFAB />);
+    expect(modalOpen).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Add transaction' }));
+    expect(modalOpen).toBe(true);
   });
 });
