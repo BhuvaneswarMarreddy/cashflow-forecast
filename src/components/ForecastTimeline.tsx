@@ -154,7 +154,7 @@ export default function ForecastTimeline({ forecast }: ForecastTimelineProps) {
           </div>
           <div>
             <h3 className="text-xl font-bold text-[var(--foreground)]">Transaction Timeline</h3>
-            <p className="text-sm text-[var(--foreground-muted)] mt-0.5">{totalEvents} upcoming events</p>
+            <p className="text-sm text-[var(--foreground-muted)] mt-1">{totalEvents} upcoming events</p>
           </div>
         </div>
         

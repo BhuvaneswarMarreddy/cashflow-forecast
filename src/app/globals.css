@@ -158,6 +158,7 @@
 }
 
 /* UI-100 — the hero number: one serif figure owns each screen. */
+@layer components {
 .hero-number {
   font-family: var(--font-display);
   font-variant-numeric: tabular-nums;
@@ -166,11 +167,15 @@
   font-size: 1.75rem; /* 28px mobile */
   text-wrap: balance;
 }
-@media (min-width: 1024px) {
-  .hero-number { font-size: 2.5rem; } /* 40px desktop */
+}
+@media (min-width: 1024px) {  @layer components {
+.hero-number { font-size: 2.5rem; }
+  } /* 40px desktop */
 }
 /* Money figures line up everywhere. */
+@layer components {
 .tnum { font-variant-numeric: tabular-nums; }
+}
 
 * {
   box-sizing: border-box;
@@ -199,6 +204,7 @@ body {
 }
 
 /* Animated background pattern - Deep Blue Theme */
+@layer components {
 .bg-pattern {
   position: fixed;
   inset: 0;
@@ -209,8 +215,10 @@ body {
   pointer-events: none;
   z-index: 0;
 }
+}
 
 /* Glass morphism card */
+@layer components {
 .glass-card {
   background: var(--glass-bg);
   backdrop-filter: blur(20px);
@@ -218,10 +226,11 @@ body {
   border-radius: var(--radius-card);
   transition: all 0.3s ease;
 }
-
+}@layer components {
 .glass-card:hover {
   border-color: var(--border-glow);
   box-shadow: var(--shadow-glow);
+}
 }
 
 /**
@@ -247,7 +256,7 @@ body {
     background: var(--background-tertiary);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-card);
-    padding: 14px 18px;
+    padding: 12px 16px;
     color: var(--foreground);
     font-size: 0.95rem;
     transition: all 0.2s ease;
@@ -307,11 +316,12 @@ input[type="number"].input-field::-webkit-inner-spin-button {
 }
 
 /* Button styles */
+@layer components {
 .btn-primary {
   background: var(--gradient-aurora);
   border: none;
   border-radius: var(--radius-card);
-  padding: 14px 28px;
+  padding: 12px 24px;
   color: #16181c;
   font-weight: 600;
   font-size: 1rem;
@@ -319,17 +329,17 @@ input[type="number"].input-field::-webkit-inner-spin-button {
   transition: all 0.3s ease;
   font-family: var(--font-sans);
 }
-
+}@layer components {
 .btn-primary:hover {
   transform: translateY(-2px);
   box-shadow: 0 8px 30px rgba(201, 162, 78, 0.4);
 }
-
+}@layer components {
 .btn-secondary {
   background: var(--background-tertiary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-card);
-  padding: 14px 28px;
+  padding: 12px 24px;
   color: var(--foreground);
   font-weight: 500;
   font-size: 1rem;
@@ -337,17 +347,17 @@ input[type="number"].input-field::-webkit-inner-spin-button {
   transition: all 0.3s ease;
   font-family: var(--font-sans);
 }
-
+}@layer components {
 .btn-secondary:hover {
   border-color: var(--accent-primary);
   background: rgba(201, 162, 78, 0.1);
 }
-
+}@layer components {
 .btn-gradient {
   background: linear-gradient(135deg, #f59e0b 0%, #ef4444 50%, #ec4899 100%);
   border: none;
   border-radius: var(--radius-card);
-  padding: 14px 28px;
+  padding: 12px 24px;
   color: white;
   font-weight: 600;
   font-size: 1rem;
@@ -355,17 +365,17 @@ input[type="number"].input-field::-webkit-inner-spin-button {
   transition: all 0.3s ease;
   font-family: var(--font-sans);
 }
-
+}@layer components {
 .btn-gradient:hover {
   transform: translateY(-2px);
   box-shadow: 0 8px 30px rgba(245, 158, 11, 0.4);
 }
-
+}@layer components {
 .btn-danger {
   background: var(--accent-danger);
   border: none;
   border-radius: var(--radius-card);
-  padding: 14px 28px;
+  padding: 12px 24px;
   color: white;
   font-weight: 600;
   font-size: 1rem;
@@ -373,26 +383,34 @@ input[type="number"].input-field::-webkit-inner-spin-button {
   transition: all 0.3s ease;
   font-family: var(--font-sans);
 }
-
+}@layer components {
 .btn-danger:hover {
   background: #dc2626;
   transform: translateY(-2px);
   box-shadow: 0 8px 30px rgba(239, 68, 68, 0.4);
 }
-
+}@layer components {
 .btn-danger:disabled {
   opacity: 0.5;
   cursor: not-allowed;
   transform: none;
 }
+}
 
 /* Card payment method colors */
+@layer components {
 .payment-amex { border-left: 4px solid var(--amex-blue); }
+}@layer components {
 .payment-chase { border-left: 4px solid var(--chase-blue); }
+}@layer components {
 .payment-discover { border-left: 4px solid var(--discover-orange); }
+}@layer components {
 .payment-apple { border-left: 4px solid var(--apple-gray); }
+}@layer components {
 .payment-visa { border-left: 4px solid var(--visa-blue); }
+}@layer components {
 .payment-mastercard { border-left: 4px solid var(--mastercard-red); }
+}
 
 /* Scrollbar */
 ::-webkit-scrollbar {
@@ -441,28 +459,35 @@ input[type="number"].input-field::-webkit-inner-spin-button {
   50% {
     transform: translateY(-10px);
   }
-}
-
+}@layer components {
 .animate-fade-in-up {
   animation: fadeInUp 0.6s ease-out forwards;
 }
-
+}@layer components {
 .animate-pulse-glow {
   animation: pulse-glow 2s ease-in-out infinite;
 }
-
+}@layer components {
 .animate-float {
   animation: float 3s ease-in-out infinite;
 }
+}
 
 /* Stagger animation delays */
+@layer components {
 .delay-100 { animation-delay: 100ms; }
+}@layer components {
 .delay-200 { animation-delay: 200ms; }
+}@layer components {
 .delay-300 { animation-delay: 300ms; }
+}@layer components {
 .delay-400 { animation-delay: 400ms; }
+}@layer components {
 .delay-500 { animation-delay: 500ms; }
+}
 
 /* Calendar styles */
+@layer components {
 .calendar-day {
   aspect-ratio: 1;
   display: flex;
@@ -477,21 +502,21 @@ input[type="number"].input-field::-webkit-inner-spin-button {
   border: 1px solid transparent;
   min-height: 80px;
 }
-
+}@layer components {
 .calendar-day:hover {
   border-color: var(--accent-primary);
   background: rgba(201, 162, 78, 0.1);
 }
-
+}@layer components {
 .calendar-day.today {
   border-color: var(--accent-secondary);
   background: rgba(6, 182, 212, 0.1);
 }
-
+}@layer components {
 .calendar-day.has-expense {
   position: relative;
 }
-
+}@layer components {
 .calendar-day.has-expense::after {
   content: '';
   position: absolute;
@@ -501,26 +526,31 @@ input[type="number"].input-field::-webkit-inner-spin-button {
   background: var(--accent-danger);
   border-radius: 50%;
 }
-
+}@layer components {
 .calendar-day.has-income::after {
   background: var(--accent-success);
 }
+}
 
 /* Chart container */
+@layer components {
 .chart-container {
   background: var(--background-secondary);
   border-radius: var(--radius-card);
   padding: 24px;
   border: 1px solid var(--border-color);
 }
+}
 
 /* Tooltip */
+@layer components {
 .tooltip {
   background: var(--background-tertiary) !important;
   border: 1px solid var(--border-color) !important;
   border-radius: var(--radius-control) !important;
   padding: 12px !important;
   box-shadow: var(--shadow-card) !important;
+}
 }
 
 /* Select dropdown — layered for the same cascade reason as .input-field. */
@@ -529,7 +559,7 @@ input[type="number"].input-field::-webkit-inner-spin-button {
   background: var(--background-tertiary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-card);
-  padding: 14px 18px;
+  padding: 12px 16px;
   color: var(--foreground);
   font-size: 0.95rem;
   transition: all 0.2s ease;
@@ -554,10 +584,12 @@ input[type="number"].input-field::-webkit-inner-spin-button {
 }
 
 /* Select option styling */
+@layer components {
 .select-field option {
   background: var(--background-tertiary);
   color: var(--foreground);
   padding: 12px;
+}
 }
 
 /* Form controls follow the theme via :root's color-scheme (inherited property). */
@@ -566,7 +598,7 @@ input[type="number"].input-field::-webkit-inner-spin-button {
 select option {
   background-color: var(--background-tertiary);
   color: var(--foreground);
-  padding: 10px;
+  padding: 8px;
 }
 
 select option:hover,
@@ -577,27 +609,30 @@ select option:checked {
 }
 
 /* Custom dropdown styling */
+@layer components {
 .dropdown-blue {
   background: rgba(201, 162, 78, 0.1);
   border: 1px solid rgba(176, 141, 63, 0.3);
   color: #f0f6fc;
 }
-
+}@layer components {
 .dropdown-blue:focus {
   border-color: #c9a24e;
   box-shadow: 0 0 0 3px rgba(176, 141, 63, 0.2);
 }
-
+}@layer components {
 .dropdown-blue option {
   background-color: #1c1f24;
   color: #f0f6fc;
 }
+}
 
 /* Form spacing utilities */
+@layer components {
 .form-group {
   margin-bottom: 1rem;
 }
-
+}@layer components {
 .form-label {
   display: block;
   font-size: 0.875rem;
@@ -605,18 +640,20 @@ select option:checked {
   color: var(--foreground-secondary);
   margin-bottom: 0.5rem;
 }
-
+}@layer components {
 .form-helper {
   font-size: 0.75rem;
   color: var(--foreground-muted);
   margin-top: 0.375rem;
 }
+}
 
 /* Input wrapper for icons */
+@layer components {
 .input-wrapper {
   position: relative;
 }
-
+}@layer components {
 .input-wrapper .input-icon {
   position: absolute;
   left: 0.75rem;
@@ -628,12 +665,14 @@ select option:checked {
   pointer-events: none;
   transition: color 0.2s ease;
 }
-
+}@layer components {
 .input-wrapper:focus-within .input-icon {
   color: var(--accent-primary);
 }
+}
 
 /* Badge styles */
+@layer components {
 .badge {
   display: inline-flex;
   align-items: center;
@@ -644,23 +683,25 @@ select option:checked {
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
-
+}@layer components {
 .badge-expense {
   background: color-mix(in srgb, var(--money-out) 18%, transparent);
   color: var(--money-out);
 }
-
+}@layer components {
 .badge-income {
   background: color-mix(in srgb, var(--money-in) 18%, transparent);
   color: var(--money-in);
 }
-
+}@layer components {
 .badge-projected {
   background: color-mix(in srgb, var(--progress) 18%, transparent);
   color: var(--progress);
 }
+}
 
 /* Stat card */
+@layer components {
 .stat-card {
   background: var(--background-secondary);
   border: 1px solid var(--border-color);
@@ -668,14 +709,16 @@ select option:checked {
   padding: 24px;
   transition: all 0.3s ease;
 }
-
+}@layer components {
 .stat-card:hover {
   transform: translateY(-4px);
   box-shadow: var(--shadow-card);
   border-color: var(--border-glow);
 }
+}
 
 /* Modal overlay */
+@layer components {
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -687,12 +730,12 @@ select option:checked {
   z-index: 100;
   animation: fadeIn 0.2s ease-out;
 }
+}
 
 @keyframes fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
-}
-
+}@layer components {
 .modal-content {
   background: var(--background-secondary);
   border: 1px solid var(--border-color);
@@ -703,6 +746,7 @@ select option:checked {
   max-height: 90vh;
   overflow-y: auto;
   animation: slideUp 0.3s ease-out;
+}
 }
 
 @keyframes slideUp {
@@ -719,6 +763,7 @@ select option:checked {
 /* Sheet — the one <dialog> every modal rides. Desktop mirrors .modal-content exactly;
    <=640px it becomes a bottom sheet. Padding stays 0 here (kills the UA default) —
    content padding lives on the Sheet's inner div so Tailwind utilities keep working. */
+@layer components {
 dialog.sheet {
   background: var(--background-secondary);
   border: 1px solid var(--border-color);
@@ -732,11 +777,12 @@ dialog.sheet {
   color: var(--foreground);
   animation: slideUp 0.3s ease-out;
 }
-
+}@layer components {
 dialog.sheet::backdrop {
   background: rgba(0, 0, 0, 0.7);
   backdrop-filter: blur(4px);
   animation: fadeIn 0.2s ease-out;
+}
 }
 
 @keyframes sheetUp {
@@ -744,8 +790,8 @@ dialog.sheet::backdrop {
   to { transform: translateY(0); opacity: 1; }
 }
 
-@media (max-width: 640px) {
-  dialog.sheet {
+@media (max-width: 640px) {  @layer components {
+dialog.sheet {
     width: 100%;
     max-width: 100%;
     margin: auto 0 0 0; /* pin to the bottom edge */
@@ -757,6 +803,7 @@ dialog.sheet::backdrop {
     padding-bottom: env(safe-area-inset-bottom);
     animation: sheetUp 0.25s ease-out;
   }
+  }
 }
 
 /* Docked data-chat rail. Portaled to <body> — it must NOT render under the navbar:
@@ -764,6 +811,7 @@ dialog.sheet::backdrop {
    which pinned the rail inside the 64px bar with its contents spilling out
    transparently (that shipped). Mobile: bottom sheet, same motion as dialog.sheet.
    Desktop: full-height right rail below the navbar, sliding in from the right. */
+@layer components {
 .chat-rail {
   position: fixed;
   /* Above QuickAddFAB's z-50. At 40 the FAB floated over the rail's own input and send
@@ -782,22 +830,25 @@ dialog.sheet::backdrop {
   box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.35);
   animation: sheetUp 0.25s ease-out;
 }
+}
 
 /* Phones: the inline resize width must never apply — the sheet spans the viewport and
    its width comes from its insets. !important is what lets the inline style win on
    desktop while losing here. */
 @media (max-width: 639.98px) {
-  .chat-rail {
+    @layer components {
+.chat-rail {
     width: auto !important;
     /* The home-indicator allowance ADDS to the component's 1rem padding instead of
        replacing it — a bare env() override read 0 on desktop and welded the composer
        to the panel's bottom edge everywhere. */
     padding-bottom: calc(1rem + env(safe-area-inset-bottom)) !important;
   }
+  }
 }
 
-@media (min-width: 640px) {
-  .chat-rail {
+@media (min-width: 640px) {  @layer components {
+.chat-rail {
     /* Floating panel, not a flush dock: 4rem navbar + a half-rem breath, and margins
        on the right and bottom so the page shows through — the owner asked for air. */
     inset: 4.5rem 0.75rem 0.75rem auto;
@@ -811,6 +862,7 @@ dialog.sheet::backdrop {
     box-shadow: -8px 8px 40px rgba(0, 0, 0, 0.35);
     animation: railIn 0.25s ease-out;
   }
+  }
 }
 
 @keyframes railIn {
@@ -819,6 +871,7 @@ dialog.sheet::backdrop {
 }
 
 /* Delete confirmation modal */
+@layer components {
 .delete-confirm-modal {
   background: var(--background-secondary);
   border: 1px solid var(--accent-danger);
@@ -827,6 +880,7 @@ dialog.sheet::backdrop {
   text-align: center;
   max-width: 360px;
   width: 90%;
+}
 }
 
 /* Mobile responsive improvements */
@@ -858,7 +912,7 @@ dialog.sheet::backdrop {
     .input-field,
     .select-field {
       padding-block: 12px;
-      padding-inline: 14px;
+      padding-inline: 16px;
       font-size: 16px; /* Prevents iOS zoom */
     }
   }
@@ -906,8 +960,16 @@ dialog.sheet::backdrop {
     font-size: clamp(1rem, 3vw + 0.35rem, 1.1rem) !important;
   }
 
-  /* Improve touch targets */
-  button, a, input, select {
+  /**
+   * Touch targets. Deliberately NOT a bare `a`: an anchor inside a sentence is
+   * a text run, and forcing 44px on it stretches it as a flex child — which is
+   * what threw the login form's "Forgot password?" link 12px off the baseline
+   * of its own label and opened ~24px of dead space beneath it.
+   *
+   * A control that needs a bigger box asks for one in its own markup
+   * (`min-h-[44px]`), where the layout can see it.
+   */
+  button, input, select, [role="button"], nav a, a.btn-primary, a.btn-secondary {
     min-height: 44px;
   }
 
@@ -936,41 +998,52 @@ body {
 }
 
 /* Weak-GPU relief: below-the-fold chart cards skip layout/paint until scrolled near */
+@layer components {
 .below-fold-chart {
   content-visibility: auto;
   contain-intrinsic-size: 0 320px;
+}
 }
 
 /* Landscape phones: cap chart card heights so the page isn't one chart tall.
    ponytail: only reaches %-height charts inside these wrappers; fixed height
    props (flow's maximize view) manage themselves. */
 @media (max-height: 480px) and (pointer: coarse) {
-  .chart-container,
+    @layer components {
+.chart-container,
   .below-fold-chart {
     max-height: 240px;
     overflow: hidden;
+  }
   }
 }
 
 /* Small screen adjustments */
 @media (max-width: 375px) {
-  .modal-content {
+    @layer components {
+.modal-content {
     padding: 16px;
   }
-
-  .btn-primary,
-  .btn-secondary,
-  .btn-gradient {
-    padding: 10px 16px;
-    font-size: 0.85rem;
   }
 
-  .stat-card {
+    @layer components {
+.btn-primary,
+  .btn-secondary,
+  .btn-gradient {
+    padding: 8px 16px;
+    font-size: 0.85rem;
+  }
+  }
+
+    @layer components {
+.stat-card {
     padding: 12px;
+  }
   }
 }
 
 /* Floating action button for mobile */
+@layer components {
 .fab {
   position: fixed;
   bottom: 24px;
@@ -988,10 +1061,11 @@ body {
   z-index: 50;
   transition: all 0.3s ease;
 }
-
+}@layer components {
 .fab:hover {
   transform: scale(1.1);
   box-shadow: 0 6px 30px rgba(201, 162, 78, 0.6);
+}
 }
 
 /* Safe area insets for notched phones */
@@ -1021,11 +1095,12 @@ a:focus-visible {
 }
 
 /* Transaction row swipe actions (for future enhancement) */
+@layer components {
 .transaction-row {
   position: relative;
   overflow: hidden;
 }
-
+}@layer components {
 .transaction-row-actions {
   position: absolute;
   right: 0;
@@ -1036,6 +1111,7 @@ a:focus-visible {
   gap: 8px;
   padding: 0 16px;
   background: linear-gradient(90deg, transparent, var(--background-secondary));
+}
 }
 
 /* Respect reduced motion app-wide: near-instant transitions/animations, no smooth scroll.
@@ -1052,8 +1128,10 @@ a:focus-visible {
 }
 
 /* Keyboard focus ring for the SVG flow (Sankey) nodes — browsers give SVG no default */
+@layer components {
 .flow-node:focus-visible {
   outline: 2px solid var(--accent-primary);
   outline-offset: 2px;
   border-radius: var(--radius-control);
+}
 }

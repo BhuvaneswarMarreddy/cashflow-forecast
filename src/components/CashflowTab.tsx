@@ -272,7 +272,7 @@ export default function CashflowTab() {
           </div>
           <div className="divide-y divide-[var(--border-color)]">
             {flows.detail.map(r => (
-              <div key={r.name} className="flex items-center justify-between py-2.5">
+              <div key={r.name} className="flex items-center justify-between py-3">
                 <span className="text-[var(--foreground)]">{r.name}</span>
                 <span className="font-semibold text-[var(--accent-primary)] tnum">{money(r.value)}</span>
               </div>
@@ -293,7 +293,7 @@ export default function CashflowTab() {
           </div>
           <div className="divide-y divide-[var(--border-color)]">
             {rewardsByCard.map(r => (
-              <div key={r.name} className="flex items-center justify-between py-2.5">
+              <div key={r.name} className="flex items-center justify-between py-3">
                 <span className="text-[var(--foreground)]">{r.name}</span>
                 <span className="font-semibold text-[var(--accent-primary)] tnum">{money(r.value)}</span>
               </div>

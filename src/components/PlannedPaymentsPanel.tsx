@@ -475,7 +475,7 @@ export default function PlannedPaymentsPanel() {
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-1">
-                      <span className={`px-2 py-0.5 rounded-control text-xs ${getPriorityColor(item.priority)}`}>
+                      <span className={`px-2 py-1 rounded-control text-xs ${getPriorityColor(item.priority)}`}>
                         {item.priority}
                       </span>
                       {item.isRecurring && (
@@ -499,28 +499,28 @@ export default function PlannedPaymentsPanel() {
                   <div className="flex items-center gap-1 ml-2">
                     <button
                       onClick={() => handleComplete(item, true)}
-                      className="p-1.5 bg-green-500/20 hover:bg-green-500/30 rounded-control text-green-400"
+                      className="p-2 bg-green-500/20 hover:bg-green-500/30 rounded-control text-green-400"
                       title="Complete & create transaction"
                     >
                       <Check className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => handleSkip(item.id)}
-                      className="p-1.5 bg-gray-500/20 hover:bg-gray-500/30 rounded-control text-gray-400"
+                      className="p-2 bg-gray-500/20 hover:bg-gray-500/30 rounded-control text-gray-400"
                       title="Skip"
                     >
                       <X className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => handleEdit(item)}
-                      className="p-1.5 bg-amber-500/20 hover:bg-amber-500/30 rounded-control text-amber-400"
+                      className="p-2 bg-amber-500/20 hover:bg-amber-500/30 rounded-control text-amber-400"
                       title="Edit"
                     >
                       <Edit2 className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => handleDelete(item.id)}
-                      className="p-1.5 bg-red-500/20 hover:bg-red-500/30 rounded-control text-red-400"
+                      className="p-2 bg-red-500/20 hover:bg-red-500/30 rounded-control text-red-400"
                       title="Delete"
                     >
                       <Trash2 className="w-4 h-4" />

@@ -521,7 +521,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
             key={r.key}
             onClick={() => setRange(r.key)}
             aria-pressed={range === r.key}
-            className={`px-3 py-1.5 rounded-control text-sm transition-colors ${range === r.key
+            className={`px-3 py-2 rounded-control text-sm transition-colors ${range === r.key
               ? 'bg-[var(--accent-primary)] text-[#16181c]'
               : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'}`}
           >
@@ -534,7 +534,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
           value={effectiveYear}
           onChange={(e) => setYear(e.target.value)}
           aria-label="Choose year"
-          className="px-3 py-1.5 text-sm font-medium rounded-control bg-[var(--background-tertiary)] text-[var(--foreground)] focus:outline-none cursor-pointer"
+          className="px-3 py-2 text-sm font-medium rounded-control bg-[var(--background-tertiary)] text-[var(--foreground)] focus:outline-none cursor-pointer"
         >
           {yearOptions.map((y) => (
             <option key={y} value={y} className="bg-[var(--background-secondary)] text-[var(--foreground)]">{y}</option>
@@ -693,7 +693,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
     <button
       onClick={() => setShowGross((g) => !g)}
       aria-pressed={showGross}
-      className="px-2.5 py-1 rounded-pill text-xs border border-[var(--border-color)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]"
+      className="px-3 py-1 rounded-pill text-xs border border-[var(--border-color)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]"
       title="Confirmed refunds reduce the category they reverse. Switch to gross to see every dollar exactly as it moved."
     >
       {showGross ? 'Showing gross' : 'Show gross'}
@@ -709,7 +709,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
           key={label}
           onClick={() => chooseView(simple)}
           aria-pressed={simpleView === simple}
-          className={`px-3 py-1.5 rounded-control text-sm transition-colors ${simpleView === simple
+          className={`px-3 py-2 rounded-control text-sm transition-colors ${simpleView === simple
             ? 'bg-[var(--accent-primary)] text-[#16181c]'
             : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'}`}
         >
@@ -729,7 +729,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
         window.localStorage.setItem('flow-chart-kind', key);
       }}
       aria-label="Chart type"
-      className="px-3 py-1.5 text-sm font-medium rounded-control bg-[var(--background-tertiary)] text-[var(--foreground)] focus:outline-none cursor-pointer"
+      className="px-3 py-2 text-sm font-medium rounded-control bg-[var(--background-tertiary)] text-[var(--foreground)] focus:outline-none cursor-pointer"
     >
       {CHART_KINDS.map((c) => (
         <option key={c.key} value={c.key} className="bg-[var(--background-secondary)] text-[var(--foreground)]">
@@ -1373,7 +1373,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
     <div className="min-h-screen relative">
       <div className="bg-pattern" />
       <Navbar />
-      <main className="pt-24 pb-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto relative z-10 space-y-10">
+      <main className="pt-24 pb-40 md:pb-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto relative z-10 space-y-10">
         <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <h1 className="text-3xl font-bold text-[var(--foreground)]">Money flow</h1>
@@ -1544,7 +1544,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
                   <button
                     type="button"
                     onClick={() => askAbout(askAboutNode(effectivePin!, pinnedTxns))}
-                    className="shrink-0 min-h-[36px] flex items-center gap-1.5 px-3 py-1.5 rounded-control border border-[var(--border-color)] bg-[var(--background-secondary)] text-xs font-medium text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background)] transition-colors"
+                    className="shrink-0 min-h-[36px] flex items-center gap-2 px-3 py-2 rounded-control border border-[var(--border-color)] bg-[var(--background-secondary)] text-xs font-medium text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background)] transition-colors"
                   >
                     <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
                     Ask about this
@@ -1554,10 +1554,10 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
                   <table className="w-full text-sm">
                     <thead className="text-left text-[var(--foreground-muted)] sticky top-0 bg-[var(--background-secondary)]">
                       <tr>
-                        <th scope="col" className="px-3 py-1.5 font-normal">Date</th>
-                        <th scope="col" className="px-3 py-1.5 font-normal">Merchant</th>
-                        <th scope="col" className="px-3 py-1.5 font-normal text-right">Amount</th>
-                        <th scope="col" className="px-3 py-1.5 font-normal">Status</th>
+                        <th scope="col" className="px-3 py-2 font-normal">Date</th>
+                        <th scope="col" className="px-3 py-2 font-normal">Merchant</th>
+                        <th scope="col" className="px-3 py-2 font-normal text-right">Amount</th>
+                        <th scope="col" className="px-3 py-2 font-normal">Status</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1566,11 +1566,11 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
                           {/* `day()`, not the raw field: a row stores a full ISO
                               timestamp and this table was printing
                               "2026-07-22T05:00:00.000Z" at the owner. */}
-                          <td className="px-3 py-1.5 whitespace-nowrap">{day(t.date)}</td>
-                          <td className="px-3 py-1.5">{t.merchant || t.title}</td>
-                          <td className="px-3 py-1.5 text-right tabular-nums">{money(Math.round(t.amount * 100))}</td>
+                          <td className="px-3 py-2 whitespace-nowrap">{day(t.date)}</td>
+                          <td className="px-3 py-2">{t.merchant || t.title}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{money(Math.round(t.amount * 100))}</td>
                           {/* Gross stays on the row. The badge says what happened to it. */}
-                          <td className="px-3 py-1.5"><RelationBadgeRow badges={relationBadges(t, badgeCtx)} /></td>
+                          <td className="px-3 py-2"><RelationBadgeRow badges={relationBadges(t, badgeCtx)} /></td>
                         </tr>
                       ))}
                     </tbody>

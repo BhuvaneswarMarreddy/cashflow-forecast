@@ -227,7 +227,7 @@ export default function ForecastPage() {
       <div className="bg-pattern" />
       <Navbar />
       
-      <main className="pt-24 pb-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto relative z-10">
+      <main className="pt-24 pb-40 md:pb-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto relative z-10">
         {/* Header with Time Period Selector */}
         <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
           <div>
@@ -245,7 +245,7 @@ export default function ForecastPage() {
 
           {/* Time Period Selector */}
           {activeTab === 'timeline' && (
-          <div className="flex items-center gap-1.5 p-1.5 bg-[var(--background-secondary)] rounded-control border border-[var(--border-color)] shadow-sm">
+          <div className="flex items-center gap-2 p-2 bg-[var(--background-secondary)] rounded-control border border-[var(--border-color)] shadow-sm">
             {TIME_PERIODS.map((period) => (
               <button
                 key={period.days}
@@ -265,7 +265,7 @@ export default function ForecastPage() {
         </div>
 
         {/* Tab bar: Timeline | Bills (BILLS-001) */}
-        <div className="mb-6 flex items-center gap-1.5 p-1.5 bg-[var(--background-secondary)] rounded-control border border-[var(--border-color)] w-fit">
+        <div className="mb-6 flex items-center gap-2 p-2 bg-[var(--background-secondary)] rounded-control border border-[var(--border-color)] w-fit">
           {(['timeline', 'bills', 'cashflow'] as const).map(tab => (
             <button
               key={tab}

@@ -98,7 +98,7 @@ export default function UpcomingBillsPanel({
             <Bell className={`w-4 h-4 ${urgentCount > 0 ? 'text-amber-500' : 'text-[var(--foreground-muted)]'}`} />
             <span className="text-sm font-medium text-[var(--foreground)]">Upcoming Bills</span>
             {urgentCount > 0 && (
-              <span className="px-1.5 py-0.5 text-xs font-medium rounded-pill bg-amber-500 text-white">
+              <span className="px-2 py-1 text-xs font-medium rounded-pill bg-amber-500 text-white">
                 {urgentCount}
               </span>
             )}
@@ -110,7 +110,7 @@ export default function UpcomingBillsPanel({
           {displayItems.map((reminder) => (
             <div
               key={reminder.id}
-              className="flex items-center justify-between py-1.5"
+              className="flex items-center justify-between py-2"
             >
               <div className="flex items-center gap-2">
                 <span className={`${

@@ -352,7 +352,7 @@ export default function HistoryPage() {
       <div className="bg-pattern" />
       <Navbar />
 
-      <main className="pt-24 pb-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto relative z-10">
+      <main className="pt-24 pb-40 md:pb-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto relative z-10">
         {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
           <div>
@@ -416,21 +416,21 @@ export default function HistoryPage() {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setIsAddModalOpen(true)}
-                    className="btn-primary min-h-[44px] px-3 py-1.5 text-sm flex items-center gap-1.5"
+                    className="btn-primary min-h-[44px] px-3 py-2 text-sm flex items-center gap-2"
                   >
                     <Plus className="w-4 h-4" />
                     Add
                   </button>
                   <button
                     onClick={() => setIsScannerOpen(true)}
-                    className="btn-gradient min-h-[44px] px-3 py-1.5 text-sm flex items-center gap-1.5"
+                    className="btn-gradient min-h-[44px] px-3 py-2 text-sm flex items-center gap-2"
                   >
                     <Camera className="w-4 h-4" />
                     Scan
                   </button>
                   <button
                     onClick={() => setIsImportModalOpen(true)}
-                    className="btn-secondary min-h-[44px] px-3 py-1.5 text-sm flex items-center gap-1.5"
+                    className="btn-secondary min-h-[44px] px-3 py-2 text-sm flex items-center gap-2"
                   >
                     <Upload className="w-4 h-4" />
                     Import
@@ -504,7 +504,7 @@ export default function HistoryPage() {
                 <div className="flex items-center gap-1 p-1 bg-[var(--background)] rounded-control border border-[var(--border-color)]">
                   <button
                     onClick={() => setTypeFilter('all')}
-                    className={`min-h-[44px] px-2.5 py-1 rounded-control text-xs font-medium transition-all ${
+                    className={`min-h-[44px] px-3 py-1 rounded-control text-xs font-medium transition-all ${
                       typeFilter === 'all'
                         ? 'bg-[var(--accent-primary)] text-[#16181c]'
                         : 'text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]'
@@ -514,7 +514,7 @@ export default function HistoryPage() {
                   </button>
                   <button
                     onClick={() => setTypeFilter('income')}
-                    className={`min-h-[44px] px-2.5 py-1 rounded-control text-xs font-medium transition-all ${
+                    className={`min-h-[44px] px-3 py-1 rounded-control text-xs font-medium transition-all ${
                       typeFilter === 'income'
                         ? 'bg-emerald-500 text-white'
                         : 'text-emerald-500 hover:bg-emerald-500/10'
@@ -524,7 +524,7 @@ export default function HistoryPage() {
                   </button>
                   <button
                     onClick={() => setTypeFilter('expense')}
-                    className={`min-h-[44px] px-2.5 py-1 rounded-control text-xs font-medium transition-all ${
+                    className={`min-h-[44px] px-3 py-1 rounded-control text-xs font-medium transition-all ${
                       typeFilter === 'expense'
                         ? 'bg-red-500 text-white'
                         : 'text-red-400 hover:bg-red-500/10'
@@ -538,7 +538,7 @@ export default function HistoryPage() {
                 <div className="flex items-center gap-1 p-1 bg-[var(--background)] rounded-control border border-[var(--border-color)]">
                   <button
                     onClick={() => setGroupBy('month')}
-                    className={`min-h-[44px] px-2.5 py-1 rounded-control text-xs font-medium transition-all ${
+                    className={`min-h-[44px] px-3 py-1 rounded-control text-xs font-medium transition-all ${
                       groupBy === 'month'
                         ? 'bg-[var(--accent-primary)] text-[#16181c]'
                         : 'text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]'
@@ -548,7 +548,7 @@ export default function HistoryPage() {
                   </button>
                   <button
                     onClick={() => setGroupBy('year')}
-                    className={`min-h-[44px] px-2.5 py-1 rounded-control text-xs font-medium transition-all ${
+                    className={`min-h-[44px] px-3 py-1 rounded-control text-xs font-medium transition-all ${
                       groupBy === 'year'
                         ? 'bg-[var(--accent-primary)] text-[#16181c]'
                         : 'text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]'
@@ -558,7 +558,7 @@ export default function HistoryPage() {
                   </button>
                   <button
                     onClick={() => setGroupBy('category')}
-                    className={`min-h-[44px] px-2.5 py-1 rounded-control text-xs font-medium transition-all ${
+                    className={`min-h-[44px] px-3 py-1 rounded-control text-xs font-medium transition-all ${
                       groupBy === 'category'
                         ? 'bg-[var(--accent-primary)] text-[#16181c]'
                         : 'text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]'
@@ -734,7 +734,7 @@ export default function HistoryPage() {
                                     <p className="font-medium text-[var(--foreground)] max-sm:min-w-0 max-sm:truncate">{txn.title}</p>
                                     {txn.merchant && (
                                       <span 
-                                        className="text-xs px-2 py-0.5 rounded-pill text-white"
+                                        className="text-xs px-2 py-1 rounded-pill text-white"
                                         style={{ backgroundColor: merchantColor || undefined }}
                                       >
                                         {txn.merchant}
@@ -742,7 +742,7 @@ export default function HistoryPage() {
                                     )}
                                     {linkedAccount && (
                                       <span 
-                                        className="text-xs px-2 py-0.5 rounded-pill border"
+                                        className="text-xs px-2 py-1 rounded-pill border"
                                         style={{ 
                                           borderColor: linkedAccount.color, 
                                           color: linkedAccount.color,

@@ -268,7 +268,7 @@ export default function EmergencyFundPanel({
       <div className="p-4 rounded-control bg-gradient-to-r from-[var(--accent-primary)]/10 to-[var(--accent-secondary)]/10 border border-[var(--accent-primary)]/20 mb-6">
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm text-[var(--foreground-muted)]">Set Aside for Emergencies</span>
-          <span className={`text-xs px-2 py-0.5 rounded-pill ${
+          <span className={`text-xs px-2 py-1 rounded-pill ${
             metrics.fundProgress >= 100 
               ? 'bg-emerald-500/20 text-emerald-500' 
               : 'bg-amber-500/20 text-amber-500'
@@ -343,11 +343,11 @@ export default function EmergencyFundPanel({
         metrics.status === 'warning' ? 'bg-amber-500/10' : 'bg-emerald-500/10'
       }`}>
         {metrics.status === 'critical' || metrics.status === 'warning' ? (
-          <AlertTriangle className={`w-4 h-4 mt-0.5 flex-shrink-0 ${
+          <AlertTriangle className={`w-4 h-4 mt-1 flex-shrink-0 ${
             metrics.status === 'critical' ? 'text-red-500' : 'text-amber-500'
           }`} />
         ) : (
-          <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-emerald-500" />
+          <CheckCircle className="w-4 h-4 mt-1 flex-shrink-0 text-emerald-500" />
         )}
         <p className={`text-sm ${
           metrics.status === 'critical' ? 'text-red-400' :

@@ -180,7 +180,7 @@ export default function DebtPlannerPanel({
         {comparison.savingsDifference > 50 && (
           <div className="p-3 rounded-control bg-[var(--accent-primary)]/10 border border-[var(--accent-primary)]/20">
             <div className="flex items-start gap-2">
-              <Info className="w-4 h-4 text-[var(--accent-primary)] mt-0.5" />
+              <Info className="w-4 h-4 text-[var(--accent-primary)] mt-1" />
               <div className="text-sm">
                 <span className="text-[var(--foreground)]">
                   <strong>Avalanche</strong> saves you <strong>${comparison.savingsDifference.toLocaleString()}</strong> more in interest.
@@ -270,7 +270,7 @@ export default function DebtPlannerPanel({
                 <div className="flex items-center gap-2">
                   <p className="font-medium text-[var(--foreground)]">{debt.accountName}</p>
                   {index === 0 && (
-                    <span className="px-2 py-0.5 text-xs rounded-pill bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">
+                    <span className="px-2 py-1 text-xs rounded-pill bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">
                       Focus
                     </span>
                   )}

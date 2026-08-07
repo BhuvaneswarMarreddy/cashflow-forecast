@@ -195,7 +195,7 @@ export default function DashboardPage({ initialBills }: { initialBills?: Bill[] 
       {/* UI-112: content caps at the reading measure. At full desktop width a row's
           merchant and its amount sat a foot apart, which is a stretched phone
           layout, not a desktop one. */}
-      <main className="pt-24 pb-24 px-4 lg:px-8 max-w-content mx-auto relative z-10">
+      <main className="pt-24 pb-40 md:pb-16 px-4 lg:px-8 max-w-content mx-auto relative z-10">
         {/* Setup Incomplete Banner */}
         {setupIncomplete && (
           <div className="mb-6 p-4 rounded-card bg-[var(--background-secondary)] border border-[var(--accent-primary)]">
@@ -285,17 +285,17 @@ export default function DashboardPage({ initialBills }: { initialBills?: Bill[] 
 
                 <div className="mt-4 flex flex-wrap items-center gap-2">
                   {forecast && (
-                    <span className={`px-3 py-1.5 rounded-pill text-sm font-medium tnum bg-[var(--background-tertiary)] ${forecast.lowestBalance < (profile?.settings?.safetyThreshold || 500) ? 'text-[var(--money-out)]' : 'text-[var(--foreground-secondary)]'}`}>
+                    <span className={`px-3 py-2 rounded-pill text-sm font-medium tnum bg-[var(--background-tertiary)] ${forecast.lowestBalance < (profile?.settings?.safetyThreshold || 500) ? 'text-[var(--money-out)]' : 'text-[var(--foreground-secondary)]'}`}>
                       Lowest in 90 days {formatMoney(forecast.lowestBalance, profile?.currency, 2)}
                     </span>
                   )}
                   {home.cardsOwed > 0 && (
-                    <span className="px-3 py-1.5 rounded-pill text-sm font-medium tnum bg-[var(--background-tertiary)] text-[var(--money-out)]">
+                    <span className="px-3 py-2 rounded-pill text-sm font-medium tnum bg-[var(--background-tertiary)] text-[var(--money-out)]">
                       Cards owed {formatMoney(-home.cardsOwed, profile?.currency, 2)}
                     </span>
                   )}
                   {home.lockedMonthly > 0 && (
-                    <span className="px-3 py-1.5 rounded-pill text-sm font-medium tnum bg-[var(--background-tertiary)] text-[var(--accent-primary)]">
+                    <span className="px-3 py-2 rounded-pill text-sm font-medium tnum bg-[var(--background-tertiary)] text-[var(--accent-primary)]">
                       Locked {formatMoney(home.lockedMonthly, profile?.currency, 2)}/mo
                     </span>
                   )}
@@ -332,7 +332,7 @@ export default function DashboardPage({ initialBills }: { initialBills?: Bill[] 
               {upcomingBills.slice(0, 3).map((bill) => (
                 <li
                   key={bill.id}
-                  className="flex items-center justify-between gap-3 py-2.5 border-b border-[var(--border-color)] last:border-0"
+                  className="flex items-center justify-between gap-3 py-3 border-b border-[var(--border-color)] last:border-0"
                 >
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-[var(--foreground)] truncate">{bill.name}</p>

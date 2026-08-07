@@ -112,7 +112,7 @@ export default function LoginPage() {
             type="button"
             onClick={handleGoogleSignIn}
             disabled={isGoogleLoading || isSubmitting}
-            className="w-full flex items-center justify-center gap-3 py-3.5 px-4 rounded-card bg-white text-gray-800 font-medium hover:bg-gray-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed mb-6 border border-gray-200 shadow-sm"
+            className="w-full flex items-center justify-center gap-3 py-4 px-4 rounded-card bg-white text-gray-800 font-medium hover:bg-gray-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed mb-6 border border-gray-200 shadow-sm"
           >
             {isGoogleLoading ? (
               <div className="w-5 h-5 border-2 border-gray-300 border-t-gray-800 rounded-pill animate-spin" />

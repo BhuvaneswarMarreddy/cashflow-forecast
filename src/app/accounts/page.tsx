@@ -404,7 +404,7 @@ export default function AccountsPage() {
       <div className="bg-pattern" />
       <Navbar />
       
-      <main className="pt-24 pb-12 px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto relative z-10">
+      <main className="pt-24 pb-40 md:pb-16 px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto relative z-10">
         {/* Header */}
         <div className="mb-8 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
           <div>
@@ -436,7 +436,7 @@ export default function AccountsPage() {
             </div>
             {syncMsg && (
               <p role="status" aria-live="polite"
-                 className={`text-xs mt-1.5 ${syncErr ? 'text-[var(--accent-danger)]' : 'text-[var(--foreground-muted)]'}`}>
+                 className={`text-xs mt-2 ${syncErr ? 'text-[var(--accent-danger)]' : 'text-[var(--foreground-muted)]'}`}>
                 {syncMsg}
               </p>
             )}
@@ -626,21 +626,21 @@ export default function AccountsPage() {
                           <button
                             onClick={() => setGraphAccount(account)}
                             aria-label={`${account.name} — view history graph`}
-                            className="p-2.5 min-w-11 min-h-11 sm:p-2 sm:min-w-auto sm:min-h-auto rounded-control text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors"
+                            className="p-3 min-w-11 min-h-11 sm:p-2 sm:min-w-auto sm:min-h-auto rounded-control text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors"
                           >
                             <BarChart3 className="w-4 h-4" />
                           </button>
                           <button
                             onClick={() => openEditAccount(account)}
                             aria-label={`Edit ${account.name}`}
-                            className="p-2.5 min-w-11 min-h-11 sm:p-2 sm:min-w-auto sm:min-h-auto rounded-control text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors"
+                            className="p-3 min-w-11 min-h-11 sm:p-2 sm:min-w-auto sm:min-h-auto rounded-control text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors"
                           >
                             <Edit3 className="w-4 h-4" />
                           </button>
                           <button
                             onClick={() => confirmDelete(account.id, 'account')}
                             aria-label={`Delete ${account.name}`}
-                            className="p-2.5 min-w-11 min-h-11 sm:p-2 sm:min-w-auto sm:min-h-auto rounded-control text-[var(--foreground-muted)] hover:text-[var(--accent-danger)] hover:bg-[var(--accent-danger)]/10 transition-colors"
+                            className="p-3 min-w-11 min-h-11 sm:p-2 sm:min-w-auto sm:min-h-auto rounded-control text-[var(--foreground-muted)] hover:text-[var(--accent-danger)] hover:bg-[var(--accent-danger)]/10 transition-colors"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -722,14 +722,14 @@ export default function AccountsPage() {
                           <button
                             onClick={() => openEditIncome(income)}
                             aria-label={`Edit ${income.name}`}
-                            className="p-2.5 min-w-11 min-h-11 sm:p-2 sm:min-w-auto sm:min-h-auto rounded-control text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors"
+                            className="p-3 min-w-11 min-h-11 sm:p-2 sm:min-w-auto sm:min-h-auto rounded-control text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors"
                           >
                             <Edit3 className="w-4 h-4" />
                           </button>
                           <button
                             onClick={() => confirmDelete(income.id, 'income')}
                             aria-label={`Delete ${income.name}`}
-                            className="p-2.5 min-w-11 min-h-11 sm:p-2 sm:min-w-auto sm:min-h-auto rounded-control text-[var(--foreground-muted)] hover:text-[var(--accent-danger)] hover:bg-[var(--accent-danger)]/10 transition-colors"
+                            className="p-3 min-w-11 min-h-11 sm:p-2 sm:min-w-auto sm:min-h-auto rounded-control text-[var(--foreground-muted)] hover:text-[var(--accent-danger)] hover:bg-[var(--accent-danger)]/10 transition-colors"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -1096,7 +1096,7 @@ export default function AccountsPage() {
                   className="input-field"
                   aria-describedby="income-aliases-help"
                 />
-                <p id="income-aliases-help" className="text-xs text-[var(--foreground-muted)] mt-1.5">
+                <p id="income-aliases-help" className="text-xs text-[var(--foreground-muted)] mt-2">
                   Text that appears on the bank line for this income, comma-separated. A deposit only
                   counts as earned income when it matches. Leave blank to match on the name above.
                 </p>

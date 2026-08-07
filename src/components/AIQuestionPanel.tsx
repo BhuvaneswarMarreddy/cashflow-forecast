@@ -104,7 +104,7 @@ export default function AIQuestionPanel({ forecast }: AIQuestionPanelProps) {
               <button
                 key={i}
                 onClick={() => askQuestion(sq)}
-                className="px-3 py-1.5 text-sm rounded-pill bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:bg-[var(--accent-primary)]/10 hover:text-[var(--accent-primary)] transition-colors"
+                className="px-3 py-2 text-sm rounded-pill bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:bg-[var(--accent-primary)]/10 hover:text-[var(--accent-primary)] transition-colors"
               >
                 {sq}
               </button>

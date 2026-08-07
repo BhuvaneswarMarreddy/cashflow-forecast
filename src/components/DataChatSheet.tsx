@@ -293,7 +293,7 @@ export default function DataChatSheet({ open, onClose, seed }: {
           focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent-primary)]"
       />
       <div className="flex items-start gap-3 shrink-0">
-        <Sparkles className="w-5 h-5 text-[var(--accent-primary)] mt-0.5" aria-hidden="true" />
+        <Sparkles className="w-5 h-5 text-[var(--accent-primary)] mt-1" aria-hidden="true" />
         <div className="flex-1 min-w-0">
           <h2 className="text-lg font-semibold text-[var(--foreground)]">Ask about your data</h2>
           <p className="text-xs text-[var(--foreground-muted)]">Ask a question, or say how something should be categorised.</p>
@@ -329,7 +329,7 @@ export default function DataChatSheet({ open, onClose, seed }: {
 
         {messages.map((m) => (
           <div key={m.id} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
-            <div className={`max-w-[85%] rounded-card px-4 py-2.5 text-sm leading-relaxed ${
+            <div className={`max-w-[85%] rounded-card px-4 py-3 text-sm leading-relaxed ${
               m.role === 'user'
                 ? 'bg-[var(--accent-primary)]/15 text-[var(--foreground)]'
                 : 'bg-[var(--background-secondary)] border border-[var(--border-color)] text-[var(--foreground-secondary)]'
@@ -432,7 +432,7 @@ function RulePreviewCard({ rule, pending, busy, money, onApply, onCancel }: {
       {pending && sample.length > 0 && (
         <ul role="list" className="mt-2 divide-y divide-[var(--border-color)] border-t border-[var(--border-color)]">
           {sample.map((t) => (
-            <li key={t.id} className="py-1.5 flex items-center gap-3 text-xs">
+            <li key={t.id} className="py-2 flex items-center gap-3 text-xs">
               <span className="flex-1 min-w-0 truncate text-[var(--foreground-secondary)]">{t.title}</span>
               <span className="text-[var(--foreground-muted)] shrink-0">{displayCategory(t)}</span>
               <span className="tabular-nums text-[var(--foreground)] shrink-0">{money(t.amount)}</span>

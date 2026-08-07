@@ -219,10 +219,10 @@ export default function BillsTab({ userId, initialBills, initialTransactions }: 
           history, then validate each one as you migrate autopay to your BofA debit card.
         </p>
         <div className="flex items-center justify-center gap-3">
-          <button onClick={handleSeed} disabled={seeding} className="btn-primary px-5 py-2.5 rounded-control font-semibold">
+          <button onClick={handleSeed} disabled={seeding} className="btn-primary px-5 py-3 rounded-control font-semibold">
             {seeding ? 'Importing…' : 'Import starter list (28)'}
           </button>
-          <button onClick={() => setEditing('new')} className="btn-secondary px-5 py-2.5 rounded-control font-semibold">
+          <button onClick={() => setEditing('new')} className="btn-secondary px-5 py-3 rounded-control font-semibold">
             Add manually
           </button>
         </div>
@@ -261,12 +261,12 @@ export default function BillsTab({ userId, initialBills, initialTransactions }: 
           <div className="flex items-center gap-2">
             <button
               onClick={() => setAnnualView((v) => !v)}
-              className="btn-secondary px-3 py-1.5 rounded-control text-sm font-medium"
+              className="btn-secondary px-3 py-2 rounded-control text-sm font-medium"
               aria-pressed={annualView}
             >
               {annualView ? 'Annual' : 'Monthly'}
             </button>
-            <button onClick={() => setEditing('new')} className="btn-primary px-3 py-1.5 rounded-control text-sm font-semibold flex items-center gap-1">
+            <button onClick={() => setEditing('new')} className="btn-primary px-3 py-2 rounded-control text-sm font-semibold flex items-center gap-1">
               <Plus className="w-4 h-4" /> Add bill
             </button>
           </div>
@@ -291,7 +291,7 @@ export default function BillsTab({ userId, initialBills, initialTransactions }: 
       </div>
 
       {/* Filter segmented control */}
-      <div className="flex items-center gap-1.5 p-1.5 bg-[var(--background-secondary)] rounded-control border border-[var(--border-color)] overflow-x-auto">
+      <div className="flex items-center gap-2 p-2 bg-[var(--background-secondary)] rounded-control border border-[var(--border-color)] overflow-x-auto">
         {FILTERS.map((f) => (
           <button
             key={f.id}
@@ -331,16 +331,16 @@ export default function BillsTab({ userId, initialBills, initialTransactions }: 
               {bill.migrationStatus === 'to-switch' ? (
                 <button
                   onClick={() => applyUpdate(bill.id, { migrationStatus: 'switched', paymentMethodId: 'bofa-debit' })}
-                  className="mt-0.5 w-6 h-6 min-w-[44px] min-h-[44px] shrink-0 rounded-control border-2 border-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/20 transition-colors"
+                  className="mt-1 w-6 h-6 min-w-[44px] min-h-[44px] shrink-0 rounded-control border-2 border-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/20 transition-colors"
                   title="Mark switched to BofA debit"
                   aria-label={`Mark ${bill.vendor} switched to BofA debit`}
                 />
               ) : bill.migrationStatus === 'switched' ? (
-                <div className="mt-0.5 w-6 h-6 min-w-[44px] min-h-[44px] shrink-0 rounded-control bg-[var(--accent-primary)] flex items-center justify-center">
+                <div className="mt-1 w-6 h-6 min-w-[44px] min-h-[44px] shrink-0 rounded-control bg-[var(--accent-primary)] flex items-center justify-center">
                   <Check className="w-4 h-4 text-[#16181c]" />
                 </div>
               ) : (
-                <div className="mt-0.5 w-6 h-6 min-w-[44px] min-h-[44px] shrink-0" />
+                <div className="mt-1 w-6 h-6 min-w-[44px] min-h-[44px] shrink-0" />
               )}
 
               <div
@@ -379,12 +379,12 @@ export default function BillsTab({ userId, initialBills, initialTransactions }: 
                   )}
                   {needsAttention && <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />}
                 </div>
-                <div className="text-sm text-[var(--foreground-secondary)] mt-0.5">
+                <div className="text-sm text-[var(--foreground-secondary)] mt-1">
                   {formatMoney(bill.amount, 'USD', 2)} · {bill.frequency}
                   {bill.autopayDay ? ` · day ${bill.autopayDay}` : ''}
                   {cancelled ? ` · ${LIFECYCLE_LABELS[bill.lifecycleStatus]}` : ''}
                 </div>
-                <div className="text-sm text-[var(--foreground-muted)] mt-0.5 relative">
+                <div className="text-sm text-[var(--foreground-muted)] mt-1 relative">
                   {method?.label || bill.paymentMethodId} ·{' '}
                   <button
                     onClick={(e) => { e.stopPropagation(); setStatusMenuFor(statusMenuFor === bill.id ? null : bill.id); }}
@@ -460,7 +460,7 @@ export default function BillsTab({ userId, initialBills, initialTransactions }: 
                   const others = rest.reduce((s, x) => s + x.monthly, 0);
                   const max = Math.max(...top.map(x => Math.abs(x.monthly)), 0.01);
                   return (
-                    <div className="space-y-1.5">
+                    <div className="space-y-2">
                       {top.map(x => (
                         <div key={x.merchant} className="flex items-center gap-2">
                           <span className="w-36 truncate text-[var(--foreground-secondary)]">{x.merchant}</span>

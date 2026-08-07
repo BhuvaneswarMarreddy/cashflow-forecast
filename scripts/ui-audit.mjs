@@ -53,10 +53,18 @@ const THEMES = ['dark', 'light'];
 const ALLOWED_RADII = [0, 10, 16, 999];
 const TOUCH_MIN = 44;
 
+/**
+ * The spec's spacing scale is a 4px grid (edges 16/32, card padding 16/20, gaps
+ * 12/24), so the rule is the grid itself rather than a hand-listed set — an
+ * explicit list flagged legitimate layout offsets like the 96px navbar clearance
+ * while missing that 36px is on-grid. 1px and 2px are hairlines and separators.
+ */
+const SPACING_EXTRA = [1, 2];
+
 /* ------------------------------------------------------------------ *
  * Everything below runs INSIDE the page.
  * ------------------------------------------------------------------ */
-function collectFindings({ ALLOWED_RADII, TOUCH_MIN }) {
+function collectFindings({ ALLOWED_RADII, TOUCH_MIN, SPACING_EXTRA }) {
   const findings = [];
   const add = (check, detail, el, extra = {}) =>
     findings.push({ check, detail, selector: describe(el), ...extra });
@@ -196,7 +204,53 @@ function collectFindings({ ALLOWED_RADII, TOUCH_MIN }) {
     }
   }
 
-  /* --- 6. The page scrolls sideways -------------------------------- */
+  /* --- 6. Spacing off the 4px scale -------------------------------- *
+   * A value someone typed rather than chose. Reported per element AND
+   * summarised as a value histogram, because "the app uses 19 distinct
+   * paddings" is the finding, not any single one of them.               */
+  const spacingSeen = {};
+  for (const el of document.querySelectorAll('body *')) {
+    if (!visible(el)) continue;
+    if (el.closest('nextjs-portal, [data-nextjs-toast], svg')) continue;
+    const cs = getComputedStyle(el);
+    const props = {
+      paddingTop: cs.paddingTop, paddingRight: cs.paddingRight,
+      paddingBottom: cs.paddingBottom, paddingLeft: cs.paddingLeft,
+      rowGap: cs.rowGap, columnGap: cs.columnGap,
+      marginTop: cs.marginTop, marginBottom: cs.marginBottom,
+    };
+    const bad = [];
+    for (const [prop, raw] of Object.entries(props)) {
+      if (!raw || raw === 'normal' || raw.includes('%')) continue;
+      const px = Math.round(parseFloat(raw));
+      if (!Number.isFinite(px) || px < 0) continue; // negative margins are deliberate
+      (spacingSeen[prop.startsWith('margin') ? 'margin' : prop.startsWith('padding') ? 'padding' : 'gap'] ??= {});
+      const bucket = spacingSeen[prop.startsWith('margin') ? 'margin' : prop.startsWith('padding') ? 'padding' : 'gap'];
+      bucket[px] = (bucket[px] || 0) + 1;
+      const onGrid = px % 4 === 0 || SPACING_EXTRA.includes(px);
+      if (!onGrid) bad.push(`${prop}:${px}px`);
+    }
+    if (bad.length) add('off-scale-spacing', bad.join(' '), el, { values: bad });
+  }
+  findings.push({ check: 'spacing-histogram', detail: JSON.stringify(spacingSeen), selector: '(page)' });
+
+  /* --- 7. Sibling rows in one list disagree on rhythm --------------- *
+   * The eye reads a list as broken long before it can name why: two rows
+   * 12px apart and the next 20px. Only flagged for lists of 3+.        */
+  for (const list of document.querySelectorAll('ul, ol, [role="list"], .space-y-2, .space-y-3, .space-y-4')) {
+    const kids = [...list.children].filter(visible);
+    if (kids.length < 3) continue;
+    const heights = kids.map((k) => {
+      const cs = getComputedStyle(k);
+      return `${Math.round(parseFloat(cs.paddingTop))}/${Math.round(parseFloat(cs.paddingBottom))}`;
+    });
+    const distinct = new Set(heights);
+    if (distinct.size > 1) {
+      add('ragged-list-rhythm', `${distinct.size} different row paddings: ${[...distinct].join(', ')}`, list);
+    }
+  }
+
+  /* --- 8. The page scrolls sideways -------------------------------- */
   const doc = document.documentElement;
   if (doc.scrollWidth > doc.clientWidth + 1) {
     const wide = [...document.querySelectorAll('body *')].filter((el) => {
@@ -252,7 +306,7 @@ for (const target of targets) {
         if (rendered < 40) {
           throw new Error(`surface rendered only ${rendered} chars — nothing to audit`);
         }
-        const findings = await page.evaluate(collectFindings, { ALLOWED_RADII, TOUCH_MIN });
+        const findings = await page.evaluate(collectFindings, { ALLOWED_RADII, TOUCH_MIN, SPACING_EXTRA });
         for (const f of findings) all.push({ surface, ...f });
         console.log(`${findings.length ? '✗' : '✓'} ${surface.padEnd(34)} ${findings.length} finding(s)`);
       } catch (err) {

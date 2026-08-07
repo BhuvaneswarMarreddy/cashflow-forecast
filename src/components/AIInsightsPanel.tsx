@@ -245,7 +245,7 @@ export default function AIInsightsPanel({
           <button
             onClick={generateAIInsight}
             disabled={isLoading}
-            className="text-xs px-3 py-1.5 rounded-control bg-[var(--accent-primary)] text-[#16181c] hover:opacity-90 disabled:opacity-50 flex items-center gap-1"
+            className="text-xs px-3 py-2 rounded-control bg-[var(--accent-primary)] text-[#16181c] hover:opacity-90 disabled:opacity-50 flex items-center gap-1"
           >
             {isLoading ? (
               <span className="animate-pulse">Analyzing...</span>
@@ -263,7 +263,7 @@ export default function AIInsightsPanel({
       {aiInsight && (
         <div className="p-4 bg-[var(--accent-primary)]/5 border-b border-[var(--border-color)]">
           <div className="flex gap-3">
-            <Lightbulb className="w-5 h-5 text-[var(--accent-primary)] flex-shrink-0 mt-0.5" />
+            <Lightbulb className="w-5 h-5 text-[var(--accent-primary)] flex-shrink-0 mt-1" />
             <p className="text-sm text-[var(--foreground-secondary)] leading-relaxed">{aiInsight}</p>
           </div>
         </div>

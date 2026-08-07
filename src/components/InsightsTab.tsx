@@ -166,7 +166,7 @@ export default function InsightsTab() {
               {money(spentSoFar)} of {money(periodBudget)} this {viewMode === 'weekly' ? 'week' : 'month'}
             </p>
           </div>
-          <div className={`flex items-center gap-1.5 text-sm font-semibold tnum ${trend >= 0 ? 'text-[var(--money-out)]' : 'text-[var(--money-in)]'}`}>
+          <div className={`flex items-center gap-2 text-sm font-semibold tnum ${trend >= 0 ? 'text-[var(--money-out)]' : 'text-[var(--money-in)]'}`}>
             {trend >= 0 ? <TrendingUp className="w-4 h-4" aria-hidden="true" /> : <TrendingDown className="w-4 h-4" aria-hidden="true" />}
             {trend >= 0 ? '+' : ''}{trend.toFixed(1)}% vs last {viewMode === 'weekly' ? 'week' : 'month'}
           </div>
@@ -215,7 +215,7 @@ export default function InsightsTab() {
           <p className="text-sm text-[var(--foreground-secondary)] mb-4">
             Top merchants this {viewMode === 'weekly' ? 'week' : 'month'}.
           </p>
-          <div className="space-y-2.5">
+          <div className="space-y-3">
             {topMerchants.map(m => (
               <div key={m.name} className="flex items-center gap-3">
                 <span className="w-36 truncate text-sm text-[var(--foreground-secondary)]">{m.name}</span>

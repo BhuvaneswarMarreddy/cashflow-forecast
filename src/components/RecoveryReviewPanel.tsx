@@ -339,7 +339,7 @@ function PanelBody({
               <button
                 type="button"
                 onClick={() => askAbout(askAboutItem(selected, ctx))}
-                className={`${ACTION_BTN} flex items-center gap-1.5`}
+                className={`${ACTION_BTN} flex items-center gap-2`}
               >
                 <Sparkles className="w-4 h-4" aria-hidden="true" />
                 I don&apos;t understand this — explain it

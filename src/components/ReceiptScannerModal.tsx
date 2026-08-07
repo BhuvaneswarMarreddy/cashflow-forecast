@@ -430,20 +430,20 @@ export default function ReceiptScannerModal({ isOpen, onClose }: ReceiptScannerM
                               value={txn.title}
                               onChange={(e) => updateTransaction(index, 'title', e.target.value)}
                               placeholder="Title"
-                              className="flex-1 px-3 py-1.5 rounded-control bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
+                              className="flex-1 px-3 py-2 rounded-control bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
                             />
                             <input
                               type="text"
                               value={txn.merchant || ''}
                               onChange={(e) => updateTransaction(index, 'merchant', e.target.value)}
                               placeholder="Merchant (Amazon, Walmart...)"
-                              className="w-40 px-3 py-1.5 rounded-control bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
+                              className="w-40 px-3 py-2 rounded-control bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
                             />
                             <input
                               type="date"
                               value={txn.date}
                               onChange={(e) => updateTransaction(index, 'date', e.target.value)}
-                              className="px-3 py-1.5 rounded-control bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
+                              className="px-3 py-2 rounded-control bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
                             />
                           </div>
 
@@ -452,7 +452,7 @@ export default function ReceiptScannerModal({ isOpen, onClose }: ReceiptScannerM
                               <select
                                 value={txn.type}
                                 onChange={(e) => updateTransaction(index, 'type', e.target.value)}
-                                className="px-3 py-1.5 rounded-control bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
+                                className="px-3 py-2 rounded-control bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
                               >
                                 <option value="expense">Expense</option>
                                 <option value="income">Income</option>
@@ -463,7 +463,7 @@ export default function ReceiptScannerModal({ isOpen, onClose }: ReceiptScannerM
                                   type="number"
                                   value={txn.amount}
                                   onChange={(e) => updateTransaction(index, 'amount', parseFloat(e.target.value) || 0)}
-                                  className="w-24 pl-7 pr-3 py-1.5 rounded-control bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
+                                  className="w-24 pl-7 pr-3 py-2 rounded-control bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
                                 />
                               </div>
                             </div>
@@ -471,7 +471,7 @@ export default function ReceiptScannerModal({ isOpen, onClose }: ReceiptScannerM
                             <select
                               value={txn.category}
                               onChange={(e) => updateTransaction(index, 'category', e.target.value)}
-                              className="flex-1 px-3 py-1.5 rounded-control bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
+                              className="flex-1 px-3 py-2 rounded-control bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
                             >
                               {EXPENSE_CATEGORIES.map((cat) => (
                                 <option key={cat.value} value={cat.value}>
@@ -486,7 +486,7 @@ export default function ReceiptScannerModal({ isOpen, onClose }: ReceiptScannerM
                             <select
                               value={txn.paymentMethod || 'chase'}
                               onChange={(e) => updateTransaction(index, 'paymentMethod', e.target.value)}
-                              className="flex-1 px-3 py-1.5 rounded-control bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
+                              className="flex-1 px-3 py-2 rounded-control bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
                             >
                               {profile?.paymentAccounts && profile.paymentAccounts.length > 0 ? (
                                 <>
