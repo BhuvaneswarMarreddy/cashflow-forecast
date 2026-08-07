@@ -1,46 +1,63 @@
 @import "tailwindcss";
 
 :root {
-  /* Dark theme - Midnight Aurora */
-  --background: #14161a;
-  --background-secondary: #1c1f24;
-  --background-tertiary: #24282e;
-  --foreground: #f2f0ea;
-  --foreground-secondary: #9a9c98;
-  --foreground-muted: #8a8d88;   /* WCAG 1.4.3: ~5:1 on the graphite bg (was #5c5f5a = 2.6:1) */
-  
-  /* Accent colors - Deep Blue Theme */
-  --accent-primary: #c9a24e;      /* Gold — filled CTAs use dark text */
-  --accent-secondary: #b08d3f;   /* Deep gold */
-  --accent-tertiary: #d9bd77;    /* Pale gold */
-  --accent-success: #34d399;     /* Green for money in */
-  --accent-danger: #f87171;      /* Red for money out */
-  --accent-warning: #fbbf24;     /* Amber for warnings */
-  
-  /* Payment method colors */
+  /* UI-100 — Midnight Ledger (dark). Values are the FINAL redesign spec
+     (DESIGN-IS-2026-08-07/, pitch artifact); the semantic trio is validated
+     for colorblind separation — change nothing here without re-running
+     the dataviz palette validator. Pinned by design-tokens.test.ts. */
+  --background: #101014;
+  --background-secondary: #1A1A20;
+  --background-tertiary: #22222A;
+  --foreground: #F2EFE6;
+  --foreground-secondary: #B9B4A5;
+  --foreground-muted: #948F82;   /* WCAG 1.4.3: ~5:1 on the ink bg */
+
+  /* Accents — gold carries brand + progress; money-in is TEAL (never green:
+     old red/green pair measured deutan ΔE 2.4 — indistinguishable). */
+  --accent-primary: #D9A521;     /* Gold — filled CTAs use dark text */
+  --accent-secondary: #B98D18;   /* Deep gold */
+  --accent-tertiary: #E7C55C;    /* Pale gold */
+  --accent-success: #1FA2A8;     /* teal — money in */
+  --accent-danger: #E5484D;      /* red — money out */
+  --accent-warning: #D9A521;     /* warnings wear gold, not a 4th hue */
+
+  /* Semantic money aliases — new code reads these, not the accent names */
+  --money-in: #1FA2A8;
+  --money-out: #E5484D;
+  --progress: #D9A521;
+
+  /* Chart MARKS (validated trio for this surface; text uses the accents above) */
+  --chart-progress: #c98500;
+  --chart-in: #1FA2A8;
+  --chart-out: #E5484D;
+
+  /* Payment method colors — legacy; UI-104/106 remove the last usages */
   --amex-blue: #006fcf;
   --chase-blue: #117aca;
   --discover-orange: #ff6000;
   --apple-gray: #a2aaad;
   --visa-blue: #1a1f71;
   --mastercard-red: #eb001b;
-  
-  /* Gradients - Deep Blue Theme */
-  --gradient-aurora: linear-gradient(135deg, #b08d3f 0%, #c9a24e 100%);
-  --gradient-sunset: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
-  --gradient-ocean: linear-gradient(135deg, #8a6d2e 0%, #c9a24e 100%);
-  --gradient-purple: linear-gradient(135deg, #3d4653 0%, #b08d3f 100%);
-  
-  /* Shadows - Blue glow */
-  --shadow-glow: 0 0 40px rgba(201, 162, 78, 0.28);
+
+  /* Gradients — gold family only; the sunset/purple jazz is retired */
+  --gradient-aurora: linear-gradient(135deg, #B98D18 0%, #D9A521 100%);
+  --gradient-sunset: linear-gradient(135deg, #B3261E 0%, #E5484D 100%);
+  --gradient-ocean: linear-gradient(135deg, #8a6d2e 0%, #D9A521 100%);
+  --gradient-purple: linear-gradient(135deg, #22222A 0%, #B98D18 100%);
+
+  /* Shadows — one level, quiet */
+  --shadow-glow: 0 0 32px rgba(217, 165, 33, 0.18);
   --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.4);
-  
+
   /* Border */
-  --border-color: #2b2f35;
-  --border-glow: rgba(201, 162, 78, 0.5);
+  --border-color: #2A2A32;
+  --border-glow: rgba(217, 165, 33, 0.45);
 
   /* Glass surface (theme-dependent) */
-  --glass-bg: rgba(22, 27, 34, 0.8);
+  --glass-bg: rgba(20, 20, 24, 0.8);
+
+  /* Type — serif carries hero numbers and screen titles */
+  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
 
   color-scheme: dark;
 }
@@ -49,45 +66,59 @@
    the gold TEXT token deepens for contrast. Toggle wins over OS preference:
    [data-theme] is stamped on <html> by the Settings toggle / boot script. */
 :root[data-theme="light"] {
-  --background: #f6f3ec;
-  --background-secondary: #fdfcf8;
-  --background-tertiary: #ebe6d9;
-  --foreground: #1d1f24;
-  --foreground-secondary: #4b4e55;
-  --foreground-muted: #6c6f68;
-  --accent-primary: #9a7b30;
-  --accent-secondary: #83672a;
-  --accent-tertiary: #b08d3f;
-  --accent-success: #157f5f;
-  --accent-danger: #cf3a41;
-  --accent-warning: #9a6a05;
-  --border-color: #ded7c8;
-  --border-glow: rgba(154, 123, 48, 0.5);
-  --shadow-glow: 0 0 40px rgba(154, 123, 48, 0.18);
+  /* UI-100 — Paper & Gold (light). Same contract as the dark block above. */
+  --background: #FAF7EF;
+  --background-secondary: #FFFFFF;
+  --background-tertiary: #F0EBDD;
+  --foreground: #17150F;
+  --foreground-secondary: #5C574A;
+  --foreground-muted: #6E695C;
+  --accent-primary: #8A6D0B;
+  --accent-secondary: #745B09;
+  --accent-tertiary: #B98D18;
+  --accent-success: #177864;   /* teal text — money in */
+  --accent-danger: #C0393F;    /* red text — money out */
+  --accent-warning: #8A6D0B;
+  --money-in: #177864;
+  --money-out: #C0393F;
+  --progress: #8A6D0B;
+  --chart-progress: #eda100;
+  --chart-in: #00987F;
+  --chart-out: #e34948;
+  --border-color: #E7E1D2;
+  --border-glow: rgba(138, 109, 11, 0.45);
+  --shadow-glow: 0 0 32px rgba(138, 109, 11, 0.14);
   --shadow-card: 0 4px 20px rgba(70, 60, 30, 0.1);
-  --glass-bg: rgba(255, 255, 255, 0.75);
+  --glass-bg: rgba(255, 255, 255, 0.78);
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
-    --background: #f6f3ec;
-    --background-secondary: #fdfcf8;
-    --background-tertiary: #ebe6d9;
-    --foreground: #1d1f24;
-    --foreground-secondary: #4b4e55;
-    --foreground-muted: #6c6f68;
-    --accent-primary: #9a7b30;
-    --accent-secondary: #83672a;
-    --accent-tertiary: #b08d3f;
-    --accent-success: #157f5f;
-    --accent-danger: #cf3a41;
-    --accent-warning: #9a6a05;
-    --border-color: #ded7c8;
-    --border-glow: rgba(154, 123, 48, 0.5);
-    --shadow-glow: 0 0 40px rgba(154, 123, 48, 0.18);
+    /* Keep in lockstep with :root[data-theme="light"] above (UI-100). */
+    --background: #FAF7EF;
+    --background-secondary: #FFFFFF;
+    --background-tertiary: #F0EBDD;
+    --foreground: #17150F;
+    --foreground-secondary: #5C574A;
+    --foreground-muted: #6E695C;
+    --accent-primary: #8A6D0B;
+    --accent-secondary: #745B09;
+    --accent-tertiary: #B98D18;
+    --accent-success: #177864;
+    --accent-danger: #C0393F;
+    --accent-warning: #8A6D0B;
+    --money-in: #177864;
+    --money-out: #C0393F;
+    --progress: #8A6D0B;
+    --chart-progress: #eda100;
+    --chart-in: #00987F;
+    --chart-out: #e34948;
+    --border-color: #E7E1D2;
+    --border-glow: rgba(138, 109, 11, 0.45);
+    --shadow-glow: 0 0 32px rgba(138, 109, 11, 0.14);
     --shadow-card: 0 4px 20px rgba(70, 60, 30, 0.1);
-    --glass-bg: rgba(255, 255, 255, 0.75);
+    --glass-bg: rgba(255, 255, 255, 0.78);
     color-scheme: light;
   }
 }
@@ -98,6 +129,21 @@
   --font-sans: var(--font-outfit), sans-serif;
   --font-mono: var(--font-space-mono), monospace;
 }
+
+/* UI-100 — the hero number: one serif figure owns each screen. */
+.hero-number {
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  line-height: 1.1;
+  font-size: 1.75rem; /* 28px mobile */
+  text-wrap: balance;
+}
+@media (min-width: 1024px) {
+  .hero-number { font-size: 2.5rem; } /* 40px desktop */
+}
+/* Money figures line up everywhere. */
+.tnum { font-variant-numeric: tabular-nums; }
 
 * {
   box-sizing: border-box;
@@ -567,18 +613,18 @@ select option:checked {
 }
 
 .badge-expense {
-  background: rgba(239, 68, 68, 0.2);
-  color: #f87171;
+  background: color-mix(in srgb, var(--money-out) 18%, transparent);
+  color: var(--money-out);
 }
 
 .badge-income {
-  background: rgba(16, 185, 129, 0.2);
-  color: #34d399;
+  background: color-mix(in srgb, var(--money-in) 18%, transparent);
+  color: var(--money-in);
 }
 
 .badge-projected {
-  background: rgba(245, 158, 11, 0.2);
-  color: #fbbf24;
+  background: color-mix(in srgb, var(--progress) 18%, transparent);
+  color: var(--progress);
 }
 
 /* Stat card */
