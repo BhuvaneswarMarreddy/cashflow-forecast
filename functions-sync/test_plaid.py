@@ -164,6 +164,11 @@ class AutoCreateAccounts(unittest.TestCase):
         raw = {"account_id": "p1", "name": "Blue Cash Preferred", "mask": "1005",
                "type": "credit", "balances": {"current": 2568.37}}
         adapted = plaid_ingest.adapt_pl_account(raw, "American Express")
+        # adapt_pl_account stamps displayLastUpdatedAt with the REAL clock (a live
+        # balance pull's date is now — intentional), and anchor_when prefers that
+        # stamp over `today`. Left unpinned, this test only passes while the wall
+        # clock reads 2026-08-06 (issue #19: green at 23:15, red at 00:21). Pin it.
+        adapted["displayLastUpdatedAt"] = "2026-08-06T12:00:00-05:00"
         fields = plaid_ingest.new_account_fields(adapted, raw, "American Express", "2026-08-06")
         self.assertEqual(fields["type"], "credit_card")
         self.assertEqual(fields["provider"], "amex")
