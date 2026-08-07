@@ -31,29 +31,38 @@ function shippedRasters(): string[] {
   return [...favicons, ...logos];
 }
 
-async function cornerPixel(file: string): Promise<[number, number, number, number]> {
-  const { data } = await sharp(file).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-  return [data[0], data[1], data[2], data[3]]; // top-left pixel
+/** All four corners — a mask can go wrong on one corner and look fine on another. */
+async function cornerPixels(file: string): Promise<[number, number, number, number][]> {
+  const { data, info } = await sharp(file)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const { width: w, height: h, channels: c } = info;
+  const at = (x: number, y: number): [number, number, number, number] => {
+    const i = (y * w + x) * c;
+    return [data[i], data[i + 1], data[i + 2], data[i + 3]];
+  };
+  return [at(0, 0), at(w - 1, 0), at(0, h - 1), at(w - 1, h - 1)];
 }
 
 describe('the favicon the browser actually loads', () => {
   test.each(shippedRasters().map((f) => [f.replace(`${root}/`, ''), f]))(
     '%s has no white corner box',
     async (_label, file) => {
-      const [r, g, b, a] = await cornerPixel(file);
-      const isWhite = a > 0 && r > 240 && g > 240 && b > 240;
-      expect(isWhite).toBe(false);
+      const white = (await cornerPixels(file)).filter(
+        ([r, g, b, a]) => a > 0 && r > 240 && g > 240 && b > 240
+      );
+      expect(white).toEqual([]);
     }
   );
 
   test.each(shippedRasters().map((f) => [f.replace(`${root}/`, ''), f]))(
-    '%s corner is the Midnight ground, fully opaque',
+    '%s corners are all the Midnight ground, fully opaque',
     async (_label, file) => {
-      const [r, g, b, a] = await cornerPixel(file);
       // #101014 — the same ground the SVG paints on a dark tab bar. Opaque, so
-      // no host background can bleed through the rounded corner.
-      expect([r, g, b]).toEqual([16, 16, 20]);
-      expect(a).toBe(255);
+      // no host background can bleed through a rounded corner.
+      const ink: [number, number, number, number] = [16, 16, 20, 255];
+      expect(await cornerPixels(file)).toEqual([ink, ink, ink, ink]);
     }
   );
 
