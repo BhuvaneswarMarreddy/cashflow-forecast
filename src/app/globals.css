@@ -224,66 +224,75 @@ body {
   box-shadow: var(--shadow-glow);
 }
 
-/* Input styles */
-.input-field {
-  background: var(--background-tertiary);
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  padding: 14px 18px;
-  color: var(--foreground);
-  font-size: 0.95rem;
-  transition: all 0.2s ease;
-  width: 100%;
-  font-family: var(--font-sans);
-  letter-spacing: 0.01em;
-  line-height: 1.5;
-}
+/**
+ * Input styles — INSIDE @layer components, and that is load-bearing.
+ *
+ * Unlayered CSS beats every layered rule regardless of specificity, and
+ * Tailwind ships its utilities in @layer utilities. So while this block sat
+ * unlayered, `.input-field`'s shorthand `padding` silently defeated every
+ * padding utility in the app: `className="input-field pl-[3.5rem]"` compiled
+ * fine, applied nothing, and the icon meant to sit in the cleared space landed
+ * on top of the value instead. 36 inputs across 8 files rendered that way.
+ *
+ * The previous fix was two hand-written overrides, `.input-field.pl-12` and
+ * `.pr-12`, which is why the login form looked right and every field using any
+ * other padding value did not. Both are deleted: with this block layered, the
+ * real utilities win on their own.
+ *
+ * Verified by scripts/ui-audit.mjs, which measures the field's content box
+ * against its icon rather than trusting the markup.
+ */
+@layer components {
+  .input-field {
+    background: var(--background-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 14px 18px;
+    color: var(--foreground);
+    font-size: 0.95rem;
+    transition: all 0.2s ease;
+    width: 100%;
+    font-family: var(--font-sans);
+    letter-spacing: 0.01em;
+    line-height: 1.5;
+  }
 
-.input-field:focus {
-  outline: none;
-  border-color: var(--accent-primary);
-  box-shadow: 0 0 0 3px rgba(201, 162, 78, 0.2);
-}
+  .input-field:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(201, 162, 78, 0.2);
+  }
 
-.input-field::placeholder {
-  color: var(--foreground-muted);
-  font-weight: 400;
-  letter-spacing: 0.02em;
-}
+  .input-field::placeholder {
+    color: var(--foreground-muted);
+    font-weight: 400;
+    letter-spacing: 0.02em;
+  }
 
-/* Input with icon - left padding for icon space */
-.input-field.pl-12 {
-  padding-left: 2.75rem;
-}
+  /* Icon positioning inside input wrapper */
+  .input-icon-left {
+    position: absolute;
+    left: 0.875rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--foreground-muted);
+    pointer-events: none;
+    transition: color 0.2s ease;
+  }
 
-/* Input with icon on right */
-.input-field.pr-12 {
-  padding-right: 2.75rem;
-}
+  .input-icon-right {
+    position: absolute;
+    right: 0.875rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--foreground-muted);
+  }
 
-/* Icon positioning inside input wrapper */
-.input-icon-left {
-  position: absolute;
-  left: 0.875rem;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--foreground-muted);
-  pointer-events: none;
-  transition: color 0.2s ease;
-}
-
-.input-icon-right {
-  position: absolute;
-  right: 0.875rem;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--foreground-muted);
-}
-
-/* Focus state icon color */
-.input-field:focus + .input-icon-left,
-.input-field:focus ~ .input-icon-left {
-  color: var(--accent-primary);
+  /* Focus state icon color */
+  .input-field:focus + .input-icon-left,
+  .input-field:focus ~ .input-icon-left {
+    color: var(--accent-primary);
+  }
 }
 
 /* Number input - hide spinners */
@@ -514,7 +523,8 @@ input[type="number"].input-field::-webkit-inner-spin-button {
   box-shadow: var(--shadow-card) !important;
 }
 
-/* Select dropdown */
+/* Select dropdown — layered for the same cascade reason as .input-field. */
+@layer components {
 .select-field {
   background: var(--background-tertiary);
   border: 1px solid var(--border-color);
@@ -536,15 +546,11 @@ input[type="number"].input-field::-webkit-inner-spin-button {
   line-height: 1.5;
 }
 
-/* Select with icon - left padding for icon space */
-.select-field.pl-12 {
-  padding-left: 2.75rem;
-}
-
 .select-field:focus {
   outline: none;
   border-color: var(--accent-primary);
   box-shadow: 0 0 0 3px rgba(201, 162, 78, 0.2);
+}
 }
 
 /* Select option styling */
@@ -840,15 +846,21 @@ dialog.sheet::backdrop {
     font-size: 0.9rem;
   }
 
-  .input-field,
-  .select-field {
-    padding: 12px 14px;
-    font-size: 16px; /* Prevents iOS zoom */
-  }
-
-  .input-field.pl-12,
-  .select-field.pl-12 {
-    padding-left: 2.5rem;
+  /**
+   * Layered for the same reason as the base .input-field block: unlayered, this
+   * shorthand `padding` beat every padding utility BELOW 640px only — which is
+   * why the icon inputs measured 56px of left padding on desktop and 14px on a
+   * phone, and why the `$` landed on the value there and nowhere else.
+   *
+   * The `.pl-12` companion override is gone with it; the real utility applies.
+   */
+  @layer components {
+    .input-field,
+    .select-field {
+      padding-block: 12px;
+      padding-inline: 14px;
+      font-size: 16px; /* Prevents iOS zoom */
+    }
   }
 
   .stat-card {
