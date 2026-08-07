@@ -170,3 +170,81 @@ describe('starter seed integrity', () => {
     for (const i of installments) expect(i.migrationStatus).toBe('exception');
   });
 });
+
+// ---------------------------------------------------------------------------
+// v1.1 — merchant drill-down (spendBreakdown)
+// ---------------------------------------------------------------------------
+
+import { BillMatcher, matcherApplies, spendBreakdown } from '@/lib/bills';
+import type { Transaction } from '@/types';
+
+const tx = (over: Partial<Transaction>): Transaction => ({
+  id: 't', title: 'SYNTHETIC', amount: 10, type: 'expense', category: 'other',
+  paymentMethod: 'other', date: '2026-07-15', ...over,
+} as Transaction);
+
+describe('matcherApplies', () => {
+  const groceries: BillMatcher = { categories: ['Groceries'], excludeMerchants: ['Instacart'] };
+
+  test('matches by sourceCategory and respects merchant exclusions', () => {
+    expect(matcherApplies(groceries, tx({ sourceCategory: 'Groceries', merchant: 'H-E-B' }))).toBe(true);
+    expect(matcherApplies(groceries, tx({ sourceCategory: 'Groceries', merchant: 'Instacart' }))).toBe(false);
+    expect(matcherApplies(groceries, tx({ sourceCategory: 'Gas', merchant: 'H-E-B' }))).toBe(false);
+  });
+
+  test('matches by merchant and drops one-offs above excludeOver', () => {
+    const amazon: BillMatcher = { merchants: ['Amazon'], excludeOver: 1000 };
+    expect(matcherApplies(amazon, tx({ merchant: 'Amazon', amount: 86.59 }))).toBe(true);
+    expect(matcherApplies(amazon, tx({ merchant: 'Amazon', amount: 2271.09 }))).toBe(false);
+    expect(matcherApplies(amazon, tx({ merchant: 'Walmart', amount: 5 }))).toBe(false);
+  });
+
+  test('ignores transfers and pending rows', () => {
+    const any: BillMatcher = { categories: ['Groceries'] };
+    expect(matcherApplies(any, tx({ sourceCategory: 'Groceries', type: 'transfer' }))).toBe(false);
+    expect(matcherApplies(any, tx({ sourceCategory: 'Groceries', pending: true }))).toBe(false);
+  });
+});
+
+describe('spendBreakdown', () => {
+  const TODAY = new Date('2026-08-07T12:00:00');
+  const matcher: BillMatcher = { categories: ['Groceries'], excludeMerchants: ['Instacart'] };
+
+  const rows: Transaction[] = [
+    tx({ id: 'a', sourceCategory: 'Groceries', merchant: 'H-E-B', amount: 100, date: '2026-05-10' }),
+    tx({ id: 'b', sourceCategory: 'Groceries', merchant: 'H-E-B', amount: 50, date: '2026-06-10' }),
+    tx({ id: 'c', sourceCategory: 'Groceries', merchant: 'Kroger', amount: 60, date: '2026-07-10' }),
+    // refund nets against the merchant
+    tx({ id: 'd', sourceCategory: 'Groceries', merchant: 'Kroger', amount: 10, type: 'income', date: '2026-07-12' }),
+    // store-card payment credit must NOT count as a refund
+    tx({ id: 'e', sourceCategory: 'Groceries', merchant: 'Kroger', title: 'No Details Available', amount: 500, type: 'income', date: '2026-07-13' }),
+    // outside the 3-full-month window (April) and current-month partial (August)
+    tx({ id: 'f', sourceCategory: 'Groceries', merchant: 'H-E-B', amount: 999, date: '2026-04-30' }),
+    tx({ id: 'g', sourceCategory: 'Groceries', merchant: 'H-E-B', amount: 25, date: '2026-08-05' }),
+    // excluded merchant never appears
+    tx({ id: 'h', sourceCategory: 'Groceries', merchant: 'Instacart', amount: 400, date: '2026-07-01' }),
+  ];
+
+  test('windows to the last 3 full months, nets refunds, reports current month separately', () => {
+    const b = spendBreakdown(matcher, rows, TODAY);
+    expect(b.months.map(m => m.month)).toEqual(['2026-05', '2026-06', '2026-07']);
+    expect(b.months.map(m => m.total)).toEqual([100, 50, 50]); // Jul: 60 − 10 refund
+    expect(b.actualMonthly).toBeCloseTo(200 / 3, 2);
+    expect(b.currentMonth).toEqual({ month: '2026-08', total: 25 });
+  });
+
+  test('ranks merchants by net monthly spend, descending', () => {
+    const b = spendBreakdown(matcher, rows, TODAY);
+    expect(b.merchants[0].merchant).toBe('H-E-B');
+    expect(b.merchants[0].monthly).toBeCloseTo(150 / 3, 2);
+    expect(b.merchants[1].merchant).toBe('Kroger');
+    expect(b.merchants[1].monthly).toBeCloseTo(50 / 3, 2);
+  });
+
+  test('falls back to title when merchant is absent', () => {
+    const b = spendBreakdown({ categories: ['Gas'] }, [
+      tx({ sourceCategory: 'Gas', merchant: undefined, title: 'SHELL OIL 5744', amount: 30, date: '2026-07-02' }),
+    ], TODAY);
+    expect(b.merchants[0].merchant).toBe('SHELL OIL 5744');
+  });
+});

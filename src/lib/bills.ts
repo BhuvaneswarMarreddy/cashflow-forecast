@@ -10,6 +10,8 @@
  * round once, so per-row rounding can never drift a header total.
  */
 
+import type { Transaction } from '@/types';
+
 export type BillFrequency =
   | 'weekly'
   | 'biweekly'
@@ -27,6 +29,21 @@ export type MigrationStatus =
 
 export type LifecycleStatus = 'active' | 'cancel-planned' | 'cancelled';
 
+/**
+ * Links a bill row (typically a budget-target "(average)" row) to the live
+ * transactions behind it, so tapping the row shows actual merchants and a
+ * target-vs-actual comparison. All rules AND together.
+ */
+export interface BillMatcher {
+  /** Matches Transaction.sourceCategory (the Monarch label). */
+  categories?: string[];
+  /** Matches Transaction.merchant exactly. */
+  merchants?: string[];
+  excludeMerchants?: string[];
+  /** Ignore single rows larger than this — one-off purchases, not run rate. */
+  excludeOver?: number;
+}
+
 export interface Bill {
   id: string;
   vendor: string;
@@ -41,6 +58,7 @@ export interface Bill {
   paymentMethodId: string;
   migrationStatus: MigrationStatus;
   lifecycleStatus: LifecycleStatus;
+  matcher?: BillMatcher;
   remarks?: string;
   source?: 'manual' | 'starter-audit';
   seedVersion?: number;
@@ -131,6 +149,83 @@ export function migrationSummary(bills: Bill[]): MigrationSummary {
     completed: count('switched', 'no-change-needed'),
     exceptions: count('exception'),
     total: bills.length,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Merchant drill-down (v1.1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Does this settled income/expense row belong to the bill's spending bucket?
+ * Transfers and pending holds never count — a hold is not posted truth
+ * (see interpretTransaction in classify.ts for the app-wide policy).
+ */
+export function matcherApplies(m: BillMatcher, t: Transaction): boolean {
+  if (t.type === 'transfer' || t.pending) return false;
+  if (m.categories && !m.categories.includes(t.sourceCategory ?? '')) return false;
+  if (m.merchants && !m.merchants.includes(t.merchant ?? '')) return false;
+  if (m.excludeMerchants && m.excludeMerchants.includes(t.merchant ?? '')) return false;
+  if (m.excludeOver && Math.abs(t.amount) > m.excludeOver) return false;
+  return true;
+}
+
+export interface SpendBreakdown {
+  /** Net spend per month for the last 3 FULL months, oldest first. */
+  months: Array<{ month: string; total: number }>;
+  /** 3-full-month average — the "actual" against the row's target amount. */
+  actualMonthly: number;
+  /** The in-progress month, reported separately ("Aug so far"). */
+  currentMonth: { month: string; total: number };
+  /** Net monthly spend per merchant over the window, descending. */
+  merchants: Array<{ merchant: string; monthly: number }>;
+}
+
+/**
+ * Actual spending behind a matcher: expenses add, refunds (income rows)
+ * subtract. Store-card payment credits arrive as income titled "No Details
+ * Available" and are debt settlement, not refunds — they never subtract.
+ */
+export function spendBreakdown(
+  m: BillMatcher,
+  transactions: Transaction[],
+  today: Date
+): SpendBreakdown {
+  const ym = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  const windowMonths: string[] = [];
+  for (let i = 3; i >= 1; i--) {
+    windowMonths.push(ym(new Date(today.getFullYear(), today.getMonth() - i, 1)));
+  }
+  const current = ym(today);
+
+  const monthTotals = new Map<string, number>(windowMonths.map(mm => [mm, 0]));
+  let currentTotal = 0;
+  const perMerchant = new Map<string, number>();
+
+  for (const t of transactions) {
+    if (!matcherApplies(m, t)) continue;
+    const isRefund = t.type === 'income';
+    if (isRefund && /no details/i.test(t.title)) continue;
+    const signed = isRefund ? -t.amount : t.amount;
+    const month = t.date.slice(0, 7);
+    if (month === current) {
+      currentTotal = roundCurrency(currentTotal + signed);
+      continue;
+    }
+    if (!monthTotals.has(month)) continue;
+    monthTotals.set(month, roundCurrency(monthTotals.get(month)! + signed));
+    const name = t.merchant || t.title;
+    perMerchant.set(name, (perMerchant.get(name) ?? 0) + signed);
+  }
+
+  const months = windowMonths.map(mm => ({ month: mm, total: monthTotals.get(mm)! }));
+  return {
+    months,
+    actualMonthly: roundCurrency(months.reduce((s, x) => s + x.total, 0) / months.length),
+    currentMonth: { month: current, total: currentTotal },
+    merchants: [...perMerchant.entries()]
+      .map(([merchant, total]) => ({ merchant, monthly: roundCurrency(total / months.length) }))
+      .sort((a, b) => b.monthly - a.monthly),
   };
 }
 
