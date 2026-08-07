@@ -175,6 +175,7 @@ const ALICE_COLLECTIONS = [
   'reviewCandidates',
   'serviceFamilies',
   'budgets',
+  'bills',
 ];
 
 async function seed() {
@@ -838,5 +839,60 @@ describe('5i. service family invariants', () => {
 
   it('refuses a non-list aliases', async () => {
     await assertFails(setDoc(at('f5'), family({ aliases: 'syntheticsvc' })));
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe('5j. bills invariants (BILLS-001)', () => {
+  const at = (id) => doc(asAlice(), 'users', ALICE, 'bills', id);
+  const bill = (overrides = {}) => ({
+    vendor: 'Verizon Wireless',
+    amount: 525,
+    frequency: 'monthly',
+    paymentMethodId: 'bofa-checking-ach',
+    migrationStatus: 'no-change-needed',
+    lifecycleStatus: 'active',
+    ...overrides,
+  });
+
+  it('creates a valid bill', async () => {
+    await assertSucceeds(setDoc(at('b1'), bill()));
+  });
+
+  it('refuses a missing required key', async () => {
+    const { frequency, ...missing } = bill();
+    await assertFails(setDoc(at('b2'), missing));
+  });
+
+  it('refuses an empty vendor', async () => {
+    await assertFails(setDoc(at('b3'), bill({ vendor: '' })));
+  });
+
+  it('refuses a zero or negative amount', async () => {
+    await assertFails(setDoc(at('b4'), bill({ amount: 0 })));
+    await assertFails(setDoc(at('b5'), bill({ amount: -5 })));
+  });
+
+  it('refuses a non-numeric amount', async () => {
+    await assertFails(setDoc(at('b6'), bill({ amount: '525' })));
+  });
+
+  it('refuses an unknown frequency', async () => {
+    await assertFails(setDoc(at('b7'), bill({ frequency: 'fortnightly' })));
+  });
+
+  it('refuses an unknown migrationStatus', async () => {
+    await assertFails(setDoc(at('b8'), bill({ migrationStatus: 'done' })));
+  });
+
+  it('refuses an unknown lifecycleStatus', async () => {
+    await assertFails(setDoc(at('b9'), bill({ lifecycleStatus: 'paused' })));
+  });
+
+  it('updates and deletes their own bill', async () => {
+    await assertSucceeds(setDoc(at('b10'), bill()));
+    await assertSucceeds(setDoc(at('b10'), bill({ migrationStatus: 'switched' })));
+    await assertSucceeds(deleteDoc(at('b10')));
   });
 });

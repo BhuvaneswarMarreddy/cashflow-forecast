@@ -373,6 +373,28 @@ service cloud.firestore {
       match /reminders/{reminderId} {
         allow read, write: if isOwner(userId);
       }
+
+      // =========================================
+      // Bills register (BILLS-001)
+      // =========================================
+      // Manually curated recurring obligations driving the autopay migration.
+      // Carries money, so it gets the transaction-style shape treatment. A new
+      // collection MUST have a match block here or the deny-all below silently
+      // rejects the app's own writes (see the plannedTransactions note above).
+      match /bills/{billId} {
+        allow read: if isOwner(userId);
+
+        allow create, update: if isOwner(userId) &&
+          request.resource.data.keys().hasAll(['vendor', 'amount', 'frequency', 'paymentMethodId', 'migrationStatus', 'lifecycleStatus']) &&
+          isValidString(request.resource.data.vendor, 1, 200) &&
+          request.resource.data.amount is number &&
+          request.resource.data.amount > 0 &&
+          request.resource.data.frequency in ['weekly', 'biweekly', 'monthly', 'quarterly', 'semiannual', 'annual'] &&
+          request.resource.data.migrationStatus in ['to-review', 'to-switch', 'switched', 'exception', 'no-change-needed'] &&
+          request.resource.data.lifecycleStatus in ['active', 'cancel-planned', 'cancelled'];
+
+        allow delete: if isOwner(userId);
+      }
     }
     
     // =========================================
