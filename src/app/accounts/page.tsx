@@ -10,15 +10,12 @@ import Navbar from '@/components/Navbar';
 import AccountsList from '@/components/AccountsList';
 import AccountsDiagnostics from '@/components/AccountsDiagnostics';
 import AccountDetailModal from '@/components/AccountDetailModal';
-import AccountTransactions from '@/components/AccountTransactions';
 import SubscriptionsPanel from '@/components/SubscriptionsPanel';
 import BudgetSettingsPanel from '@/components/BudgetSettingsPanel';
 import BudgetStatusPanel from '@/components/BudgetStatusPanel';
 import DebtPlannerPanel from '@/components/DebtPlannerPanel';
 import { PAYMENT_METHODS, ACCOUNT_TYPES, PaymentAccount, IncomeSource, AccountType, PaymentMethod, CategoryBudget } from '@/types';
-import { deriveAccountBalance, withDerivedBalances, monthlyAverages } from '@/lib/forecast';
-import { matchTransfers } from '@/lib/transfers';
-import { interpretTransaction } from '@/lib/classify';
+import { withDerivedBalances, monthlyAverages } from '@/lib/forecast';
 import { currentOf } from '@/lib/accounts';
 import { syncNow, describeSync, connectBankWithPlaid } from '@/lib/sync-client';
 import { useAccountsObservability } from '@/lib/obs/useAccountsObservability';
@@ -37,11 +34,7 @@ import {
   X,
   AlertCircle,
   FileText,
-  Percent,
-  Receipt,
   BarChart3,
-  ArrowLeftRight,
-  AlertTriangle,
   RefreshCw,
 } from 'lucide-react';
 
@@ -64,7 +57,7 @@ export default function AccountsPage() {
   const { transactions, isLoading: transactionsLoading, error: transactionsError, refreshTransactions } = useTransactions();
   const router = useRouter();
   
-  const [activeTab, setActiveTab] = useState<'accounts' | 'subscriptions' | 'spending' | 'transfers' | 'income' | 'budget' | 'budgets' | 'debt'>('accounts');
+  const [activeTab, setActiveTab] = useState<'accounts' | 'subscriptions' | 'budgets' | 'debt'>('accounts');
 
   // Live transfer pairing: match each leg leaving an account to the leg arriving in
   // another, so an internal move reads as ONE net-zero movement. Unpaired legs = the
@@ -75,24 +68,6 @@ export default function AccountsPage() {
     () => withDerivedBalances(profile?.paymentAccounts || [], transactions),
     [profile?.paymentAccounts, transactions]
   );
-  const transfers = useMemo(
-    () => matchTransfers(transactions, derivedAccounts),
-    [transactions, derivedAccounts]
-  );
-  const acctName = (id?: string) => profile?.paymentAccounts?.find(a => a.id === id)?.name || 'Untracked';
-  const transferRoutes = useMemo(() => {
-    const m = new Map<string, { from: string; to: string; total: number; count: number }>();
-    transfers.pairs.forEach(p => {
-      const key = `${p.fromAccountId}->${p.toAccountId}`;
-      const r = m.get(key) || { from: acctName(p.fromAccountId), to: acctName(p.toAccountId), total: 0, count: 0 };
-      r.total += p.amount; r.count += 1;
-      m.set(key, r);
-    });
-    return [...m.values()].sort((a, b) => b.total - a.total);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transfers, profile?.paymentAccounts]);
-  const unmatchedOutTotal = transfers.unmatchedOut.reduce((s, t) => s + t.amount, 0);
-  const unmatchedInTotal = transfers.unmatchedIn.reduce((s, t) => s + t.amount, 0);
   // OBS-001: page-view / load lifecycle events, spans, and the sanitized provenance for
   // the summary cards below. Must stay above the early return (React error #310).
   const obs = useAccountsObservability({
@@ -263,9 +238,18 @@ export default function AccountsPage() {
       name: accountForm.name,
       type: accountForm.type,
       provider: accountForm.provider,
-      // Editing the balance re-anchors: the typed value becomes the opening balance as of today.
-      openingBalance: parseFloat(accountForm.balance) || 0,
-      openingDate: new Date().toISOString().slice(0, 10),
+      // UI-106 (audit accuracy): re-anchor ONLY when the balance was actually
+      // edited. Renaming an account must not move its numbers — the old code
+      // set openingDate to today on every save, silently shifting balances.
+      ...(!editingAccount || Math.abs((parseFloat(accountForm.balance) || 0) - currentOf(editingAccount)) > 0.004
+        ? {
+            openingBalance: parseFloat(accountForm.balance) || 0,
+            openingDate: new Date().toISOString().slice(0, 10),
+          }
+        : {
+            openingBalance: editingAccount.openingBalance,
+            openingDate: editingAccount.openingDate,
+          }),
       creditLimit: isCard ? parseFloat(accountForm.creditLimit) || undefined : undefined,
       apr: (isCard || isLoan) ? parseFloat(accountForm.apr) || undefined : undefined,
       statementDate: isCard ? (accountForm.statementDate ? parseInt(accountForm.statementDate) : undefined) : undefined,
@@ -424,7 +408,7 @@ export default function AccountsPage() {
         {/* Header */}
         <div className="mb-8 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
           <div>
-            <h1 className="text-3xl font-bold text-[var(--foreground)]">Account Settings</h1>
+            <h1 className="text-3xl font-bold text-[var(--foreground)]">Accounts &amp; Money</h1>
             <p className="text-[var(--foreground-secondary)] mt-1">
               Manage your payment accounts, income sources, and budget
             </p>
@@ -521,20 +505,16 @@ export default function AccountsPage() {
         {/* Tabs */}
         <div className="flex flex-nowrap sm:flex-wrap whitespace-nowrap sm:whitespace-normal gap-2 mb-6 scroll-x-mobile">
           {[
-            { key: 'accounts', label: 'Accounts', fullLabel: 'Payment Accounts', icon: CreditCard },
-            { key: 'subscriptions', label: 'Subscriptions', fullLabel: 'Subscriptions & Autopay', icon: Calendar },
-            { key: 'spending', label: 'Spending', fullLabel: 'Account Spending', icon: Receipt },
-            { key: 'transfers', label: 'Transfers', fullLabel: 'Transfers', icon: ArrowLeftRight },
-            { key: 'income', label: 'Income', fullLabel: 'Income Sources', icon: Banknote },
-            { key: 'budget', label: 'Budget', fullLabel: 'Monthly Budget', icon: DollarSign },
-            { key: 'budgets', label: 'Categories', fullLabel: 'Category Budgets', icon: BarChart3 },
+            { key: 'accounts', label: 'Accounts', fullLabel: 'Accounts & Income', icon: CreditCard },
+            { key: 'subscriptions', label: 'Bills & Subs', fullLabel: 'Bills & Subscriptions', icon: Calendar },
+            { key: 'budgets', label: 'Budget', fullLabel: 'Budget', icon: DollarSign },
             { key: 'debt', label: 'Debt Plan', fullLabel: 'Debt Planner', icon: TrendingUp },
           ].map((tab) => {
             const Icon = tab.icon;
             return (
               <button
                 key={tab.key}
-                onClick={() => setActiveTab(tab.key as any)}
+                onClick={() => setActiveTab(tab.key as typeof activeTab)}
                 className={`flex items-center gap-2 min-h-[44px] px-3 sm:px-4 py-2 rounded-lg font-medium transition-all text-sm sm:text-base ${
                   activeTab === tab.key
                     ? 'bg-[var(--accent-primary)] text-[#16181c]'
@@ -576,13 +556,10 @@ export default function AccountsPage() {
                       className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-0 p-4 rounded-xl bg-[var(--background-tertiary)] border-l-4 hover:bg-[var(--background-secondary)] transition-colors"
                       style={{ borderLeftColor: account.color }}
                     >
-                      <button
-                        type="button"
-                        className="flex items-center gap-4 flex-1 min-w-0 cursor-pointer text-left bg-transparent border-0 p-0"
-                        onClick={() => setGraphAccount(account)}
-                        title="View this account's history graph"
-                        aria-label={`${account.name} — view history graph`}
-                      >
+                      {/* UI-106: the whole row used to be an invisible button 2px
+                          from a drag handle — the body is inert now; the graph
+                          opens from the explicit chart button on the right. */}
+                      <div className="flex items-center gap-4 flex-1 min-w-0">
                         <div
                           className="w-12 h-12 rounded-xl flex items-center justify-center"
                           style={{ backgroundColor: `${account.color}20`, color: account.color }}
@@ -627,7 +604,7 @@ export default function AccountsPage() {
                             </p>
                           )}
                         </div>
-                      </button>
+                      </div>
                       <div className="flex items-center justify-between sm:justify-end gap-4">
                         <div className="text-left sm:text-right">
                           {/* The balance YOU set is the truth (the CSV has no balance). */}
@@ -646,6 +623,13 @@ export default function AccountsPage() {
                           )}
                         </div>
                         <div className="flex gap-1">
+                          <button
+                            onClick={() => setGraphAccount(account)}
+                            aria-label={`${account.name} — view history graph`}
+                            className="p-2.5 min-w-11 min-h-11 sm:p-2 sm:min-w-auto sm:min-h-auto rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors"
+                          >
+                            <BarChart3 className="w-4 h-4" />
+                          </button>
                           <button
                             onClick={() => openEditAccount(account)}
                             aria-label={`Edit ${account.name}`}
@@ -679,109 +663,6 @@ export default function AccountsPage() {
           )}
 
           {/* Spending Tab - Transactions by Account */}
-          {activeTab === 'spending' && (
-            <div>
-              <div className="flex justify-between items-center mb-6">
-                <div>
-                  <h2 className="text-xl font-semibold text-[var(--foreground)]">
-                    Account Spending
-                  </h2>
-                  <p className="text-sm text-[var(--foreground-muted)]">
-                    See transactions linked to each account
-                  </p>
-                </div>
-              </div>
-
-              {/* By payment method — folded in from the deleted /payment-methods page (D1) */}
-              {(() => {
-                const byMethod = new Map<string, number>();
-                for (const t of transactions) {
-                  // Shared classifier, not the stored type — a card payment settles
-                  // spending, it is not spending. PENDING: EXCLUDED (a hold is not
-                  // settled spending on any payment method yet).
-                  if (interpretTransaction(t, profile?.paymentAccounts).expense !== 'counted') continue;
-                  byMethod.set(t.paymentMethod, (byMethod.get(t.paymentMethod) ?? 0) + t.amount);
-                }
-                const rows = [...byMethod.entries()]
-                  .map(([method, total]) => ({
-                    label: PAYMENT_METHODS.find((m) => m.value === method)?.label ?? method,
-                    total,
-                  }))
-                  .sort((a, b) => b.total - a.total);
-                const grand = rows.reduce((s, r) => s + r.total, 0);
-                if (rows.length === 0) return null;
-                return (
-                  <div className="glass-card p-5 mb-6">
-                    <h3 className="font-semibold text-[var(--foreground)] mb-3">Spending by payment method</h3>
-                    <div className="space-y-2">
-                      {rows.map((r) => (
-                        <div key={r.label} className="flex items-center gap-3">
-                          <span className="text-sm text-[var(--foreground-secondary)] w-40 truncate">{r.label}</span>
-                          <div className="flex-1 h-2 bg-[var(--background-tertiary)] rounded-full overflow-hidden">
-                            <div className="h-full rounded-full bg-[var(--accent-primary)]" style={{ width: `${grand > 0 ? (r.total / grand) * 100 : 0}%` }} />
-                          </div>
-                          <span className="text-sm font-medium text-[var(--foreground)] tabular-nums w-24 text-right">
-                            {formatMoney(r.total, profile?.currency, 2)}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {profile?.paymentAccounts && profile.paymentAccounts.length > 0 ? (
-                <div className="space-y-4">
-                  {derivedAccounts.map((account) => (
-                    <AccountTransactions
-                      key={account.id}
-                      account={account}
-                      transactions={transactions}
-                    />
-                  ))}
-                  
-                  {/* Unlinked Transactions */}
-                  {(() => {
-                    const unlinkedTxns = transactions.filter(t => !t.accountId);
-                    if (unlinkedTxns.length === 0) return null;
-                    
-                    return (
-                      <div className="bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-xl p-6">
-                        <div className="flex items-center gap-3 mb-4">
-                          <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-gray-500/20 text-gray-400">
-                            <Receipt className="w-5 h-5" />
-                          </div>
-                          <div>
-                            <p className="font-medium text-[var(--foreground)]">Unlinked Transactions</p>
-                            <p className="text-sm text-[var(--foreground-muted)]">
-                              {unlinkedTxns.length} transaction{unlinkedTxns.length !== 1 ? 's' : ''} without account
-                            </p>
-                          </div>
-                        </div>
-                        <p className="text-sm text-[var(--foreground-secondary)]">
-                          These transactions are not linked to any payment account. 
-                          Select an account when adding transactions to track spending per card/account.
-                        </p>
-                      </div>
-                    );
-                  })()}
-                </div>
-              ) : (
-                <div className="text-center py-12">
-                  <CreditCard className="w-16 h-16 text-[var(--foreground-muted)] mx-auto mb-4" />
-                  <h3 className="text-lg font-medium text-[var(--foreground)] mb-2">No accounts yet</h3>
-                  <p className="text-[var(--foreground-secondary)] mb-4">
-                    Add your credit cards and bank accounts to track spending per account
-                  </p>
-                  <button onClick={() => setActiveTab('accounts')} className="btn-primary">
-                    Add Accounts
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Subscriptions & autopay — recurring charges across all accounts */}
           {activeTab === 'subscriptions' && (
             <div>
               <div className="mb-6">
@@ -799,107 +680,7 @@ export default function AccountsPage() {
           )}
 
           {/* Transfers Tab — paired internal movements + unmatched review */}
-          {activeTab === 'transfers' && (
-            <div>
-              <div className="mb-6">
-                <h2 className="text-xl font-semibold text-[var(--foreground)]">Transfers between your accounts</h2>
-                <p className="text-sm text-[var(--foreground-secondary)] mt-1">
-                  Each leg leaving one account is matched to the leg arriving in another. Matched
-                  moves net to zero and are excluded from income and expenses — money changing
-                  pockets, not coming in or going out.
-                </p>
-              </div>
-
-              {/* Summary */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-                <div className="stat-card">
-                  <p className="text-sm text-[var(--foreground-secondary)] mb-1">Matched (net zero)</p>
-                  <p className="text-2xl font-bold text-[var(--foreground)]">
-                    {formatMoney(transfers.matchedTotal, profile?.currency, 2)}
-                  </p>
-                  <p className="text-xs text-[var(--foreground-muted)]">{transfers.pairs.length} paired moves</p>
-                </div>
-                <div className="stat-card">
-                  <p className="text-sm text-[var(--foreground-secondary)] mb-1">Left to untracked</p>
-                  <p className="text-2xl font-bold text-[var(--accent-danger)]">
-                    {formatMoney(unmatchedOutTotal, profile?.currency, 2)}
-                  </p>
-                  <p className="text-xs text-[var(--foreground-muted)]">{transfers.unmatchedOut.length} unmatched out</p>
-                </div>
-                <div className="stat-card">
-                  <p className="text-sm text-[var(--foreground-secondary)] mb-1">Arrived from untracked</p>
-                  <p className="text-2xl font-bold text-[var(--accent-success)]">
-                    {formatMoney(unmatchedInTotal, profile?.currency, 2)}
-                  </p>
-                  <p className="text-xs text-[var(--foreground-muted)]">{transfers.unmatchedIn.length} unmatched in</p>
-                </div>
-              </div>
-
-              {/* Matched routes */}
-              {transferRoutes.length > 0 ? (
-                <div className="glass-card divide-y divide-[var(--border-color)] mb-6">
-                  {transferRoutes.map((r, i) => (
-                    <div key={i} className="flex items-center justify-between p-4">
-                      <div className="flex items-center gap-2 text-[var(--foreground)]">
-                        <span className="font-medium">{r.from}</span>
-                        <ArrowLeftRight className="w-4 h-4 text-[var(--accent-primary)]" />
-                        <span className="font-medium">{r.to}</span>
-                      </div>
-                      <div className="text-right">
-                        <p className="font-semibold text-[var(--foreground)]">
-                          {formatMoney(r.total, profile?.currency, 2)}
-                        </p>
-                        <p className="text-xs text-[var(--foreground-muted)]">{r.count} moves</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-12 bg-[var(--background-secondary)] rounded-xl border border-[var(--border-color)] mb-6">
-                  <ArrowLeftRight className="w-12 h-12 mx-auto mb-3 text-[var(--foreground-muted)]" />
-                  <p className="text-[var(--foreground-secondary)]">
-                    No matched transfers yet. Import your accounts — moves between two imported
-                    accounts pair up here automatically.
-                  </p>
-                </div>
-              )}
-
-              {/* Unmatched review */}
-              {(transfers.unmatchedOut.length > 0 || transfers.unmatchedIn.length > 0) && (
-                <div className="glass-card p-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <AlertTriangle className="w-4 h-4 text-amber-500" />
-                    <span className="font-medium text-[var(--foreground)]">Needs a look — unmatched legs</span>
-                  </div>
-                  <p className="text-sm text-[var(--foreground-secondary)] mb-3">
-                    The other side of these is in an account you didn&apos;t import (external savings,
-                    a Zelle to a person, a loan servicer) — so they may be real money in/out, or a
-                    mislabel to reclassify.
-                  </p>
-                  <div className="max-h-[280px] overflow-y-auto divide-y divide-[var(--border-color)]">
-                    {[...transfers.unmatchedOut.map(t => ({ t, dir: 'out' as const })),
-                      ...transfers.unmatchedIn.map(t => ({ t, dir: 'in' as const }))]
-                      .sort((a, b) => b.t.date.localeCompare(a.t.date))
-                      .slice(0, 40)
-                      .map(({ t, dir }) => (
-                        <div key={t.id} className="flex items-center justify-between py-2 text-sm">
-                          <div>
-                            <span className="text-[var(--foreground)]">{t.title}</span>
-                            <span className="text-[var(--foreground-muted)]"> · {acctName(t.accountId)}</span>
-                          </div>
-                          <span className={dir === 'in' ? 'text-emerald-500' : 'text-[var(--accent-danger)]'}>
-                            {dir === 'in' ? '+' : '-'}{formatMoney(t.amount, 'USD', 2)}
-                          </span>
-                        </div>
-                      ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Income Tab */}
-          {activeTab === 'income' && (
+          {activeTab === 'accounts' && (
             <div>
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-xl font-semibold text-[var(--foreground)]">
@@ -971,7 +752,7 @@ export default function AccountsPage() {
           )}
 
           {/* Budget Tab */}
-          {activeTab === 'budget' && (
+          {activeTab === 'budgets' && (
             <div>
               <h2 className="text-xl font-semibold text-[var(--foreground)] mb-6">
                 Monthly Budget
@@ -1208,27 +989,29 @@ export default function AccountsPage() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">Statement Date</label>
-                      <input
-                        type="number"
-                        min="1"
-                        max="31"
+                      <select
                         value={accountForm.statementDate}
                         onChange={(e) => setAccountForm({ ...accountForm, statementDate: e.target.value })}
-                        placeholder="15"
                         className="input-field"
-                      />
+                      >
+                        <option value="">Not set</option>
+                        {Array.from({ length: 31 }, (_, i) => String(i + 1)).map((d) => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                      </select>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">Due Date</label>
-                      <input
-                        type="number"
-                        min="1"
-                        max="31"
+                      <select
                         value={accountForm.dueDate}
                         onChange={(e) => setAccountForm({ ...accountForm, dueDate: e.target.value })}
-                        placeholder="5"
                         className="input-field"
-                      />
+                      >
+                        <option value="">Not set</option>
+                        {Array.from({ length: 31 }, (_, i) => String(i + 1)).map((d) => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                      </select>
                     </div>
                   </div>
                 </>
@@ -1350,15 +1133,16 @@ export default function AccountsPage() {
 
               <div>
                 <label className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">Pay Date (Day of Month)</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="31"
-                  value={incomeForm.payDate}
-                  onChange={(e) => setIncomeForm({ ...incomeForm, payDate: e.target.value })}
-                  placeholder="1"
-                  className="input-field"
-                />
+                <select
+                        value={incomeForm.payDate}
+                        onChange={(e) => setIncomeForm({ ...incomeForm, payDate: e.target.value })}
+                        className="input-field"
+                      >
+                        <option value="">Not set</option>
+                        {Array.from({ length: 31 }, (_, i) => String(i + 1)).map((d) => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                      </select>
               </div>
 
               <button
