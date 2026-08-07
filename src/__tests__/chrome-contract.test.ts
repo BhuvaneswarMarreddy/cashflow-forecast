@@ -36,7 +36,7 @@ describe('UI-101 chrome contract', () => {
   test('every nav href resolves to a real route', () => {
     const nav = read('src/lib/nav.ts');
     const hrefs = [...nav.matchAll(/href:\s*'([^']+)'/g)].map(m => m[1]);
-    expect(hrefs.length).toBeGreaterThanOrEqual(8);
+    expect(hrefs.length).toBeGreaterThanOrEqual(5); // UI-104: the map is 5 primary destinations
     for (const href of hrefs) {
       expect(existsSync(join(process.cwd(), 'src/app', href.slice(1), 'page.tsx'))).toBe(true);
     }

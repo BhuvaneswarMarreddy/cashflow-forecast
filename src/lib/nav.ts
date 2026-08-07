@@ -1,5 +1,5 @@
 import {
-  LayoutDashboard, LineChart, BarChart3, GitBranch, History, CreditCard, PieChart, CalendarDays,
+  LayoutDashboard, LineChart, GitBranch, History, CreditCard,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -29,8 +29,9 @@ export interface NavItem {
 }
 
 export const NAV_ITEMS: NavItem[] = [
-  { href: '/dashboard', label: 'Overview', icon: LayoutDashboard, tab: true },
+  { href: '/dashboard', label: 'Home', icon: LayoutDashboard, tab: true },
   { href: '/forecast', label: 'Forecast', icon: LineChart, tab: true },
+  { href: '/history', label: 'Activity', icon: History, tab: true },
   { href: '/flow', label: 'Flow', icon: GitBranch, tab: true },
   { href: '/accounts', label: 'Accounts', icon: CreditCard, tab: true },
 ];
@@ -40,9 +41,10 @@ export const NAV_ITEMS: NavItem[] = [
  * links and bookmarks keep working; folding their bodies into Flow tabs is the next
  * step and deletes the duplicate float arithmetic along with them.
  */
-export const SECONDARY_ITEMS: NavItem[] = [
-  { href: '/history', label: 'Transactions', icon: History, tab: false },
-  { href: '/analytics', label: 'Analytics', icon: PieChart, tab: false },
-  { href: '/cashflow', label: 'Cashflow', icon: BarChart3, tab: false },
-  { href: '/calendar', label: 'Calendar', icon: CalendarDays, tab: false },
-];
+/**
+ * UI-103/104 retired the four secondary routes: analytics, cashflow and
+ * calendar are redirects into tabs now, and history is the primary Activity
+ * destination. Kept as an (empty) list so the Navbar's interim rendering and
+ * the chrome contract stay stable; delete outright when nothing imports it.
+ */
+export const SECONDARY_ITEMS: NavItem[] = [];

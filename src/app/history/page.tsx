@@ -10,6 +10,7 @@ import AddTransactionModal from '@/components/AddTransactionModal';
 import CSVImportModal from '@/components/CSVImportModal';
 import ReceiptScannerModal from '@/components/ReceiptScannerModal';
 import RunwayCalculator from '@/components/RunwayCalculator';
+import InsightsTab from '@/components/InsightsTab';
 import { generateForecast, calculateCurrentCash, monthlyAverages, withDerivedBalances } from '@/lib/forecast';
 import { classifyTransaction, isPositive, isReward, sumExpenseCents, sumIncomeCents } from '@/lib/classify';
 import { pairedLegId } from '@/lib/transfers';
@@ -30,18 +31,15 @@ import {
   DollarSign,
   ArrowUpRight,
   ArrowDownRight,
-  Clock,
-  FileText,
-  BarChart2,
   Camera,
   Sparkles,
 } from 'lucide-react';
-import { format, parseISO, startOfMonth, endOfMonth, subMonths, isWithinInterval } from 'date-fns';
+import { format, parseISO, startOfMonth, subMonths, isWithinInterval } from 'date-fns';
 import { currentOf } from '@/lib/accounts';
 import { formatMoney, monthlyIncomeOf } from '@/lib/money';
 import { askAbout, askAboutTransaction } from '@/lib/ask';
 
-type ViewMode = 'history' | 'runway';
+type ViewMode = 'history' | 'insights' | 'runway';
 type DateFilter = 'all' | 'thisMonth' | 'lastMonth' | 'last3Months' | 'last6Months';
 type GroupBy = 'month' | 'year' | 'category';
 
@@ -51,7 +49,13 @@ export default function HistoryPage() {
   const { profile, isLoading: profileLoading, isOnboarded, incomeContext } = useUserProfile();
   const router = useRouter();
 
-  const [viewMode, setViewMode] = useState<ViewMode>('history');
+  // UI-104: /analytics folded in as the Insights tab; ?tab= deep-links (its old
+  // route redirects here). Lazy init, hydration-safe behind the auth gate.
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    if (typeof window === 'undefined') return 'history';
+    const t = new URLSearchParams(window.location.search).get('tab');
+    return t === 'insights' || t === 'runway' ? t : 'history';
+  });
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
@@ -352,45 +356,42 @@ export default function HistoryPage() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
           <div>
-            <h1 className="text-3xl font-bold text-[var(--foreground)]">
-              {viewMode === 'history' ? 'Transaction History' : 'Wealth Runway'}
-            </h1>
+            <h1 className="text-3xl font-bold text-[var(--foreground)]">Activity</h1>
             <p className="text-[var(--foreground-secondary)] mt-1">
-              {viewMode === 'history' 
+              {viewMode === 'history'
                 ? 'View, add, and import your transactions'
-                : 'See how long your money will last'}
+                : viewMode === 'insights'
+                  ? 'Your spending pace and where it goes'
+                  : 'See how long your money will last'}
             </p>
           </div>
           <div className="flex items-center gap-3">
-            {/* View Toggle */}
+            {/* UI-104: three tabs — Transactions | Insights | Runway */}
             <div className="flex bg-[var(--background-tertiary)] rounded-lg p-1">
-              <button
-                onClick={() => setViewMode('history')}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
-                  viewMode === 'history'
-                    ? 'bg-[var(--accent-primary)] text-[#16181c]'
-                    : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'
-                }`}
-              >
-                <FileText className="w-4 h-4 inline mr-2" />
-                History
-              </button>
-              <button
-                onClick={() => setViewMode('runway')}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
-                  viewMode === 'runway'
-                    ? 'bg-[var(--accent-primary)] text-[#16181c]'
-                    : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'
-                }`}
-              >
-                <BarChart2 className="w-4 h-4 inline mr-2" />
-                Runway
-              </button>
+              {([['history', 'Transactions'], ['insights', 'Insights'], ['runway', 'Runway']] as [ViewMode, string][]).map(([v, label]) => (
+                <button
+                  key={v}
+                  onClick={() => {
+                    setViewMode(v);
+                    window.history.replaceState(null, '', v === 'history' ? '/history' : `/history?tab=${v}`);
+                  }}
+                  aria-pressed={viewMode === v}
+                  className={`min-h-[44px] px-4 rounded-md text-sm font-medium transition-all ${
+                    viewMode === v
+                      ? 'bg-[var(--accent-primary)] text-[#16181c]'
+                      : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
         </div>
 
-        {viewMode === 'history' ? (
+        {viewMode === 'insights' ? (
+          <InsightsTab />
+        ) : viewMode === 'history' ? (
           <>
             {/* Compact Header with Actions and Stats */}
             <div className="bg-[var(--background-secondary)] rounded-xl border border-[var(--border-color)] p-4 mb-6">
