@@ -58,10 +58,9 @@ const shiftMonth = (ym: string, delta: number) => {
   const [y, m] = ym.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1 + delta, 1)).toISOString().slice(0, 7);
 };
-const monthLabel = (ym: string) => {
-  const [y, m] = ym.split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1, 1)).toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
-};
+// (the audit found TWO monthLabel definitions with different output — the
+// component-level one shadowed this module-level one everywhere it mattered,
+// so the shadowed copy is gone; UI-105)
 
 const KIND_CHIPS: Array<{ kind: FlowColorKey | null; label: string }> = [
   { kind: null, label: 'All' },
@@ -159,7 +158,7 @@ interface UndoRecord {
   eventName: string;
 }
 
-export default function FlowPage() {
+export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
   const { isAuthenticated, isLoading: authLoading, user } = useAuth();
   const { transactions, rules, addRule } = useTransactions();
   const { profile, reconcileAccount, incomeContext, setInflowReview, addIncomeSource } = useUserProfile();
@@ -544,12 +543,6 @@ export default function FlowPage() {
       )}
       {range === 'month' && (
         <div className="flex items-center gap-1 rounded-lg bg-[var(--background-tertiary)] p-1">
-          <button
-            onClick={() => setMonth((m) => shiftMonth(m, -1))}
-            disabled={month <= minMonth}
-            className="px-2 py-1.5 rounded-md text-sm text-[var(--foreground-secondary)] hover:text-[var(--foreground)] disabled:opacity-30"
-            aria-label="Previous month"
-          >◀</button>
           <select
             value={month}
             onChange={(e) => setMonth(e.target.value)}
@@ -562,12 +555,6 @@ export default function FlowPage() {
               </option>
             ))}
           </select>
-          <button
-            onClick={() => setMonth((m) => shiftMonth(m, 1))}
-            disabled={month >= maxMonth}
-            className="px-2 py-1.5 rounded-md text-sm text-[var(--foreground-secondary)] hover:text-[var(--foreground)] disabled:opacity-30"
-            aria-label="Next month"
-          >▶</button>
         </div>
       )}
     </div>
@@ -664,28 +651,29 @@ export default function FlowPage() {
     return rows;
   }, [sinkRows, totalSourcesCents]);
 
+  // UI-105: 9 pills wrapped into 2-3 rows on a phone — the same toolbar already
+  // speaks <select>, so the kind filter does too. The pin chip stays: it is a
+  // removable state, not a choice.
   const kindChips = (
-    <div role="group" aria-label="Filter flow by kind" className="flex gap-1 flex-wrap items-center">
-      {KIND_CHIPS.map((c) => (
-        <button
-          key={c.label}
-          onClick={() => { setFocusKind(c.kind); setPinLabel(null); }}
-          aria-pressed={focusKind === c.kind}
-          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs border transition-colors ${focusKind === c.kind
-            ? 'bg-[var(--accent-primary)] text-[#16181c] border-transparent'
-            : 'border-[var(--border-color)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'}`}
-        >
-          {c.kind && (
-            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: FLOW_COLORS[c.kind] }} aria-hidden="true" />
-          )}
-          {c.label}
-        </button>
-      ))}
+    <div className="flex gap-2 flex-wrap items-center">
+      <select
+        value={focusKind ?? 'all'}
+        onChange={(e) => {
+          setFocusKind(e.target.value === 'all' ? null : (e.target.value as FlowColorKey));
+          setPinLabel(null);
+        }}
+        aria-label="Filter flow by kind"
+        className="select-field min-h-[44px] px-3 text-sm"
+      >
+        {KIND_CHIPS.map((c) => (
+          <option key={c.label} value={c.kind ?? 'all'}>{c.label}</option>
+        ))}
+      </select>
       {effectivePin && (
         <button
           onClick={() => setPinLabel(null)}
-          className="px-2.5 py-1 rounded-full text-xs bg-[var(--background-tertiary)] text-[var(--foreground)]"
-          title="Click to clear"
+          className="min-h-[44px] px-3 rounded-full text-sm bg-[var(--background-tertiary)] text-[var(--foreground)]"
+          title="Tap to clear"
         >
           📌 {effectivePin} ✕
         </button>
@@ -817,8 +805,11 @@ export default function FlowPage() {
   // that is not `review` — absent, unknown, `transactions`, `insights` — renders today's
   // Flow content unchanged. The wider consolidation is UX-NAV-002's, not this task's.
   const [tab, setTab] = useState<string>(() =>
-    typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('tab') || 'flow' : 'flow'
+    initialTab ??
+    (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('tab') || 'flow' : 'flow')
   );
+  // UI-105: mobile hides the wide diagram until asked (story-first).
+  const [showChartMobile, setShowChartMobile] = useState(false);
   const [storedCandidates, setStoredCandidates] = useState<CandidateDoc[]>([]);
   const [recoveryLoaded, setRecoveryLoaded] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -1402,24 +1393,20 @@ export default function FlowPage() {
               // Naming both halves is what lets the tiles be reconciled by eye:
               // the money-from-people half is the mirror of "Sent to people" below.
               sub: story.fromPeople > 0
-                ? `${money(story.earnedIn)} earned + ${money(story.fromPeople)} received from people — refunds, rewards and card credits are counted separately below`
-                : 'paychecks & money received — refunds, rewards and card charges are not income',
+                ? `${money(story.earnedIn)} earned · ${money(story.fromPeople)} from people`
+                : 'paychecks & money received',
             },
             {
               label: 'Spent on living',
               cents: story.spending,
-              sub: [
-                'all categories',
-                story.personExpense > 0 ? `plus ${money(story.personExpense)} paid to people` : null,
-                story.netted > 0
-                  ? `net of ${money(story.netted)} you confirmed as refunded`
-                  : 'gross — nothing netted until you confirm a refund',
-              ].filter(Boolean).join(', '),
+              sub: story.netted > 0
+                ? `net of ${money(story.netted)} confirmed refunds`
+                : 'gross until you confirm refunds',
             },
             {
               label: 'Money back (not income)',
               cents: story.moneyBack,
-              sub: 'refunds, cashback and card credits waiting to be matched to a purchase',
+              sub: 'awaiting a match to a purchase',
             },
             {
               label: 'Sent to people & family',
@@ -1428,10 +1415,10 @@ export default function FlowPage() {
               // cost and a payment to a person. Saying so beats two tiles that look
               // additive and are not.
               sub: story.personExpense > 0
-                ? `Zelle + Remitly. ${money(story.personExpense)} of this is also counted in spending; ${money(story.fromPeople)} came back from people and is inside "Money came in"`
-                : `Zelle + Remitly — money moved, not yet a cost. ${money(story.fromPeople)} came back from people and is inside "Money came in"`,
+                ? `${money(story.personExpense)} of this is also in “Spent”`
+                : 'money moved, not yet a cost',
             },
-            { label: gapTotal > 0 ? '⚠ Not yet in the data' : 'Data complete', cents: gapTotal, sub: gapTotal > 0 ? 'history older than your connected feeds can reach — a bank export can fill it' : 'every dollar accounted for' },
+            { label: gapTotal > 0 ? '⚠ Not yet in the data' : 'Data complete', cents: gapTotal, sub: gapTotal > 0 ? 'older than your bank feeds reach' : 'every dollar accounted for' },
           ].map((t) => (
             <div key={t.label} className="rounded-xl border border-[var(--border-color)] bg-[var(--background-secondary)] p-4">
               <p className="text-xs text-[var(--foreground-muted)]">{t.label}</p>
@@ -1515,12 +1502,22 @@ export default function FlowPage() {
                     being a lane of its own and reduces the category it came from instead; <em>Show gross</em> puts every
                     dollar back exactly as it moved.
                   </p>
-                  <p>“Borrowed on your cards” is card <strong>spending</strong> you have not paid off yet — the issuer fronted it, so it enters on the left.</p>
+                  <p>“Borrowed on your cards” is card <strong>spending</strong> you have not paid off yet — the card company fronted it, so it enters on the left.</p>
                 </div>
               </details>
             )}
+            {/* UI-105: a 900px diagram in a scroll box can never be seen whole on a
+                390px phone — mobile leads with the story tiles and table, and the
+                diagram opens on demand. Desktop is unchanged. */}
+            <button
+              onClick={() => setShowChartMobile(v => !v)}
+              aria-expanded={showChartMobile}
+              className="sm:hidden w-full min-h-[44px] mb-2 px-3 rounded-lg bg-[var(--background-tertiary)] text-sm font-medium text-[var(--foreground-secondary)]"
+            >
+              {showChartMobile ? 'Hide the diagram' : 'Show the diagram'}
+            </button>
             <div
-              className="overflow-x-auto"
+              className={`overflow-x-auto ${showChartMobile ? '' : 'hidden sm:block'}`}
               role="img"
               aria-label={`${CHART_KINDS.find((c) => c.key === chart)?.label ?? 'Flow'} chart tracing ${money(totalSourcesCents)} across ${graph.nodes.length} sources, accounts and destinations. The full breakdown is in the "View the flow as a table" section below.`}
             >
@@ -1529,7 +1526,7 @@ export default function FlowPage() {
               </div>
             </div>
             <p className="text-xs text-[var(--foreground-muted)] mt-2">
-              {chart === 'sankey' && 'Click or focus an income source (left side) and press Enter to follow that money to the end · hover for a quick peek · chips filter by kind · Esc clears'}
+              {chart === 'sankey' && 'Tap an income source on the left to follow that money to the end · tap it again to clear · the filter above narrows by kind'}
               {chart === 'treemap' && 'Box size = dollars. Where every dollar ended up in this period — including what stayed in your accounts.'}
               {chart === 'waterfall' && 'Start with all money available, subtract each destination — it lands on exactly $0 because every dollar is accounted for.'}
             </p>
@@ -1775,7 +1772,7 @@ export default function FlowPage() {
           <div className="overflow-x-auto rounded-xl border border-[var(--border-color)]">
             <table className="w-full text-sm">
               <thead className="bg-[var(--background-tertiary)] text-left">
-                <tr><th className="px-3 py-2">Merchant</th><th className="px-3 py-2">Cadence</th>
+                <tr><th className="px-3 py-2">Merchant</th><th className="px-3 py-2">How often</th>
                 <th className="px-3 py-2 text-right">Typical</th><th className="px-3 py-2 text-right">Cost/mo</th>
                 <th className="px-3 py-2">Last seen</th><th className="px-3 py-2">Status</th></tr>
               </thead>
@@ -1790,7 +1787,7 @@ export default function FlowPage() {
                     <td className="px-3 py-2">
                       {r.active
                         ? <span className="text-[var(--accent-success)]">● active</span>
-                        : <span className="text-[var(--foreground-muted)]">lapsed</span>}
+                        : <span className="text-[var(--foreground-muted)]">stopped</span>}
                     </td>
                   </tr>
                 ))}
