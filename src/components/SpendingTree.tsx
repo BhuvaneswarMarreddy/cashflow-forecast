@@ -94,7 +94,7 @@ export default function SpendingTree(props: {
       <button
         onClick={() => askAbout(askAboutTransaction(t, accounts, transactions))}
         aria-label={`Ask about ${(t.merchant || t.title).trim()} on ${day(t.date)}`}
-        className="w-8 h-8 flex items-center justify-center rounded-lg text-[var(--accent-primary)] hover:bg-[var(--background-tertiary)] shrink-0"
+        className="w-8 h-8 flex items-center justify-center rounded-control text-[var(--accent-primary)] hover:bg-[var(--background-tertiary)] shrink-0"
       >
         <Sparkles className="w-4 h-4" aria-hidden="true" />
       </button>
@@ -109,17 +109,17 @@ export default function SpendingTree(props: {
         about that exact transaction.
       </p>
       {branches.map((b) => (
-        <details key={b.label} className="rounded-xl border border-[var(--border-color)] bg-[var(--background-secondary)] open:bg-[var(--background-tertiary)]/40">
-          <summary className="flex items-center gap-3 px-3 py-2.5 cursor-pointer list-none [&::-webkit-details-marker]:hidden rounded-xl hover:bg-[var(--background-tertiary)]">
+        <details key={b.label} className="rounded-card border border-[var(--border-color)] bg-[var(--background-secondary)] open:bg-[var(--background-tertiary)]/40">
+          <summary className="flex items-center gap-3 px-3 py-2.5 cursor-pointer list-none [&::-webkit-details-marker]:hidden rounded-card hover:bg-[var(--background-tertiary)]">
             <span className="text-[var(--foreground-muted)] text-xs select-none">▸</span>
             <span className="flex-1 min-w-0">
               <span className="flex items-baseline justify-between gap-3">
                 <span className="text-sm font-medium truncate">{b.label}</span>
                 <span className="text-sm font-semibold tabular-nums shrink-0">{money(b.cents)}</span>
               </span>
-              <span className="block mt-1 h-1 rounded-full bg-[var(--background-tertiary)] overflow-hidden">
+              <span className="block mt-1 h-1 rounded-pill bg-[var(--background-tertiary)] overflow-hidden">
                 <span
-                  className="block h-full rounded-full bg-[var(--accent-primary)]"
+                  className="block h-full rounded-pill bg-[var(--accent-primary)]"
                   style={{ width: `${Math.max(1.5, (100 * b.cents) / max)}%` }}
                 />
               </span>
@@ -135,7 +135,7 @@ export default function SpendingTree(props: {
                 txnRow(m.txns[0])
               ) : (
                 <details key={m.label} className="ml-1">
-                  <summary className="flex items-baseline gap-3 py-1.5 cursor-pointer list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--background-tertiary)] rounded-lg px-2">
+                  <summary className="flex items-baseline gap-3 py-1.5 cursor-pointer list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--background-tertiary)] rounded-control px-2">
                     <span className="text-[var(--foreground-muted)] text-xs select-none">▸</span>
                     <span className="text-sm truncate flex-1 min-w-0">{m.label}</span>
                     <span className="text-xs text-[var(--foreground-muted)]">{m.txns.length}×</span>

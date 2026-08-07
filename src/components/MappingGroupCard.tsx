@@ -67,7 +67,7 @@ export default function MappingGroupCard({
   const spanLabel = group.firstDate === group.lastDate ? group.firstDate : `${group.firstDate} to ${group.lastDate}`;
 
   return (
-    <article className="rounded-xl border border-[var(--border-color)] bg-[var(--background-secondary)] p-4 space-y-3">
+    <article className="rounded-card border border-[var(--border-color)] bg-[var(--background-secondary)] p-4 space-y-3">
       <header className="space-y-1">
         <h3 className="font-medium text-[var(--foreground)]">{group.label}</h3>
         <p className="text-sm text-[var(--foreground-secondary)]">
@@ -86,7 +86,7 @@ export default function MappingGroupCard({
       </header>
 
       {group.suggestion && (
-        <section aria-label="What your data suggests" className="rounded-lg bg-[var(--background-tertiary)] p-3 text-sm space-y-1">
+        <section aria-label="What your data suggests" className="rounded-control bg-[var(--background-tertiary)] p-3 text-sm space-y-1">
           <p className="font-medium">From your own data:</p>
           <p>{group.suggestion.why}.</p>
           {group.suggestion.meaning && (
@@ -104,7 +104,7 @@ export default function MappingGroupCard({
       {/* MAP-002 — what the ledger says ABOUT these rows. There is nothing to confirm
           here, so there is no button: it is a fact, not a question. */}
       {group.findings.length > 0 && (
-        <section aria-label="What your data also shows" className="rounded-lg bg-[var(--background-tertiary)] p-3 text-sm space-y-1">
+        <section aria-label="What your data also shows" className="rounded-control bg-[var(--background-tertiary)] p-3 text-sm space-y-1">
           {group.findings.map((f) => (
             <p key={f} className="text-[var(--foreground-secondary)]">{f}.</p>
           ))}
@@ -114,7 +114,7 @@ export default function MappingGroupCard({
       {/* The pre-filled income source, offered only once the owner has chosen the meaning
           it belongs to. Every field below is read off these rows. */}
       {offer && meaning === group.suggestion?.meaning && (
-        <section aria-label="Create an income source from these rows" className="rounded-lg bg-[var(--background-tertiary)] p-3 text-sm space-y-1">
+        <section aria-label="Create an income source from these rows" className="rounded-control bg-[var(--background-tertiary)] p-3 text-sm space-y-1">
           <label className="flex items-start gap-2 min-h-[44px] cursor-pointer">
             <input type="checkbox" checked={createSource} onChange={(e) => setCreateSource(e.target.checked)} />
             <span>
@@ -175,7 +175,7 @@ export default function MappingGroupCard({
         </fieldset>
       )}
 
-      <section aria-label="What confirming will do" className="rounded-lg bg-[var(--background-tertiary)] p-3 text-sm space-y-1">
+      <section aria-label="What confirming will do" className="rounded-control bg-[var(--background-tertiary)] p-3 text-sm space-y-1">
         <p className="font-medium">If you confirm:</p>
         {preview ? (
           <>

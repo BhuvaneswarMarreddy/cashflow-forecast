@@ -214,7 +214,7 @@ function OnboardingContent() {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="bg-pattern" />
-        <div className="animate-pulse-glow w-16 h-16 rounded-2xl bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] flex items-center justify-center">
+        <div className="animate-pulse-glow w-16 h-16 rounded-card bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] flex items-center justify-center">
           <TrendingUp className="w-8 h-8 text-white" />
         </div>
       </div>
@@ -628,8 +628,8 @@ function OnboardingContent() {
             className="absolute inset-0 bg-black/60 backdrop-blur-sm"
             onClick={() => !isDeleting && setDeleteConfirm(null)}
           />
-          <div className="relative bg-[var(--background-secondary)] rounded-2xl p-6 max-w-sm w-full border border-[var(--border-color)] shadow-2xl">
-            <div className="flex items-center justify-center w-12 h-12 rounded-full bg-[var(--accent-danger)]/20 mx-auto mb-4">
+          <div className="relative bg-[var(--background-secondary)] rounded-card p-6 max-w-sm w-full border border-[var(--border-color)] shadow-2xl">
+            <div className="flex items-center justify-center w-12 h-12 rounded-pill bg-[var(--accent-danger)]/20 mx-auto mb-4">
               <Trash2 className="w-6 h-6 text-[var(--accent-danger)]" />
             </div>
             <h3 className="text-lg font-semibold text-[var(--foreground)] text-center mb-2">
@@ -651,11 +651,11 @@ function OnboardingContent() {
               <button
                 onClick={handleConfirmedDelete}
                 disabled={isDeleting}
-                className="flex-1 px-4 py-2.5 rounded-xl bg-[var(--accent-danger)] text-white font-medium hover:bg-[var(--accent-danger)]/90 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                className="flex-1 px-4 py-2.5 rounded-card bg-[var(--accent-danger)] text-white font-medium hover:bg-[var(--accent-danger)]/90 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 {isDeleting ? (
                   <>
-                    <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                    <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-pill animate-spin" />
                     Deleting...
                   </>
                 ) : (
@@ -682,7 +682,7 @@ function OnboardingContent() {
               <div className="flex flex-col items-center flex-shrink-0">
                 <div
                   aria-hidden="true"
-                  className={`w-9 h-9 md:w-11 md:h-11 rounded-xl flex items-center justify-center transition-all ${
+                  className={`w-9 h-9 md:w-11 md:h-11 rounded-card flex items-center justify-center transition-all ${
                     index <= currentStepIndex
                       ? 'bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] text-white'
                       : 'bg-[var(--background-tertiary)] text-[var(--foreground-muted)]'
@@ -697,7 +697,7 @@ function OnboardingContent() {
               {index < steps.length - 1 && (
                 <div
                   aria-hidden="true"
-                  className={`w-6 md:w-8 h-0.5 mx-1 rounded transition-all flex-shrink-0 ${
+                  className={`w-6 md:w-8 h-0.5 mx-1 rounded-control transition-all flex-shrink-0 ${
                     index < currentStepIndex ? 'bg-[var(--accent-primary)]' : 'bg-[var(--background-tertiary)]'
                   }`}
                 />
@@ -716,7 +716,7 @@ function OnboardingContent() {
           {/* Welcome Step */}
           {currentStep === 'welcome' && (
             <div className="text-center">
-              <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] mb-6">
+              <div className="inline-flex items-center justify-center w-20 h-20 rounded-card bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] mb-6">
                 <TrendingUp className="w-10 h-10 text-white" />
               </div>
               <h1 className="text-3xl font-bold text-[var(--foreground)] mb-4">
@@ -736,7 +736,7 @@ function OnboardingContent() {
                 >
                   {isConnecting ? (
                     <>
-                      <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                      <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-pill animate-spin" />
                       Working…
                     </>
                   ) : (
@@ -790,7 +790,7 @@ function OnboardingContent() {
                 >
                   {isSaving ? (
                     <>
-                      <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                      <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-pill animate-spin" />
                       Saving...
                     </>
                   ) : (
@@ -811,7 +811,7 @@ function OnboardingContent() {
           {currentStep === 'bank-accounts' && (
             <div>
               <div className="flex items-center gap-3 mb-2">
-                <div className="w-10 h-10 rounded-xl bg-[var(--accent-primary)]/20 flex items-center justify-center">
+                <div className="w-10 h-10 rounded-card bg-[var(--accent-primary)]/20 flex items-center justify-center">
                   <Landmark className="w-5 h-5 text-[var(--accent-primary)]" />
                 </div>
                 <div>
@@ -830,12 +830,12 @@ function OnboardingContent() {
                   {bankAccounts.map((account, index) => (
                     <div
                       key={index}
-                      className="flex items-center justify-between p-4 rounded-xl bg-[var(--background-tertiary)] border-l-4"
+                      className="flex items-center justify-between p-4 rounded-card bg-[var(--background-tertiary)] border-l-4"
                       style={{ borderLeftColor: account.color }}
                     >
                       <div className="flex items-center gap-4">
                         <div
-                          className="w-10 h-10 rounded-xl flex items-center justify-center"
+                          className="w-10 h-10 rounded-card flex items-center justify-center"
                           style={{ backgroundColor: `${account.color}20`, color: account.color }}
                         >
                           {getAccountIcon(account.type)}
@@ -856,7 +856,7 @@ function OnboardingContent() {
                         </p>
                         <button
                           onClick={() => removeBankAccount(index)}
-                          className="p-2 rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-danger)] hover:bg-[var(--accent-danger)]/10 transition-colors"
+                          className="p-2 rounded-control text-[var(--foreground-muted)] hover:text-[var(--accent-danger)] hover:bg-[var(--accent-danger)]/10 transition-colors"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -871,7 +871,7 @@ function OnboardingContent() {
                 <form
                   ref={addFormRef}
                   onSubmit={(e) => { e.preventDefault(); addBankAccount(); }}
-                  className="p-5 rounded-xl bg-[var(--background-tertiary)] border border-[var(--border-color)] mt-4"
+                  className="p-5 rounded-card bg-[var(--background-tertiary)] border border-[var(--border-color)] mt-4"
                 >
                   <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">Add Bank Account</h3>
                   
@@ -966,7 +966,7 @@ function OnboardingContent() {
                     >
                       {isAddingBank ? (
                         <>
-                          <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                          <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-pill animate-spin" />
                           Saving...
                         </>
                       ) : (
@@ -989,7 +989,7 @@ function OnboardingContent() {
               ) : (
                 <button
                   onClick={() => setShowBankForm(true)}
-                  className="w-full p-4 rounded-xl border-2 border-dashed border-[var(--border-color)] text-[var(--foreground-secondary)] hover:border-[var(--accent-primary)] hover:text-[var(--accent-primary)] transition-all flex items-center justify-center gap-2 mt-4"
+                  className="w-full p-4 rounded-card border-2 border-dashed border-[var(--border-color)] text-[var(--foreground-secondary)] hover:border-[var(--accent-primary)] hover:text-[var(--accent-primary)] transition-all flex items-center justify-center gap-2 mt-4"
                 >
                   <Plus className="w-5 h-5" />
                   Add Bank Account
@@ -1020,7 +1020,7 @@ function OnboardingContent() {
           {currentStep === 'credit-cards' && (
             <div>
               <div className="flex items-center gap-3 mb-2">
-                <div className="w-10 h-10 rounded-xl bg-[var(--accent-secondary)]/20 flex items-center justify-center">
+                <div className="w-10 h-10 rounded-card bg-[var(--accent-secondary)]/20 flex items-center justify-center">
                   <CreditCard className="w-5 h-5 text-[var(--accent-secondary)]" />
                 </div>
                 <div>
@@ -1039,12 +1039,12 @@ function OnboardingContent() {
                   {creditCards.map((card, index) => (
                     <div
                       key={index}
-                      className="flex items-center justify-between p-4 rounded-xl bg-[var(--background-tertiary)] border-l-4"
+                      className="flex items-center justify-between p-4 rounded-card bg-[var(--background-tertiary)] border-l-4"
                       style={{ borderLeftColor: card.color }}
                     >
                       <div className="flex items-center gap-4">
                         <div
-                          className="w-10 h-10 rounded-xl flex items-center justify-center"
+                          className="w-10 h-10 rounded-card flex items-center justify-center"
                           style={{ backgroundColor: `${card.color}20`, color: card.color }}
                         >
                           <CreditCard className="w-5 h-5" />
@@ -1067,7 +1067,7 @@ function OnboardingContent() {
                         </p>
                         <button
                           onClick={() => removeCreditCard(index)}
-                          className="p-2 rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-danger)] hover:bg-[var(--accent-danger)]/10 transition-colors"
+                          className="p-2 rounded-control text-[var(--foreground-muted)] hover:text-[var(--accent-danger)] hover:bg-[var(--accent-danger)]/10 transition-colors"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -1082,7 +1082,7 @@ function OnboardingContent() {
                 <form
                   ref={addFormRef}
                   onSubmit={(e) => { e.preventDefault(); addCreditCard(); }}
-                  className="p-5 rounded-xl bg-[var(--background-tertiary)] border border-[var(--border-color)] mt-4"
+                  className="p-5 rounded-card bg-[var(--background-tertiary)] border border-[var(--border-color)] mt-4"
                 >
                   <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">Add Credit Card</h3>
                   
@@ -1191,7 +1191,7 @@ function OnboardingContent() {
                       <label className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">
                         Available Credit
                       </label>
-                      <div className="h-[46px] px-4 rounded-xl bg-[var(--background-secondary)] border border-[var(--border-color)] flex items-center">
+                      <div className="h-[46px] px-4 rounded-card bg-[var(--background-secondary)] border border-[var(--border-color)] flex items-center">
                         <DollarSign className="w-4 h-4 text-[var(--foreground-muted)] mr-2" />
                         <span className={`font-medium ${
                           (parseFloat(cardForm.creditLimit) || 0) - (parseFloat(cardForm.balance) || 0) >= 0 
@@ -1268,7 +1268,7 @@ function OnboardingContent() {
                     >
                       {isAddingCard ? (
                         <>
-                          <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                          <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-pill animate-spin" />
                           Saving...
                         </>
                       ) : (
@@ -1297,7 +1297,7 @@ function OnboardingContent() {
                     }));
                     setShowCardForm(true);
                   }}
-                  className="w-full p-4 rounded-xl border-2 border-dashed border-[var(--border-color)] text-[var(--foreground-secondary)] hover:border-[var(--accent-secondary)] hover:text-[var(--accent-secondary)] transition-all flex items-center justify-center gap-2 mt-4"
+                  className="w-full p-4 rounded-card border-2 border-dashed border-[var(--border-color)] text-[var(--foreground-secondary)] hover:border-[var(--accent-secondary)] hover:text-[var(--accent-secondary)] transition-all flex items-center justify-center gap-2 mt-4"
                 >
                   <Plus className="w-5 h-5" />
                   Add Credit Card
@@ -1328,7 +1328,7 @@ function OnboardingContent() {
           {currentStep === 'loans' && (
             <div>
               <div className="flex items-center gap-3 mb-2">
-                <div className="w-10 h-10 rounded-xl bg-[var(--accent-warning)]/20 flex items-center justify-center">
+                <div className="w-10 h-10 rounded-card bg-[var(--accent-warning)]/20 flex items-center justify-center">
                   <FileText className="w-5 h-5 text-[var(--accent-warning)]" />
                 </div>
                 <div>
@@ -1347,10 +1347,10 @@ function OnboardingContent() {
                   {loans.map((loan, index) => (
                     <div
                       key={index}
-                      className="flex items-center justify-between p-4 rounded-xl bg-[var(--background-tertiary)] border-l-4 border-l-[var(--accent-warning)]"
+                      className="flex items-center justify-between p-4 rounded-card bg-[var(--background-tertiary)] border-l-4 border-l-[var(--accent-warning)]"
                     >
                       <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-[var(--accent-warning)]/20 text-[var(--accent-warning)]">
+                        <div className="w-10 h-10 rounded-card flex items-center justify-center bg-[var(--accent-warning)]/20 text-[var(--accent-warning)]">
                           <FileText className="w-5 h-5" />
                         </div>
                         <div>
@@ -1368,7 +1368,7 @@ function OnboardingContent() {
                         </p>
                         <button
                           onClick={() => removeLoan(index)}
-                          className="p-2 rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-danger)] hover:bg-[var(--accent-danger)]/10 transition-colors"
+                          className="p-2 rounded-control text-[var(--foreground-muted)] hover:text-[var(--accent-danger)] hover:bg-[var(--accent-danger)]/10 transition-colors"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -1383,7 +1383,7 @@ function OnboardingContent() {
                 <form
                   ref={addFormRef}
                   onSubmit={(e) => { e.preventDefault(); addLoan(); }}
-                  className="p-5 rounded-xl bg-[var(--background-tertiary)] border border-[var(--border-color)] mt-4"
+                  className="p-5 rounded-card bg-[var(--background-tertiary)] border border-[var(--border-color)] mt-4"
                 >
                   <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">Add Loan</h3>
                   
@@ -1516,7 +1516,7 @@ function OnboardingContent() {
                     >
                       {isAddingLoan ? (
                         <>
-                          <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                          <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-pill animate-spin" />
                           Saving...
                         </>
                       ) : (
@@ -1539,7 +1539,7 @@ function OnboardingContent() {
               ) : (
                 <button
                   onClick={() => setShowLoanForm(true)}
-                  className="w-full p-4 rounded-xl border-2 border-dashed border-[var(--border-color)] text-[var(--foreground-secondary)] hover:border-[var(--accent-warning)] hover:text-[var(--accent-warning)] transition-all flex items-center justify-center gap-2 mt-4"
+                  className="w-full p-4 rounded-card border-2 border-dashed border-[var(--border-color)] text-[var(--foreground-secondary)] hover:border-[var(--accent-warning)] hover:text-[var(--accent-warning)] transition-all flex items-center justify-center gap-2 mt-4"
                 >
                   <Plus className="w-5 h-5" />
                   Add Personal Loan
@@ -1570,7 +1570,7 @@ function OnboardingContent() {
           {currentStep === 'income' && (
             <div>
               <div className="flex items-center gap-3 mb-2">
-                <div className="w-10 h-10 rounded-xl bg-[var(--accent-success)]/20 flex items-center justify-center">
+                <div className="w-10 h-10 rounded-card bg-[var(--accent-success)]/20 flex items-center justify-center">
                   <Banknote className="w-5 h-5 text-[var(--accent-success)]" />
                 </div>
                 <div>
@@ -1589,10 +1589,10 @@ function OnboardingContent() {
                   {incomeSources.map((income, index) => (
                     <div
                       key={index}
-                      className="flex items-center justify-between p-4 rounded-xl bg-[var(--background-tertiary)] border-l-4 border-l-[var(--accent-success)]"
+                      className="flex items-center justify-between p-4 rounded-card bg-[var(--background-tertiary)] border-l-4 border-l-[var(--accent-success)]"
                     >
                       <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-[var(--accent-success)]/20 text-[var(--accent-success)]">
+                        <div className="w-10 h-10 rounded-card flex items-center justify-center bg-[var(--accent-success)]/20 text-[var(--accent-success)]">
                           <Banknote className="w-5 h-5" />
                         </div>
                         <div>
@@ -1612,7 +1612,7 @@ function OnboardingContent() {
                         </p>
                         <button
                           onClick={() => removeIncome(index)}
-                          className="p-2 rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-danger)] hover:bg-[var(--accent-danger)]/10 transition-colors"
+                          className="p-2 rounded-control text-[var(--foreground-muted)] hover:text-[var(--accent-danger)] hover:bg-[var(--accent-danger)]/10 transition-colors"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -1621,7 +1621,7 @@ function OnboardingContent() {
                   ))}
                   
                   {/* Monthly Income Summary */}
-                  <div className="p-4 rounded-xl bg-[var(--accent-success)]/10 border border-[var(--accent-success)]/30">
+                  <div className="p-4 rounded-card bg-[var(--accent-success)]/10 border border-[var(--accent-success)]/30">
                     <div className="flex justify-between items-center">
                       <span className="text-[var(--foreground-secondary)]">Est. Monthly Income:</span>
                       <span className="text-lg font-bold text-[var(--accent-success)]">
@@ -1637,7 +1637,7 @@ function OnboardingContent() {
                 <form
                   ref={addFormRef}
                   onSubmit={(e) => { e.preventDefault(); addIncome(); }}
-                  className="p-5 rounded-xl bg-[var(--background-tertiary)] border border-[var(--border-color)] mt-4"
+                  className="p-5 rounded-card bg-[var(--background-tertiary)] border border-[var(--border-color)] mt-4"
                 >
                   <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">Add Income Source</h3>
                   
@@ -1716,7 +1716,7 @@ function OnboardingContent() {
                     >
                       {isAddingIncome ? (
                         <>
-                          <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                          <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-pill animate-spin" />
                           Saving...
                         </>
                       ) : (
@@ -1739,7 +1739,7 @@ function OnboardingContent() {
               ) : (
                 <button
                   onClick={() => setShowIncomeForm(true)}
-                  className="w-full p-4 rounded-xl border-2 border-dashed border-[var(--border-color)] text-[var(--foreground-secondary)] hover:border-[var(--accent-success)] hover:text-[var(--accent-success)] transition-all flex items-center justify-center gap-2 mt-4"
+                  className="w-full p-4 rounded-card border-2 border-dashed border-[var(--border-color)] text-[var(--foreground-secondary)] hover:border-[var(--accent-success)] hover:text-[var(--accent-success)] transition-all flex items-center justify-center gap-2 mt-4"
                 >
                   <Plus className="w-5 h-5" />
                   Add Income Source
@@ -1770,7 +1770,7 @@ function OnboardingContent() {
           {currentStep === 'budget' && (
             <div>
               <div className="flex items-center gap-3 mb-6">
-                <div className="w-10 h-10 rounded-xl bg-[var(--accent-tertiary)]/20 flex items-center justify-center">
+                <div className="w-10 h-10 rounded-card bg-[var(--accent-tertiary)]/20 flex items-center justify-center">
                   <DollarSign className="w-5 h-5 text-[var(--accent-tertiary)]" />
                 </div>
                 <div>
@@ -1806,7 +1806,7 @@ function OnboardingContent() {
                 {/* Summary */}
                 <div className="mt-6 space-y-3">
                   {incomeSources.length > 0 && (
-                    <div className="p-3 rounded-xl bg-[var(--accent-success)]/10 border border-[var(--accent-success)]/30">
+                    <div className="p-3 rounded-card bg-[var(--accent-success)]/10 border border-[var(--accent-success)]/30">
                       <div className="flex justify-between items-center">
                         <span className="text-sm text-[var(--foreground-secondary)]">Monthly Income:</span>
                         <span className="font-bold text-[var(--accent-success)]">
@@ -1817,7 +1817,7 @@ function OnboardingContent() {
                   )}
 
                   {totalDebt > 0 && (
-                    <div className="p-3 rounded-xl bg-[var(--accent-danger)]/10 border border-[var(--accent-danger)]/30">
+                    <div className="p-3 rounded-card bg-[var(--accent-danger)]/10 border border-[var(--accent-danger)]/30">
                       <div className="flex justify-between items-center">
                         <span className="text-sm text-[var(--foreground-secondary)]">Total Debt:</span>
                         <span className="font-bold text-[var(--accent-danger)]">
@@ -1828,7 +1828,7 @@ function OnboardingContent() {
                   )}
 
                   {totalMonthlyPayments > 0 && (
-                    <div className="p-3 rounded-xl bg-[var(--background-tertiary)]">
+                    <div className="p-3 rounded-card bg-[var(--background-tertiary)]">
                       <div className="flex justify-between items-center">
                         <span className="text-sm text-[var(--foreground-secondary)]">Loan Payments:</span>
                         <span className="font-medium text-[var(--foreground)]">
@@ -1857,7 +1857,7 @@ function OnboardingContent() {
                 >
                   {isSaving ? (
                     <>
-                      <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                      <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-pill animate-spin" />
                       Saving...
                     </>
                   ) : (
@@ -1874,7 +1874,7 @@ function OnboardingContent() {
           {/* Complete Step */}
           {currentStep === 'complete' && (
             <div className="text-center">
-              <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-[var(--accent-success)]/20 mb-6">
+              <div className="inline-flex items-center justify-center w-20 h-20 rounded-pill bg-[var(--accent-success)]/20 mb-6">
                 <Check className="w-10 h-10 text-[var(--accent-success)]" />
               </div>
               <h2 className="text-3xl font-bold text-[var(--foreground)] mb-4">
@@ -1885,19 +1885,19 @@ function OnboardingContent() {
               </p>
               
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 max-w-lg mx-auto mb-8">
-                <div className="p-3 rounded-xl bg-[var(--background-tertiary)]">
+                <div className="p-3 rounded-card bg-[var(--background-tertiary)]">
                   <p className="text-xl font-bold text-[var(--accent-primary)]">{bankAccounts.length}</p>
                   <p className="text-xs text-[var(--foreground-secondary)]">Banks</p>
                 </div>
-                <div className="p-3 rounded-xl bg-[var(--background-tertiary)]">
+                <div className="p-3 rounded-card bg-[var(--background-tertiary)]">
                   <p className="text-xl font-bold text-[var(--accent-secondary)]">{creditCards.length}</p>
                   <p className="text-xs text-[var(--foreground-secondary)]">Cards</p>
                 </div>
-                <div className="p-3 rounded-xl bg-[var(--background-tertiary)]">
+                <div className="p-3 rounded-card bg-[var(--background-tertiary)]">
                   <p className="text-xl font-bold text-[var(--accent-warning)]">{loans.length}</p>
                   <p className="text-xs text-[var(--foreground-secondary)]">Loans</p>
                 </div>
-                <div className="p-3 rounded-xl bg-[var(--background-tertiary)]">
+                <div className="p-3 rounded-card bg-[var(--background-tertiary)]">
                   <p className="text-xl font-bold text-[var(--accent-success)]">{incomeSources.length}</p>
                   <p className="text-xs text-[var(--foreground-secondary)]">Income</p>
                 </div>
@@ -1924,7 +1924,7 @@ function OnboardingContent() {
             >
               {isSaving ? (
                 <>
-                  <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                  <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-pill animate-spin" />
                   Saving...
                 </>
               ) : (

@@ -66,25 +66,25 @@ export default function DebtPlannerPanel({
     <div className="space-y-6">
       {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="p-4 rounded-xl bg-[var(--background-tertiary)]">
+        <div className="p-4 rounded-card bg-[var(--background-tertiary)]">
           <p className="text-sm text-[var(--foreground-muted)]">Total Debt</p>
           <p className="text-xl font-bold text-[var(--accent-danger)]">
             ${totalDebt.toLocaleString()}
           </p>
         </div>
-        <div className="p-4 rounded-xl bg-[var(--background-tertiary)]">
+        <div className="p-4 rounded-card bg-[var(--background-tertiary)]">
           <p className="text-sm text-[var(--foreground-muted)]">Min. Payments</p>
           <p className="text-xl font-bold text-[var(--foreground)]">
             ${Math.round(totalMinPayment).toLocaleString()}/mo
           </p>
         </div>
-        <div className="p-4 rounded-xl bg-[var(--background-tertiary)]">
+        <div className="p-4 rounded-card bg-[var(--background-tertiary)]">
           <p className="text-sm text-[var(--foreground-muted)]">Debt-Free Date</p>
           <p className="text-xl font-bold text-[var(--accent-success)]">
             {getDebtFreeDate(plan)}
           </p>
         </div>
-        <div className="p-4 rounded-xl bg-[var(--background-tertiary)]">
+        <div className="p-4 rounded-card bg-[var(--background-tertiary)]">
           <p className="text-sm text-[var(--foreground-muted)]">Interest Saved</p>
           <p className="text-xl font-bold text-emerald-500">
             ${plan.interestSaved.toLocaleString()}
@@ -93,7 +93,7 @@ export default function DebtPlannerPanel({
       </div>
       
       {/* Strategy Selection */}
-      <div className="p-6 rounded-xl bg-[var(--background-secondary)] border border-[var(--border-color)]">
+      <div className="p-6 rounded-card bg-[var(--background-secondary)] border border-[var(--border-color)]">
         <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">
           Choose Your Strategy
         </h3>
@@ -102,14 +102,14 @@ export default function DebtPlannerPanel({
           {/* Snowball */}
           <button
             onClick={() => setSelectedStrategy('snowball')}
-            className={`p-4 rounded-xl text-left transition-all ${
+            className={`p-4 rounded-card text-left transition-all ${
               selectedStrategy === 'snowball'
                 ? 'bg-[var(--accent-primary)]/10 border-2 border-[var(--accent-primary)]'
                 : 'bg-[var(--background-tertiary)] border-2 border-transparent hover:border-[var(--border-color)]'
             }`}
           >
             <div className="flex items-center gap-3 mb-2">
-              <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+              <div className={`w-10 h-10 rounded-card flex items-center justify-center ${
                 selectedStrategy === 'snowball' ? 'bg-[var(--accent-primary)] text-[#16181c]' : 'bg-[var(--background-secondary)]'
               }`}>
                 <Zap className="w-5 h-5" />
@@ -140,14 +140,14 @@ export default function DebtPlannerPanel({
           {/* Avalanche */}
           <button
             onClick={() => setSelectedStrategy('avalanche')}
-            className={`p-4 rounded-xl text-left transition-all ${
+            className={`p-4 rounded-card text-left transition-all ${
               selectedStrategy === 'avalanche'
                 ? 'bg-[var(--accent-primary)]/10 border-2 border-[var(--accent-primary)]'
                 : 'bg-[var(--background-tertiary)] border-2 border-transparent hover:border-[var(--border-color)]'
             }`}
           >
             <div className="flex items-center gap-3 mb-2">
-              <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+              <div className={`w-10 h-10 rounded-card flex items-center justify-center ${
                 selectedStrategy === 'avalanche' ? 'bg-[var(--accent-primary)] text-[#16181c]' : 'bg-[var(--background-secondary)]'
               }`}>
                 <TrendingDown className="w-5 h-5" />
@@ -178,7 +178,7 @@ export default function DebtPlannerPanel({
         
         {/* Recommendation */}
         {comparison.savingsDifference > 50 && (
-          <div className="p-3 rounded-lg bg-[var(--accent-primary)]/10 border border-[var(--accent-primary)]/20">
+          <div className="p-3 rounded-control bg-[var(--accent-primary)]/10 border border-[var(--accent-primary)]/20">
             <div className="flex items-start gap-2">
               <Info className="w-4 h-4 text-[var(--accent-primary)] mt-0.5" />
               <div className="text-sm">
@@ -197,7 +197,7 @@ export default function DebtPlannerPanel({
       </div>
       
       {/* Extra Payment Input */}
-      <div className="p-6 rounded-xl bg-[var(--background-secondary)] border border-[var(--border-color)]">
+      <div className="p-6 rounded-card bg-[var(--background-secondary)] border border-[var(--border-color)]">
         <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">
           Extra Monthly Payment
         </h3>
@@ -224,7 +224,7 @@ export default function DebtPlannerPanel({
               <button
                 key={amount}
                 onClick={() => setExtraPayment(amount.toString())}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                className={`px-3 py-2 rounded-control text-sm font-medium transition-colors ${
                   parseFloat(extraPayment) === amount
                     ? 'bg-[var(--accent-primary)] text-[#16181c]'
                     : 'bg-[var(--background-tertiary)] text-[var(--foreground)] hover:bg-[var(--background-primary)]'
@@ -247,7 +247,7 @@ export default function DebtPlannerPanel({
       </div>
       
       {/* Payoff Timeline */}
-      <div className="p-6 rounded-xl bg-[var(--background-secondary)] border border-[var(--border-color)]">
+      <div className="p-6 rounded-card bg-[var(--background-secondary)] border border-[var(--border-color)]">
         <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">
           Payoff Order ({selectedStrategy === 'snowball' ? 'Smallest First' : 'Highest APR First'})
         </h3>
@@ -256,9 +256,9 @@ export default function DebtPlannerPanel({
           {plan.debts.map((debt, index) => (
             <div
               key={debt.accountId}
-              className="flex items-center gap-4 p-4 rounded-xl bg-[var(--background-tertiary)]"
+              className="flex items-center gap-4 p-4 rounded-card bg-[var(--background-tertiary)]"
             >
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
+              <div className={`w-8 h-8 rounded-pill flex items-center justify-center text-sm font-bold ${
                 index === 0 
                   ? 'bg-[var(--accent-primary)] text-[#16181c]' 
                   : 'bg-[var(--background-secondary)] text-[var(--foreground-muted)]'
@@ -270,7 +270,7 @@ export default function DebtPlannerPanel({
                 <div className="flex items-center gap-2">
                   <p className="font-medium text-[var(--foreground)]">{debt.accountName}</p>
                   {index === 0 && (
-                    <span className="px-2 py-0.5 text-xs rounded-full bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">
+                    <span className="px-2 py-0.5 text-xs rounded-pill bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">
                       Focus
                     </span>
                   )}
@@ -298,7 +298,7 @@ export default function DebtPlannerPanel({
         </div>
         
         {/* Summary */}
-        <div className="mt-6 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
+        <div className="mt-6 p-4 rounded-card bg-emerald-500/10 border border-emerald-500/30">
           <div className="flex items-center gap-3">
             <Target className="w-6 h-6 text-emerald-500" />
             <div>
@@ -315,7 +315,7 @@ export default function DebtPlannerPanel({
       </div>
       
       {/* Strategy Explanation */}
-      <div className="p-4 rounded-xl bg-[var(--background-tertiary)]">
+      <div className="p-4 rounded-card bg-[var(--background-tertiary)]">
         <h4 className="font-medium text-[var(--foreground)] mb-2">How This Works</h4>
         <ul className="space-y-1 text-sm text-[var(--foreground-muted)]">
           <li>• Pay minimum on all debts each month</li>

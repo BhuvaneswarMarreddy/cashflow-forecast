@@ -69,7 +69,7 @@ export default function UpcomingBillsPanel({
   
   if (totalUpcoming === 0) {
     return (
-      <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
+      <div className="p-4 rounded-card bg-emerald-500/10 border border-emerald-500/30">
         <div className="flex items-center gap-3">
           <CheckCircle2 className="w-5 h-5 text-emerald-500" />
           <div>
@@ -88,7 +88,7 @@ export default function UpcomingBillsPanel({
     const displayItems = [...categorized.overdue, ...categorized.today, ...categorized.thisWeek].slice(0, 5);
     
     return (
-      <div className={`p-4 rounded-xl ${
+      <div className={`p-4 rounded-card ${
         urgentCount > 0 
           ? 'bg-amber-500/10 border border-amber-500/30' 
           : 'bg-[var(--background-tertiary)] border border-[var(--border-color)]'
@@ -98,7 +98,7 @@ export default function UpcomingBillsPanel({
             <Bell className={`w-4 h-4 ${urgentCount > 0 ? 'text-amber-500' : 'text-[var(--foreground-muted)]'}`} />
             <span className="text-sm font-medium text-[var(--foreground)]">Upcoming Bills</span>
             {urgentCount > 0 && (
-              <span className="px-1.5 py-0.5 text-xs font-medium rounded-full bg-amber-500 text-white">
+              <span className="px-1.5 py-0.5 text-xs font-medium rounded-pill bg-amber-500 text-white">
                 {urgentCount}
               </span>
             )}
@@ -264,13 +264,13 @@ function ReminderCard({
   };
   
   return (
-    <div className={`p-3 rounded-xl flex items-center justify-between ${
+    <div className={`p-3 rounded-card flex items-center justify-between ${
       isUrgent 
         ? 'bg-amber-500/10 border border-amber-500/20' 
         : 'bg-[var(--background-tertiary)]'
     }`}>
       <div className="flex items-center gap-3">
-        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+        <div className={`w-10 h-10 rounded-card flex items-center justify-center ${
           isUrgent ? 'bg-amber-500/20 text-amber-500' : 'bg-[var(--background-secondary)] text-[var(--foreground-muted)]'
         }`}>
           {getTypeIcon(reminder.type)}
@@ -295,7 +295,7 @@ function ReminderCard({
             {onMarkPaid && (
               <button
                 onClick={() => onMarkPaid(reminder.id)}
-                className="p-2 rounded-lg text-emerald-500 hover:bg-emerald-500/10 transition-colors"
+                className="p-2 rounded-control text-emerald-500 hover:bg-emerald-500/10 transition-colors"
                 title="Mark as paid"
               >
                 <CheckCircle2 className="w-4 h-4" />

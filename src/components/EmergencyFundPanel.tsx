@@ -147,11 +147,11 @@ export default function EmergencyFundPanel({
   };
 
   return (
-    <div className="bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-xl p-6">
+    <div className="bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-card p-6">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+          <div className={`w-10 h-10 rounded-control flex items-center justify-center ${
             metrics.status === 'critical' ? 'bg-red-500/10' :
             metrics.status === 'warning' ? 'bg-amber-500/10' : 'bg-emerald-500/10'
           }`}>
@@ -168,7 +168,7 @@ export default function EmergencyFundPanel({
         
         <button 
           onClick={() => setShowSettings(!showSettings)}
-          className="p-2 rounded-lg hover:bg-[var(--background-tertiary)] transition-colors"
+          className="p-2 rounded-control hover:bg-[var(--background-tertiary)] transition-colors"
         >
           <Settings className={`w-5 h-5 ${showSettings ? 'text-[var(--accent-primary)]' : 'text-[var(--foreground-muted)]'}`} />
         </button>
@@ -176,7 +176,7 @@ export default function EmergencyFundPanel({
 
       {/* Settings Panel */}
       {showSettings && (
-        <div className="mb-6 p-4 rounded-lg bg-[var(--background-tertiary)] border border-[var(--border-color)]">
+        <div className="mb-6 p-4 rounded-control bg-[var(--background-tertiary)] border border-[var(--border-color)]">
           <div className="flex items-center gap-2 mb-4">
             <Target className="w-4 h-4 text-[var(--accent-primary)]" />
             <span className="font-medium text-[var(--foreground)]">Set Your Emergency Fund Goal</span>
@@ -186,7 +186,7 @@ export default function EmergencyFundPanel({
           <div className="flex gap-2 mb-4">
             <button
               onClick={() => setGoalType('months')}
-              className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2 ${
+              className={`flex-1 py-2 px-3 rounded-control text-sm font-medium transition-all flex items-center justify-center gap-2 ${
                 goalType === 'months'
                   ? 'bg-[var(--accent-primary)] text-[#16181c]'
                   : 'bg-[var(--background-secondary)] text-[var(--foreground-secondary)] border border-[var(--border-color)]'
@@ -197,7 +197,7 @@ export default function EmergencyFundPanel({
             </button>
             <button
               onClick={() => setGoalType('amount')}
-              className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2 ${
+              className={`flex-1 py-2 px-3 rounded-control text-sm font-medium transition-all flex items-center justify-center gap-2 ${
                 goalType === 'amount'
                   ? 'bg-[var(--accent-primary)] text-[#16181c]'
                   : 'bg-[var(--background-secondary)] text-[var(--foreground-secondary)] border border-[var(--border-color)]'
@@ -219,7 +219,7 @@ export default function EmergencyFundPanel({
                   <button
                     key={months}
                     onClick={() => setGoalMonths(months)}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    className={`px-4 py-2 rounded-control text-sm font-medium transition-all ${
                       goalMonths === months
                         ? 'bg-[var(--accent-primary)] text-[#16181c]'
                         : 'bg-[var(--background-secondary)] text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]'
@@ -244,7 +244,7 @@ export default function EmergencyFundPanel({
                   type="number"
                   value={goalAmount}
                   onChange={(e) => setGoalAmount(Number(e.target.value))}
-                  className="w-full py-2 pl-8 pr-4 rounded-lg bg-[var(--background-secondary)] border border-[var(--border-color)] text-[var(--foreground)]"
+                  className="w-full py-2 pl-8 pr-4 rounded-control bg-[var(--background-secondary)] border border-[var(--border-color)] text-[var(--foreground)]"
                   placeholder="10000"
                 />
               </div>
@@ -257,7 +257,7 @@ export default function EmergencyFundPanel({
           <button
             onClick={handleSaveSettings}
             disabled={isSaving}
-            className="w-full py-2 rounded-lg bg-[var(--accent-primary)] text-[#16181c] font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-50"
+            className="w-full py-2 rounded-control bg-[var(--accent-primary)] text-[#16181c] font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-50"
           >
             {isSaving ? 'Saving...' : 'Save Goal'}
           </button>
@@ -265,10 +265,10 @@ export default function EmergencyFundPanel({
       )}
 
       {/* Set Aside Display */}
-      <div className="p-4 rounded-lg bg-gradient-to-r from-[var(--accent-primary)]/10 to-[var(--accent-secondary)]/10 border border-[var(--accent-primary)]/20 mb-6">
+      <div className="p-4 rounded-control bg-gradient-to-r from-[var(--accent-primary)]/10 to-[var(--accent-secondary)]/10 border border-[var(--accent-primary)]/20 mb-6">
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm text-[var(--foreground-muted)]">Set Aside for Emergencies</span>
-          <span className={`text-xs px-2 py-0.5 rounded-full ${
+          <span className={`text-xs px-2 py-0.5 rounded-pill ${
             metrics.fundProgress >= 100 
               ? 'bg-emerald-500/20 text-emerald-500' 
               : 'bg-amber-500/20 text-amber-500'
@@ -286,7 +286,7 @@ export default function EmergencyFundPanel({
 
       {/* Runway Display */}
       <div className="grid grid-cols-2 gap-4 mb-6">
-        <div className="p-4 rounded-lg bg-[var(--background-tertiary)]">
+        <div className="p-4 rounded-control bg-[var(--background-tertiary)]">
           <div className="flex items-center gap-2 mb-1">
             <Calendar className="w-4 h-4 text-[var(--foreground-muted)]" />
             <span className="text-xs text-[var(--foreground-muted)]">Runway</span>
@@ -299,7 +299,7 @@ export default function EmergencyFundPanel({
           </p>
         </div>
         
-        <div className="p-4 rounded-lg bg-[var(--background-tertiary)]">
+        <div className="p-4 rounded-control bg-[var(--background-tertiary)]">
           <div className="flex items-center gap-2 mb-1">
             <TrendingDown className="w-4 h-4 text-[var(--foreground-muted)]" />
             <span className="text-xs text-[var(--foreground-muted)]">Coverage</span>
@@ -321,9 +321,9 @@ export default function EmergencyFundPanel({
             {metrics.fundProgress.toFixed(0)}%
           </span>
         </div>
-        <div className="h-3 bg-[var(--background-tertiary)] rounded-full overflow-hidden">
+        <div className="h-3 bg-[var(--background-tertiary)] rounded-pill overflow-hidden">
           <div 
-            className={`h-full rounded-full transition-all duration-500 ${
+            className={`h-full rounded-pill transition-all duration-500 ${
               metrics.fundProgress < 33 ? 'bg-red-500' :
               metrics.fundProgress < 66 ? 'bg-amber-500' : 'bg-emerald-500'
             }`}
@@ -338,7 +338,7 @@ export default function EmergencyFundPanel({
       </div>
 
       {/* Status Message */}
-      <div className={`p-3 rounded-lg mb-4 flex items-start gap-2 ${
+      <div className={`p-3 rounded-control mb-4 flex items-start gap-2 ${
         metrics.status === 'critical' ? 'bg-red-500/10' :
         metrics.status === 'warning' ? 'bg-amber-500/10' : 'bg-emerald-500/10'
       }`}>
@@ -359,7 +359,7 @@ export default function EmergencyFundPanel({
 
       {/* AI Insight */}
       {aiInsight ? (
-        <div className="p-4 rounded-lg bg-[var(--accent-primary)]/5 border border-[var(--accent-primary)]/20">
+        <div className="p-4 rounded-control bg-[var(--accent-primary)]/5 border border-[var(--accent-primary)]/20">
           <div className="flex items-center gap-2 mb-2">
             <Sparkles className="w-4 h-4 text-[var(--accent-primary)]" />
             <span className="text-xs font-medium text-[var(--accent-primary)]">AI Insight</span>
@@ -370,7 +370,7 @@ export default function EmergencyFundPanel({
         <button
           onClick={getAIInsight}
           disabled={isLoadingAI}
-          className="w-full py-2 px-4 rounded-lg border border-[var(--border-color)] text-sm text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] transition-colors flex items-center justify-center gap-2"
+          className="w-full py-2 px-4 rounded-control border border-[var(--border-color)] text-sm text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] transition-colors flex items-center justify-center gap-2"
         >
           {isLoadingAI ? (
             <>

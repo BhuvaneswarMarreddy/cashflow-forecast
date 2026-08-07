@@ -325,7 +325,7 @@ export default function HistoryPage() {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="bg-pattern" />
-        <div className="animate-pulse-glow w-16 h-16 rounded-2xl bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] flex items-center justify-center">
+        <div className="animate-pulse-glow w-16 h-16 rounded-card bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] flex items-center justify-center">
           <TrendingUp className="w-8 h-8 text-white" />
         </div>
       </div>
@@ -367,7 +367,7 @@ export default function HistoryPage() {
           </div>
           <div className="flex items-center gap-3">
             {/* UI-104: three tabs — Transactions | Insights | Runway */}
-            <div className="flex bg-[var(--background-tertiary)] rounded-lg p-1">
+            <div className="flex bg-[var(--background-tertiary)] rounded-control p-1">
               {([['history', 'Transactions'], ['insights', 'Insights'], ['runway', 'Runway']] as [ViewMode, string][]).map(([v, label]) => (
                 <button
                   key={v}
@@ -376,7 +376,7 @@ export default function HistoryPage() {
                     window.history.replaceState(null, '', v === 'history' ? '/history' : `/history?tab=${v}`);
                   }}
                   aria-pressed={viewMode === v}
-                  className={`min-h-[44px] px-4 rounded-md text-sm font-medium transition-all ${
+                  className={`min-h-[44px] px-4 rounded-control text-sm font-medium transition-all ${
                     viewMode === v
                       ? 'bg-[var(--accent-primary)] text-[#16181c]'
                       : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'
@@ -394,7 +394,7 @@ export default function HistoryPage() {
         ) : viewMode === 'history' ? (
           <>
             {/* Compact Header with Actions and Stats */}
-            <div className="bg-[var(--background-secondary)] rounded-xl border border-[var(--border-color)] p-4 mb-6">
+            <div className="bg-[var(--background-secondary)] rounded-card border border-[var(--border-color)] p-4 mb-6">
               {/* Top Row - Stats Summary */}
               <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-[var(--border-color)]">
                 <div className="flex items-center gap-6">
@@ -443,7 +443,7 @@ export default function HistoryPage() {
                 type="button"
                 onClick={() => setFiltersOpen(o => !o)}
                 aria-expanded={filtersOpen}
-                className="sm:hidden mt-4 w-full min-h-[44px] px-3 py-2 rounded-lg bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground-secondary)] flex items-center justify-between"
+                className="sm:hidden mt-4 w-full min-h-[44px] px-3 py-2 rounded-control bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground-secondary)] flex items-center justify-between"
               >
                 <span className="flex items-center gap-2">
                   <Filter className="w-4 h-4" />
@@ -463,7 +463,7 @@ export default function HistoryPage() {
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Search..."
                     aria-label="Search transactions"
-                    className="w-full py-2 pl-9 pr-3 rounded-lg bg-[var(--background)] border border-[var(--border-color)] text-base sm:text-sm text-[var(--foreground)] placeholder:text-[var(--foreground-muted)]"
+                    className="w-full py-2 pl-9 pr-3 rounded-control bg-[var(--background)] border border-[var(--border-color)] text-base sm:text-sm text-[var(--foreground)] placeholder:text-[var(--foreground-muted)]"
                   />
                 </div>
 
@@ -471,7 +471,7 @@ export default function HistoryPage() {
                 <select
                   value={accountFilter}
                   onChange={(e) => setAccountFilter(e.target.value)}
-                  className="px-3 py-2 rounded-lg bg-[var(--background)] border border-[var(--border-color)] text-sm cursor-pointer min-w-[140px]"
+                  className="px-3 py-2 rounded-control bg-[var(--background)] border border-[var(--border-color)] text-sm cursor-pointer min-w-[140px]"
                   style={{
                     color: accountFilter !== 'all' && accountFilter !== 'unlinked'
                       ? profile?.paymentAccounts?.find(a => a.id === accountFilter)?.color
@@ -491,7 +491,7 @@ export default function HistoryPage() {
                 <select
                   value={dateFilter}
                   onChange={(e) => setDateFilter(e.target.value as DateFilter)}
-                  className="px-3 py-2 rounded-lg bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground-secondary)] cursor-pointer"
+                  className="px-3 py-2 rounded-control bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground-secondary)] cursor-pointer"
                 >
                   <option value="all">All Time</option>
                   <option value="thisMonth">This Month</option>
@@ -501,10 +501,10 @@ export default function HistoryPage() {
                 </select>
 
                 {/* Type Filter */}
-                <div className="flex items-center gap-1 p-1 bg-[var(--background)] rounded-lg border border-[var(--border-color)]">
+                <div className="flex items-center gap-1 p-1 bg-[var(--background)] rounded-control border border-[var(--border-color)]">
                   <button
                     onClick={() => setTypeFilter('all')}
-                    className={`min-h-[44px] px-2.5 py-1 rounded text-xs font-medium transition-all ${
+                    className={`min-h-[44px] px-2.5 py-1 rounded-control text-xs font-medium transition-all ${
                       typeFilter === 'all'
                         ? 'bg-[var(--accent-primary)] text-[#16181c]'
                         : 'text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]'
@@ -514,7 +514,7 @@ export default function HistoryPage() {
                   </button>
                   <button
                     onClick={() => setTypeFilter('income')}
-                    className={`min-h-[44px] px-2.5 py-1 rounded text-xs font-medium transition-all ${
+                    className={`min-h-[44px] px-2.5 py-1 rounded-control text-xs font-medium transition-all ${
                       typeFilter === 'income'
                         ? 'bg-emerald-500 text-white'
                         : 'text-emerald-500 hover:bg-emerald-500/10'
@@ -524,7 +524,7 @@ export default function HistoryPage() {
                   </button>
                   <button
                     onClick={() => setTypeFilter('expense')}
-                    className={`min-h-[44px] px-2.5 py-1 rounded text-xs font-medium transition-all ${
+                    className={`min-h-[44px] px-2.5 py-1 rounded-control text-xs font-medium transition-all ${
                       typeFilter === 'expense'
                         ? 'bg-red-500 text-white'
                         : 'text-red-400 hover:bg-red-500/10'
@@ -535,10 +535,10 @@ export default function HistoryPage() {
                 </div>
 
                 {/* Group Toggle */}
-                <div className="flex items-center gap-1 p-1 bg-[var(--background)] rounded-lg border border-[var(--border-color)]">
+                <div className="flex items-center gap-1 p-1 bg-[var(--background)] rounded-control border border-[var(--border-color)]">
                   <button
                     onClick={() => setGroupBy('month')}
-                    className={`min-h-[44px] px-2.5 py-1 rounded text-xs font-medium transition-all ${
+                    className={`min-h-[44px] px-2.5 py-1 rounded-control text-xs font-medium transition-all ${
                       groupBy === 'month'
                         ? 'bg-[var(--accent-primary)] text-[#16181c]'
                         : 'text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]'
@@ -548,7 +548,7 @@ export default function HistoryPage() {
                   </button>
                   <button
                     onClick={() => setGroupBy('year')}
-                    className={`min-h-[44px] px-2.5 py-1 rounded text-xs font-medium transition-all ${
+                    className={`min-h-[44px] px-2.5 py-1 rounded-control text-xs font-medium transition-all ${
                       groupBy === 'year'
                         ? 'bg-[var(--accent-primary)] text-[#16181c]'
                         : 'text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]'
@@ -558,7 +558,7 @@ export default function HistoryPage() {
                   </button>
                   <button
                     onClick={() => setGroupBy('category')}
-                    className={`min-h-[44px] px-2.5 py-1 rounded text-xs font-medium transition-all ${
+                    className={`min-h-[44px] px-2.5 py-1 rounded-control text-xs font-medium transition-all ${
                       groupBy === 'category'
                         ? 'bg-[var(--accent-primary)] text-[#16181c]'
                         : 'text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]'
@@ -572,7 +572,7 @@ export default function HistoryPage() {
                 <select
                   value={categoryFilter}
                   onChange={(e) => setCategoryFilter(e.target.value)}
-                  className="px-3 py-2 rounded-lg bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground-secondary)] cursor-pointer max-w-[180px]"
+                  className="px-3 py-2 rounded-control bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground-secondary)] cursor-pointer max-w-[180px]"
                 >
                   <option value="all">All categories</option>
                   {categoryOptions.map(c => (
@@ -584,7 +584,7 @@ export default function HistoryPage() {
                 <select
                   value={sortOrder}
                   onChange={(e) => setSortOrder(e.target.value as typeof sortOrder)}
-                  className="px-3 py-2 rounded-lg bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground-secondary)] cursor-pointer"
+                  className="px-3 py-2 rounded-control bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground-secondary)] cursor-pointer"
                 >
                   <option value="newest">Newest</option>
                   <option value="oldest">Oldest</option>
@@ -628,7 +628,7 @@ export default function HistoryPage() {
                 ];
               }
               return (
-                <div className="mb-6 p-5 rounded-xl bg-[var(--background-secondary)] border border-[var(--border-color)]">
+                <div className="mb-6 p-5 rounded-card bg-[var(--background-secondary)] border border-[var(--border-color)]">
                   <div className="flex items-center gap-2 mb-4">
                     <DollarSign className="w-5 h-5 text-[var(--accent-primary)]" />
                     <h3 className="font-semibold text-[var(--foreground)]">{acct.name} — summary</h3>
@@ -647,7 +647,7 @@ export default function HistoryPage() {
 
             {/* Transactions List */}
             {filteredTransactions.length === 0 ? (
-              <div className="text-center py-16 bg-[var(--background-secondary)] rounded-xl border border-[var(--border-color)]">
+              <div className="text-center py-16 bg-[var(--background-secondary)] rounded-card border border-[var(--border-color)]">
                 <Calendar className="w-16 h-16 mx-auto mb-4 text-[var(--foreground-muted)]" />
                 <h3 className="text-xl font-semibold text-[var(--foreground)] mb-2">No transactions found</h3>
                 <p className="text-[var(--foreground-secondary)] mb-6">
@@ -667,7 +667,7 @@ export default function HistoryPage() {
             ) : (
               <div className="space-y-4">
                 {groupedTransactions.map((group) => (
-                  <div key={group.key} className="bg-[var(--background-secondary)] rounded-xl border border-[var(--border-color)] overflow-hidden">
+                  <div key={group.key} className="bg-[var(--background-secondary)] rounded-card border border-[var(--border-color)] overflow-hidden">
                     {/* Group Header */}
                     <button
                       onClick={() => {
@@ -718,13 +718,13 @@ export default function HistoryPage() {
                                 {/* Show merchant badge or category icon */}
                                 {txn.merchant ? (
                                   <div 
-                                    className="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-sm"
+                                    className="w-10 h-10 rounded-control flex items-center justify-center text-white font-bold text-sm"
                                     style={{ backgroundColor: merchantColor || undefined }}
                                   >
                                     {txn.merchant.charAt(0).toUpperCase()}
                                   </div>
                                 ) : (
-                                  <div className="w-10 h-10 rounded-lg bg-[var(--background-tertiary)] flex items-center justify-center text-xl">
+                                  <div className="w-10 h-10 rounded-control bg-[var(--background-tertiary)] flex items-center justify-center text-xl">
                                     {category?.icon || '📋'}
                                   </div>
                                 )}
@@ -734,7 +734,7 @@ export default function HistoryPage() {
                                     <p className="font-medium text-[var(--foreground)] max-sm:min-w-0 max-sm:truncate">{txn.title}</p>
                                     {txn.merchant && (
                                       <span 
-                                        className="text-xs px-2 py-0.5 rounded-full text-white"
+                                        className="text-xs px-2 py-0.5 rounded-pill text-white"
                                         style={{ backgroundColor: merchantColor || undefined }}
                                       >
                                         {txn.merchant}
@@ -742,7 +742,7 @@ export default function HistoryPage() {
                                     )}
                                     {linkedAccount && (
                                       <span 
-                                        className="text-xs px-2 py-0.5 rounded-full border"
+                                        className="text-xs px-2 py-0.5 rounded-pill border"
                                         style={{ 
                                           borderColor: linkedAccount.color, 
                                           color: linkedAccount.color,
@@ -777,14 +777,14 @@ export default function HistoryPage() {
                                     <button
                                       onClick={() => handleDelete(txn.id)}
                                       aria-label={`Confirm delete ${txn.title}`}
-                                      className="text-xs px-2 py-1 rounded bg-red-500 text-white max-sm:min-w-[44px] max-sm:min-h-[44px]"
+                                      className="text-xs px-2 py-1 rounded-control bg-red-500 text-white max-sm:min-w-[44px] max-sm:min-h-[44px]"
                                     >
                                       Confirm
                                     </button>
                                     <button
                                       onClick={() => setDeleteConfirm(null)}
                                       aria-label="Cancel delete"
-                                      className="text-xs px-2 py-1 rounded bg-[var(--background-tertiary)] max-sm:min-w-[44px] max-sm:min-h-[44px]"
+                                      className="text-xs px-2 py-1 rounded-control bg-[var(--background-tertiary)] max-sm:min-w-[44px] max-sm:min-h-[44px]"
                                     >
                                       Cancel
                                     </button>
@@ -797,7 +797,7 @@ export default function HistoryPage() {
                                     <button
                                       onClick={() => askAbout(askAboutTransaction(txn, profile?.paymentAccounts ?? [], transactions))}
                                       aria-label={`Ask about ${txn.title}`}
-                                      className="p-2 rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors max-sm:min-w-[44px] max-sm:min-h-[44px] flex items-center justify-center"
+                                      className="p-2 rounded-control text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors max-sm:min-w-[44px] max-sm:min-h-[44px] flex items-center justify-center"
                                       title="Ask about this transaction"
                                     >
                                       <Sparkles className="w-4 h-4" />
@@ -808,7 +808,7 @@ export default function HistoryPage() {
                                         setIsAddModalOpen(true);
                                       }}
                                       aria-label={`Edit ${txn.title}`}
-                                      className="p-2 rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors max-sm:min-w-[44px] max-sm:min-h-[44px] flex items-center justify-center"
+                                      className="p-2 rounded-control text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors max-sm:min-w-[44px] max-sm:min-h-[44px] flex items-center justify-center"
                                       title="Edit transaction"
                                     >
                                       <Edit2 className="w-4 h-4" />
@@ -816,7 +816,7 @@ export default function HistoryPage() {
                                     <button
                                       onClick={() => setDeleteConfirm(txn.id)}
                                       aria-label={`Delete ${txn.title}`}
-                                      className="p-2 rounded-lg text-[var(--foreground-muted)] hover:text-red-500 hover:bg-red-500/10 transition-colors max-sm:min-w-[44px] max-sm:min-h-[44px] flex items-center justify-center"
+                                      className="p-2 rounded-control text-[var(--foreground-muted)] hover:text-red-500 hover:bg-red-500/10 transition-colors max-sm:min-w-[44px] max-sm:min-h-[44px] flex items-center justify-center"
                                       title="Delete transaction"
                                     >
                                       <Trash2 className="w-4 h-4" />
@@ -864,19 +864,19 @@ export default function HistoryPage() {
         <div className="flex flex-col gap-2">
           <button
             onClick={() => handlePairedChoice('both')}
-            className="btn-primary min-h-[44px] px-4 rounded-lg font-semibold"
+            className="btn-primary min-h-[44px] px-4 rounded-control font-semibold"
           >
             Delete both halves
           </button>
           <button
             onClick={() => handlePairedChoice('one')}
-            className="btn-secondary min-h-[44px] px-4 rounded-lg font-medium"
+            className="btn-secondary min-h-[44px] px-4 rounded-control font-medium"
           >
             Delete only this one
           </button>
           <button
             onClick={() => setPairedDelete(null)}
-            className="min-h-[44px] px-4 rounded-lg font-medium text-[var(--foreground-secondary)] hover:text-[var(--foreground)]"
+            className="min-h-[44px] px-4 rounded-control font-medium text-[var(--foreground-secondary)] hover:text-[var(--foreground)]"
           >
             Keep both
           </button>

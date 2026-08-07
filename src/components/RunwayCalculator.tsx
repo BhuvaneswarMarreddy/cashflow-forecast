@@ -244,9 +244,9 @@ export default function RunwayCalculator({
   return (
     <div className="space-y-6">
       {/* Main Runway Card */}
-      <div className="bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-xl p-6">
+      <div className="bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-card p-6">
         <div className="flex items-center gap-3 mb-6">
-          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] flex items-center justify-center">
+          <div className="w-12 h-12 rounded-card bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] flex items-center justify-center">
             <Clock className="w-6 h-6 text-white" />
           </div>
           <div>
@@ -257,19 +257,19 @@ export default function RunwayCalculator({
 
         {/* Current Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-          <div className="p-4 rounded-lg bg-[var(--background-tertiary)]">
+          <div className="p-4 rounded-control bg-[var(--background-tertiary)]">
             <p className="text-xs text-[var(--foreground-muted)] mb-1">Current Cash</p>
             <p className="text-xl font-bold text-emerald-500">${currentCash.toLocaleString()}</p>
           </div>
-          <div className="p-4 rounded-lg bg-[var(--background-tertiary)]">
+          <div className="p-4 rounded-control bg-[var(--background-tertiary)]">
             <p className="text-xs text-[var(--foreground-muted)] mb-1">Monthly Expenses</p>
             <p className="text-xl font-bold text-red-400">${monthlyExpenses.toLocaleString()}</p>
           </div>
-          <div className="p-4 rounded-lg bg-[var(--background-tertiary)]">
+          <div className="p-4 rounded-control bg-[var(--background-tertiary)]">
             <p className="text-xs text-[var(--foreground-muted)] mb-1">Monthly Income</p>
             <p className="text-xl font-bold text-emerald-500">${monthlyIncome.toLocaleString()}</p>
           </div>
-          <div className="p-4 rounded-lg bg-[var(--background-tertiary)]">
+          <div className="p-4 rounded-control bg-[var(--background-tertiary)]">
             <p className="text-xs text-[var(--foreground-muted)] mb-1">Net Flow</p>
             <p className={`text-xl font-bold ${netMonthlyFlow >= 0 ? 'text-emerald-500' : 'text-red-400'}`}>
               {netMonthlyFlow >= 0 ? '+' : ''}${netMonthlyFlow.toLocaleString()}/mo
@@ -278,7 +278,7 @@ export default function RunwayCalculator({
         </div>
 
         {/* Runway Display */}
-        <div className="text-center py-6 px-4 rounded-xl bg-gradient-to-r from-[var(--background-tertiary)] to-[var(--background-secondary)] border border-[var(--border-color)]">
+        <div className="text-center py-6 px-4 rounded-card bg-gradient-to-r from-[var(--background-tertiary)] to-[var(--background-secondary)] border border-[var(--border-color)]">
           <p className="text-sm text-[var(--foreground-muted)] mb-2">Your money will last</p>
           <p className={`text-5xl font-bold ${runwayDisplay.color} mb-2`}>
             {runwayDisplay.text}
@@ -294,9 +294,9 @@ export default function RunwayCalculator({
       </div>
 
       {/* What-If Scenario Builder */}
-      <div className="bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-xl p-6">
+      <div className="bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-card p-6">
         <div className="flex items-center gap-3 mb-6">
-          <div className="w-10 h-10 rounded-lg bg-[var(--accent-secondary)]/20 flex items-center justify-center">
+          <div className="w-10 h-10 rounded-control bg-[var(--accent-secondary)]/20 flex items-center justify-center">
             <Sparkles className="w-5 h-5 text-[var(--accent-secondary)]" />
           </div>
           <div>
@@ -320,7 +320,7 @@ export default function RunwayCalculator({
                 step="5"
                 value={expenseReduction}
                 onChange={(e) => setExpenseReduction(parseInt(e.target.value))}
-                className="w-full h-2 bg-[var(--background-tertiary)] rounded-lg appearance-none cursor-pointer accent-[var(--accent-primary)]"
+                className="w-full h-2 bg-[var(--background-tertiary)] rounded-control appearance-none cursor-pointer accent-[var(--accent-primary)]"
               />
               <div className="flex justify-between text-sm">
                 <span className="text-[var(--foreground-muted)]">0%</span>
@@ -359,7 +359,7 @@ export default function RunwayCalculator({
 
         {/* Scenario Result */}
         {(expenseReduction > 0 || additionalIncome > 0) && (
-          <div className="mt-6 p-4 rounded-xl bg-[var(--background-tertiary)] border border-[var(--border-color)]">
+          <div className="mt-6 p-4 rounded-card bg-[var(--background-tertiary)] border border-[var(--border-color)]">
             <div className="flex items-center justify-between mb-4">
               <span className="text-sm text-[var(--foreground-muted)]">With your changes:</span>
               <button
@@ -400,7 +400,7 @@ export default function RunwayCalculator({
       </div>
 
       {/* Projection Chart */}
-      <div className="bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-xl p-6">
+      <div className="bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-card p-6">
         <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">12-Month Projection</h3>
         
         <div
@@ -459,7 +459,7 @@ export default function RunwayCalculator({
 
         <div className="flex items-center gap-4 mt-4 text-sm">
           <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-[#c9a24e]" />
+            <div className="w-3 h-3 rounded-pill bg-[#c9a24e]" />
             <span className="text-[var(--foreground-secondary)]">
               {hasWhatIf ? 'Scenario Balance' : 'Projected Balance'}
             </span>
@@ -472,10 +472,10 @@ export default function RunwayCalculator({
       </div>
 
       {/* Inspirational Scenarios */}
-      <div className="bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-xl p-6">
+      <div className="bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-card p-6">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-amber-500/20 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-control bg-amber-500/20 flex items-center justify-center">
               <Lightbulb className="w-5 h-5 text-amber-500" />
             </div>
             <div>
@@ -495,7 +495,7 @@ export default function RunwayCalculator({
           {inspirationalScenarios.map((scenario, i) => (
             <div 
               key={i}
-              className="p-4 rounded-lg bg-[var(--background-tertiary)] border border-[var(--border-color)] hover:border-[var(--border-glow)] transition-all cursor-pointer"
+              className="p-4 rounded-control bg-[var(--background-tertiary)] border border-[var(--border-color)] hover:border-[var(--border-glow)] transition-all cursor-pointer"
               onClick={() => {
                 setExpenseReduction(Math.round((1 - scenario.adjustedMonthlyExpenses / monthlyExpenses) * 100));
                 setAdditionalIncome(scenario.additionalIncome);
@@ -513,7 +513,7 @@ export default function RunwayCalculator({
         </div>
 
         {/* Motivational Message */}
-        <div className="mt-6 p-4 rounded-xl bg-gradient-to-r from-emerald-500/10 to-[var(--accent-primary)]/10 border border-emerald-500/30">
+        <div className="mt-6 p-4 rounded-card bg-gradient-to-r from-emerald-500/10 to-[var(--accent-primary)]/10 border border-emerald-500/30">
           <div className="flex items-start gap-3">
             <Target className="w-5 h-5 text-emerald-500 mt-0.5 flex-shrink-0" />
             <div>

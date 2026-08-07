@@ -32,7 +32,7 @@ const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: Array<
   if (active && payload && payload.length) {
     const data = payload[0].payload as ChartDataPoint;
     return (
-      <div className="bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-lg p-3 shadow-lg">
+      <div className="bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-control p-3 shadow-lg">
         <p className="text-sm text-[var(--foreground-muted)] mb-1">{data.displayDate}</p>
         <p className={`text-lg font-bold ${data.isCritical ? 'text-red-500' : data.balance < 0 ? 'text-red-400' : 'text-[var(--foreground)]'}`}>
           ${data.balance.toLocaleString()}
@@ -84,15 +84,15 @@ export default function ForecastChart({ forecast }: ForecastChartProps) {
   const yMax = Math.ceil(maxBalance / 500) * 500 + 500;
 
   return (
-    <div className="bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-xl p-6 shadow-sm">
+    <div className="bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-card p-6 shadow-sm">
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-8">
         <div>
           <h3 className="text-xl font-bold text-[var(--foreground)] mb-1">Cash Flow Projection</h3>
           <p className="text-sm text-[var(--foreground-muted)]">Track your balance over time</p>
         </div>
-        <div className="flex flex-wrap items-center gap-3 text-sm bg-[var(--background-tertiary)] px-4 py-2.5 rounded-lg border border-[var(--border-color)]">
+        <div className="flex flex-wrap items-center gap-3 text-sm bg-[var(--background-tertiary)] px-4 py-2.5 rounded-control border border-[var(--border-color)]">
           <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-[#c9a24e] shadow-sm" />
+            <div className="w-3 h-3 rounded-pill bg-[#c9a24e] shadow-sm" />
             <span className="text-[var(--foreground)] font-medium">Balance</span>
           </div>
           <div className="w-px h-4 bg-[var(--border-color)]" />
@@ -105,13 +105,13 @@ export default function ForecastChart({ forecast }: ForecastChartProps) {
 
       {/* Key Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-        <div className="p-4 rounded-lg bg-[var(--background-tertiary)] border border-[var(--border-color)]/50">
+        <div className="p-4 rounded-control bg-[var(--background-tertiary)] border border-[var(--border-color)]/50">
           <p className="text-xs font-semibold text-[var(--foreground-muted)] uppercase tracking-wide mb-2">Starting Balance</p>
           <p className="text-2xl font-bold text-emerald-500">
             ${forecast.startingBalance.toLocaleString()}
           </p>
         </div>
-        <div className="p-4 rounded-lg bg-[var(--background-tertiary)] border border-[var(--border-color)]/50">
+        <div className="p-4 rounded-control bg-[var(--background-tertiary)] border border-[var(--border-color)]/50">
           <p className="text-xs font-semibold text-[var(--foreground-muted)] uppercase tracking-wide mb-2">Lowest Point</p>
           <p className={`text-2xl font-bold ${forecast.lowestBalance < forecast.safetyThreshold ? 'text-red-500' : forecast.lowestBalance < forecast.safetyThreshold * 1.5 ? 'text-amber-500' : 'text-[var(--foreground)]'}`}>
             ${forecast.lowestBalance.toLocaleString()}
@@ -120,7 +120,7 @@ export default function ForecastChart({ forecast }: ForecastChartProps) {
             {format(parseISO(forecast.lowestBalanceDate), 'MMM d, yyyy')}
           </p>
         </div>
-        <div className="p-4 rounded-lg bg-[var(--background-tertiary)] border border-[var(--border-color)]/50">
+        <div className="p-4 rounded-control bg-[var(--background-tertiary)] border border-[var(--border-color)]/50">
           <p className="text-xs font-semibold text-[var(--foreground-muted)] uppercase tracking-wide mb-2">Ending Balance</p>
           <p className="text-2xl font-bold text-[var(--foreground)]">
             ${forecast.endingBalance.toLocaleString()}
@@ -130,7 +130,7 @@ export default function ForecastChart({ forecast }: ForecastChartProps) {
 
       {/* Warning if below safety */}
       {forecast.daysUntilUnsafe !== null && (
-        <div className="mb-6 p-4 rounded-lg bg-amber-500/10 border-2 border-amber-500/40 flex items-start gap-3">
+        <div className="mb-6 p-4 rounded-control bg-amber-500/10 border-2 border-amber-500/40 flex items-start gap-3">
           <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
           <div>
             <p className="text-sm font-semibold text-amber-200 mb-1">Low Balance Alert</p>

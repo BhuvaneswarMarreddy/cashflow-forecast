@@ -20,7 +20,7 @@ export default function AccountsDiagnostics({ traceId, provenance, onOpen }: {
 
   return (
     <details
-      className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--background-tertiary)] text-sm"
+      className="mb-6 rounded-control border border-[var(--border)] bg-[var(--background-tertiary)] text-sm"
       data-testid="accounts-diagnostics"
       data-trace-id={traceId}
       onToggle={(e) => { if ((e.currentTarget as HTMLDetailsElement).open) onOpen(); }}

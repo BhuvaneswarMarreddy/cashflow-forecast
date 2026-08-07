@@ -58,20 +58,20 @@ export default function ForecastTimeline({ forecast }: ForecastTimelineProps) {
   const getEventIcon = (event: ForecastEvent) => {
     if (event.amount > 0) {
       return (
-        <div className="w-8 h-8 rounded-full bg-emerald-500/20 flex items-center justify-center">
+        <div className="w-8 h-8 rounded-pill bg-emerald-500/20 flex items-center justify-center">
           <ArrowUp className="w-4 h-4 text-emerald-500" />
         </div>
       );
     }
     if (event.isCritical) {
       return (
-        <div className="w-8 h-8 rounded-full bg-red-500/20 flex items-center justify-center">
+        <div className="w-8 h-8 rounded-pill bg-red-500/20 flex items-center justify-center">
           <AlertTriangle className="w-4 h-4 text-red-500" />
         </div>
       );
     }
     return (
-      <div className="w-8 h-8 rounded-full bg-[var(--background-tertiary)] flex items-center justify-center">
+      <div className="w-8 h-8 rounded-pill bg-[var(--background-tertiary)] flex items-center justify-center">
         <ArrowDown className="w-4 h-4 text-[var(--foreground-muted)]" />
       </div>
     );
@@ -146,10 +146,10 @@ export default function ForecastTimeline({ forecast }: ForecastTimelineProps) {
   };
 
   return (
-    <div className="bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-xl p-6 shadow-sm">
+    <div className="bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-card p-6 shadow-sm">
       <div className="flex items-center justify-between mb-8">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-xl bg-[var(--accent-tertiary)]/10 flex items-center justify-center border border-[var(--accent-tertiary)]/20">
+          <div className="w-12 h-12 rounded-card bg-[var(--accent-tertiary)]/10 flex items-center justify-center border border-[var(--accent-tertiary)]/20">
             <Calendar className="w-6 h-6 text-[var(--accent-tertiary)]" />
           </div>
           <div>
@@ -159,10 +159,10 @@ export default function ForecastTimeline({ forecast }: ForecastTimelineProps) {
         </div>
         
         {/* View Mode Toggle */}
-        <div className="flex items-center gap-1 p-1 bg-[var(--background-tertiary)] rounded-lg border border-[var(--border-color)]">
+        <div className="flex items-center gap-1 p-1 bg-[var(--background-tertiary)] rounded-control border border-[var(--border-color)]">
           <button
             onClick={() => setViewMode('daily')}
-            className={`px-3 py-2 rounded-md transition-all flex items-center gap-2 ${
+            className={`px-3 py-2 rounded-control transition-all flex items-center gap-2 ${
               viewMode === 'daily'
                 ? 'bg-[var(--accent-primary)] text-[#16181c] shadow-sm'
                 : 'text-[var(--foreground-muted)] hover:text-[var(--foreground)] hover:bg-[var(--background-secondary)]'
@@ -174,7 +174,7 @@ export default function ForecastTimeline({ forecast }: ForecastTimelineProps) {
           </button>
           <button
             onClick={() => setViewMode('monthly')}
-            className={`px-3 py-2 rounded-md transition-all flex items-center gap-2 ${
+            className={`px-3 py-2 rounded-control transition-all flex items-center gap-2 ${
               viewMode === 'monthly'
                 ? 'bg-[var(--accent-primary)] text-[#16181c] shadow-sm'
                 : 'text-[var(--foreground-muted)] hover:text-[var(--foreground)] hover:bg-[var(--background-secondary)]'
@@ -189,7 +189,7 @@ export default function ForecastTimeline({ forecast }: ForecastTimelineProps) {
 
       {/* Living costs: one explainable strip instead of a row per day */}
       {livingDaily > 0 && (
-        <details className="mb-6 -mt-2 rounded-lg bg-[var(--background-tertiary)]/50 border border-[var(--border-color)]">
+        <details className="mb-6 -mt-2 rounded-control bg-[var(--background-tertiary)]/50 border border-[var(--border-color)]">
           <summary className="cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden min-h-[44px] px-3 flex items-center gap-2 text-sm text-[var(--foreground-secondary)]">
             <span aria-hidden="true">≈</span>
             All balances below include projected living costs of{' '}
@@ -222,7 +222,7 @@ export default function ForecastTimeline({ forecast }: ForecastTimelineProps) {
             const hasWarning = group.events.some(e => e.isCritical);
             
             return (
-              <div key={monthKey} className="border border-[var(--border-color)] rounded-lg overflow-hidden">
+              <div key={monthKey} className="border border-[var(--border-color)] rounded-control overflow-hidden">
                 {/* Month Header */}
                 <button
                   onClick={() => toggleMonth(monthKey)}
@@ -272,7 +272,7 @@ export default function ForecastTimeline({ forecast }: ForecastTimelineProps) {
                 {isExpanded && (
                   <div className="p-4 border-t border-[var(--border-color)] space-y-3 max-h-[400px] overflow-y-auto">
                     {group.events.map((event, i) => {
-                      const rowClass = `p-4 rounded-lg transition-all ${
+                      const rowClass = `p-4 rounded-control transition-all ${
                         event.isCritical
                           ? 'bg-red-500/10 border border-red-500/30'
                           : 'bg-[var(--background-secondary)] border border-[var(--border-color)]/50 hover:border-[var(--border-color)]'
@@ -337,7 +337,7 @@ export default function ForecastTimeline({ forecast }: ForecastTimelineProps) {
                 {/* Events for this date */}
                 <div className="space-y-3 ml-3 border-l-2 border-[var(--border-color)] pl-5 pt-3">
                   {dateEvents.map((event, i) => {
-                    const rowClass = `p-4 rounded-lg transition-all ${
+                    const rowClass = `p-4 rounded-control transition-all ${
                       event.isCritical
                         ? 'bg-red-500/10 border border-red-500/30'
                         : 'bg-[var(--background-tertiary)] border border-[var(--border-color)]/50 hover:border-[var(--border-color)]'
@@ -386,7 +386,7 @@ export default function ForecastTimeline({ forecast }: ForecastTimelineProps) {
           {totalEvents > 15 && (
             <button
               onClick={() => setShowAll(!showAll)}
-              className="w-full mt-6 py-3 text-sm font-semibold text-[var(--foreground-secondary)] hover:text-[var(--foreground)] flex items-center justify-center gap-2 transition-all border border-[var(--border-color)] rounded-lg hover:bg-[var(--background-tertiary)]"
+              className="w-full mt-6 py-3 text-sm font-semibold text-[var(--foreground-secondary)] hover:text-[var(--foreground)] flex items-center justify-center gap-2 transition-all border border-[var(--border-color)] rounded-control hover:bg-[var(--background-tertiary)]"
             >
               {showAll ? (
                 <>

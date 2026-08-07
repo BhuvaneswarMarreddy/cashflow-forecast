@@ -146,9 +146,9 @@ export default function DecisionCheckPanel({ forecast }: DecisionCheckPanelProps
   };
 
   return (
-    <div className="bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-xl p-6">
+    <div className="bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-card p-6">
       <div className="flex items-center gap-3 mb-4">
-        <div className="w-10 h-10 rounded-lg bg-[var(--accent-primary)]/10 flex items-center justify-center">
+        <div className="w-10 h-10 rounded-control bg-[var(--accent-primary)]/10 flex items-center justify-center">
           <HelpCircle className="w-5 h-5 text-[var(--accent-primary)]" />
         </div>
         <div>
@@ -199,7 +199,7 @@ export default function DecisionCheckPanel({ forecast }: DecisionCheckPanelProps
       ) : (
         <div className="space-y-4">
           {/* Risk Level Badge */}
-          <div className={`flex items-center gap-3 p-4 rounded-lg border ${getRiskColor(simulation.riskLevel)}`}>
+          <div className={`flex items-center gap-3 p-4 rounded-control border ${getRiskColor(simulation.riskLevel)}`}>
             {getRiskIcon(simulation.riskLevel)}
             <div>
               <p className="font-semibold text-[var(--foreground)]">
@@ -216,13 +216,13 @@ export default function DecisionCheckPanel({ forecast }: DecisionCheckPanelProps
 
           {/* Key Numbers */}
           <div className="grid grid-cols-2 gap-3">
-            <div className="p-3 rounded-lg bg-[var(--background-tertiary)]">
+            <div className="p-3 rounded-control bg-[var(--background-tertiary)]">
               <p className="text-xs text-[var(--foreground-muted)] mb-1">New Lowest Balance</p>
               <p className={`text-lg font-bold ${simulation.newLowestBalance < 0 ? 'text-red-500' : simulation.newLowestBalance < forecast.safetyThreshold ? 'text-amber-500' : 'text-[var(--foreground)]'}`}>
                 ${simulation.newLowestBalance.toLocaleString()}
               </p>
             </div>
-            <div className="p-3 rounded-lg bg-[var(--background-tertiary)]">
+            <div className="p-3 rounded-control bg-[var(--background-tertiary)]">
               <p className="text-xs text-[var(--foreground-muted)] mb-1">Lowest Point Date</p>
               <p className="text-lg font-bold text-[var(--foreground)]">
                 {format(new Date(simulation.newLowestDate), 'MMM d')}
@@ -232,7 +232,7 @@ export default function DecisionCheckPanel({ forecast }: DecisionCheckPanelProps
 
           {/* AI Explanation */}
           {aiExplanation && (
-            <div className="p-4 rounded-lg bg-[var(--background-tertiary)] border border-[var(--border-color)]">
+            <div className="p-4 rounded-control bg-[var(--background-tertiary)] border border-[var(--border-color)]">
               <p className="text-sm text-[var(--foreground-secondary)] leading-relaxed">
                 {aiExplanation}
               </p>
@@ -241,7 +241,7 @@ export default function DecisionCheckPanel({ forecast }: DecisionCheckPanelProps
 
           {/* Affected Bills Warning */}
           {simulation.affectedBills.length > 0 && (
-            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30">
+            <div className="p-3 rounded-control bg-red-500/10 border border-red-500/30">
               <p className="text-sm text-red-400">
                 <strong>Bills at risk:</strong> {simulation.affectedBills.join(', ')}
               </p>

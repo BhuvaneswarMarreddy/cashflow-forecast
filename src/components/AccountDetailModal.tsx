@@ -89,18 +89,18 @@ export default function AccountDetailModal({ account, transactions, onClose }: {
               {account.openingDate && <span className="text-xs text-[var(--foreground-muted)] font-normal"> · as of {account.openingDate.slice(0, 10)}</span>}
             </p>
           </div>
-          <button onClick={onClose} aria-label="Close" className="p-2 rounded-lg text-[var(--foreground-muted)] hover:bg-[var(--background-tertiary)]">
+          <button onClick={onClose} aria-label="Close" className="p-2 rounded-control text-[var(--foreground-muted)] hover:bg-[var(--background-tertiary)]">
             <X className="w-5 h-5" />
           </button>
         </div>
 
         <div className="p-5">
-          <div className="flex gap-1 rounded-lg bg-[var(--background-tertiary)] p-1 w-fit mb-4">
+          <div className="flex gap-1 rounded-control bg-[var(--background-tertiary)] p-1 w-fit mb-4">
             {RANGES.map((r) => (
               <button
                 key={r.key}
                 onClick={() => setRange(r.key)}
-                className={`px-3 py-1.5 rounded-md text-sm ${range === r.key ? 'bg-[var(--accent-primary)] text-[#16181c]' : 'text-[var(--foreground-secondary)]'}`}
+                className={`px-3 py-1.5 rounded-control text-sm ${range === r.key ? 'bg-[var(--accent-primary)] text-[#16181c]' : 'text-[var(--foreground-secondary)]'}`}
               >
                 {r.label}
               </button>
@@ -112,11 +112,11 @@ export default function AccountDetailModal({ account, transactions, onClose }: {
           ) : (
             <>
               <div className="grid grid-cols-2 gap-3 mb-4">
-                <div className="rounded-xl bg-[var(--background-tertiary)] p-3">
+                <div className="rounded-card bg-[var(--background-tertiary)] p-3">
                   <p className="text-xs text-[var(--foreground-muted)]">{inLabel}</p>
                   <p className="text-lg font-bold text-[var(--accent-success)]">{money(totalIn)}</p>
                 </div>
-                <div className="rounded-xl bg-[var(--background-tertiary)] p-3">
+                <div className="rounded-card bg-[var(--background-tertiary)] p-3">
                   <p className="text-xs text-[var(--foreground-muted)]">{outLabel}</p>
                   <p className="text-lg font-bold text-[var(--accent-danger)]">{money(totalOut)}</p>
                 </div>

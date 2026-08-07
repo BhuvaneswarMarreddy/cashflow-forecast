@@ -146,7 +146,7 @@ export default function RefundCandidateCard({
   const decide = (decision: RecoveryDecision) => onDecide(decision, chosen ?? candidate);
 
   return (
-    <article className="rounded-xl border border-[var(--border-color)] bg-[var(--background-secondary)] p-4 space-y-3">
+    <article className="rounded-card border border-[var(--border-color)] bg-[var(--background-secondary)] p-4 space-y-3">
       <header>
         <p className="font-medium text-[var(--foreground)]">{creditLine(credit, ctx.accounts)}</p>
         <p className="text-sm text-[var(--foreground-secondary)]">
@@ -155,7 +155,7 @@ export default function RefundCandidateCard({
       </header>
 
       {ambiguous && (
-        <fieldset className="rounded-lg border border-[var(--border-color)] p-3">
+        <fieldset className="rounded-control border border-[var(--border-color)] p-3">
           <legend className="px-1 text-sm font-medium">
             {(alternatives?.length ?? 0) + 1} purchases could match this credit
           </legend>
@@ -201,7 +201,7 @@ export default function RefundCandidateCard({
                     inputMode="decimal"
                     step="0.01"
                     min="0"
-                    className="min-h-[44px] w-28 rounded-lg border border-[var(--border-color)] bg-[var(--background)] px-2"
+                    className="min-h-[44px] w-28 rounded-control border border-[var(--border-color)] bg-[var(--background)] px-2"
                     value={draftDollars[a.targetTransactionId] ?? (a.allocatedAmountCents / 100).toFixed(2)}
                     onChange={(e) => setDollars(a.targetTransactionId, e.target.value)}
                   />
@@ -246,7 +246,7 @@ export default function RefundCandidateCard({
       {/* The gate. Everything below is what the owner is agreeing to, shown BEFORE the
           Confirm button is reachable — not after it, and not in a tooltip. */}
       {preview && (
-        <section aria-label="What confirming will do" className="rounded-lg bg-[var(--background-tertiary)] p-3 text-sm space-y-1">
+        <section aria-label="What confirming will do" className="rounded-control bg-[var(--background-tertiary)] p-3 text-sm space-y-1">
           <p className="font-medium">If you confirm:</p>
           <ul className="list-disc pl-5">
             {preview.whatChanges.map((line) => (

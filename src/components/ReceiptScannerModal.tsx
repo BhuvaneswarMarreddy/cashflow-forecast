@@ -264,7 +264,7 @@ export default function ReceiptScannerModal({ isOpen, onClose }: ReceiptScannerM
     <Sheet open onClose={onClose} ariaLabel="Scan receipt" maxWidth="42rem" className="p-5 sm:p-8">
         <div className="flex justify-between items-center mb-6 sticky top-0 bg-[var(--background-secondary)] pb-4 -mt-2 pt-2">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] flex items-center justify-center">
+            <div className="w-10 h-10 rounded-control bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] flex items-center justify-center">
               <Sparkles className="w-5 h-5 text-white" />
             </div>
             <div>
@@ -274,7 +274,7 @@ export default function ReceiptScannerModal({ isOpen, onClose }: ReceiptScannerM
           </div>
           <button
             onClick={onClose}
-            className="p-2 rounded-xl text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] transition-colors"
+            className="p-2 rounded-card text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
@@ -296,7 +296,7 @@ export default function ReceiptScannerModal({ isOpen, onClose }: ReceiptScannerM
             {/* Camera Button (Mobile) */}
             <button
               onClick={() => cameraInputRef.current?.click()}
-              className="w-full p-6 rounded-xl border-2 border-dashed border-[var(--accent-primary)] bg-[var(--accent-primary)]/5 hover:bg-[var(--accent-primary)]/10 transition-colors flex flex-col items-center gap-3"
+              className="w-full p-6 rounded-card border-2 border-dashed border-[var(--accent-primary)] bg-[var(--accent-primary)]/5 hover:bg-[var(--accent-primary)]/10 transition-colors flex flex-col items-center gap-3"
             >
               <Camera className="w-10 h-10 text-[var(--accent-primary)]" />
               <span className="font-medium text-[var(--foreground)]">Take Photo</span>
@@ -306,7 +306,7 @@ export default function ReceiptScannerModal({ isOpen, onClose }: ReceiptScannerM
             {/* File Upload */}
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="w-full p-6 rounded-xl border-2 border-dashed border-[var(--border-color)] hover:border-[var(--accent-primary)] transition-colors flex flex-col items-center gap-3"
+              className="w-full p-6 rounded-card border-2 border-dashed border-[var(--border-color)] hover:border-[var(--accent-primary)] transition-colors flex flex-col items-center gap-3"
             >
               <FileImage className="w-10 h-10 text-[var(--foreground-muted)]" />
               <span className="font-medium text-[var(--foreground)]">Upload Image</span>
@@ -349,7 +349,7 @@ export default function ReceiptScannerModal({ isOpen, onClose }: ReceiptScannerM
           <div className="space-y-6">
             {/* Preview */}
             {imagePreview && (
-              <div className="relative rounded-xl overflow-hidden border border-[var(--border-color)]">
+              <div className="relative rounded-card overflow-hidden border border-[var(--border-color)]">
                 <img 
                   src={imagePreview} 
                   alt="Receipt preview" 
@@ -357,7 +357,7 @@ export default function ReceiptScannerModal({ isOpen, onClose }: ReceiptScannerM
                 />
                 <button
                   onClick={handleReset}
-                  className="absolute top-2 right-2 p-2 rounded-lg bg-black/50 text-white hover:bg-black/70 transition-colors"
+                  className="absolute top-2 right-2 p-2 rounded-control bg-black/50 text-white hover:bg-black/70 transition-colors"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -366,15 +366,15 @@ export default function ReceiptScannerModal({ isOpen, onClose }: ReceiptScannerM
 
             {/* Summary with document info */}
             {summary && (
-              <div className="p-4 rounded-lg bg-[var(--background-tertiary)] border border-[var(--border-color)]">
+              <div className="p-4 rounded-control bg-[var(--background-tertiary)] border border-[var(--border-color)]">
                 <div className="flex flex-wrap items-center gap-2 mb-2">
                   {documentType && (
-                    <span className="text-xs px-2 py-1 rounded-full bg-[var(--accent-primary)]/20 text-[var(--accent-primary)]">
+                    <span className="text-xs px-2 py-1 rounded-pill bg-[var(--accent-primary)]/20 text-[var(--accent-primary)]">
                       {documentType.replace('_', ' ')}
                     </span>
                   )}
                   {detectedMerchant && (
-                    <span className="text-xs px-2 py-1 rounded-full bg-emerald-500/20 text-emerald-500">
+                    <span className="text-xs px-2 py-1 rounded-pill bg-emerald-500/20 text-emerald-500">
                       {detectedMerchant}
                     </span>
                   )}
@@ -385,7 +385,7 @@ export default function ReceiptScannerModal({ isOpen, onClose }: ReceiptScannerM
 
             {/* Error */}
             {error && (
-              <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/30 flex items-center gap-3">
+              <div className="p-4 rounded-control bg-red-500/10 border border-red-500/30 flex items-center gap-3">
                 <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
                 <p className="text-sm text-red-400">{error}</p>
               </div>
@@ -407,7 +407,7 @@ export default function ReceiptScannerModal({ isOpen, onClose }: ReceiptScannerM
                   {parsedTransactions.map((txn, index) => (
                     <div
                       key={index}
-                      className={`p-4 rounded-lg border transition-all ${
+                      className={`p-4 rounded-control border transition-all ${
                         txn.selected 
                           ? 'bg-[var(--accent-primary)]/5 border-[var(--accent-primary)]/30' 
                           : 'bg-[var(--background-tertiary)] border-[var(--border-color)] opacity-60'
@@ -419,7 +419,7 @@ export default function ReceiptScannerModal({ isOpen, onClose }: ReceiptScannerM
                           type="checkbox"
                           checked={txn.selected}
                           onChange={() => toggleTransaction(index)}
-                          className="mt-1 w-5 h-5 rounded border-[var(--border-color)] bg-[var(--background-tertiary)] text-[var(--accent-primary)] focus:ring-[var(--accent-primary)] cursor-pointer"
+                          className="mt-1 w-5 h-5 rounded-control border-[var(--border-color)] bg-[var(--background-tertiary)] text-[var(--accent-primary)] focus:ring-[var(--accent-primary)] cursor-pointer"
                         />
 
                         {/* Transaction Details */}
@@ -430,20 +430,20 @@ export default function ReceiptScannerModal({ isOpen, onClose }: ReceiptScannerM
                               value={txn.title}
                               onChange={(e) => updateTransaction(index, 'title', e.target.value)}
                               placeholder="Title"
-                              className="flex-1 px-3 py-1.5 rounded-lg bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
+                              className="flex-1 px-3 py-1.5 rounded-control bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
                             />
                             <input
                               type="text"
                               value={txn.merchant || ''}
                               onChange={(e) => updateTransaction(index, 'merchant', e.target.value)}
                               placeholder="Merchant (Amazon, Walmart...)"
-                              className="w-40 px-3 py-1.5 rounded-lg bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
+                              className="w-40 px-3 py-1.5 rounded-control bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
                             />
                             <input
                               type="date"
                               value={txn.date}
                               onChange={(e) => updateTransaction(index, 'date', e.target.value)}
-                              className="px-3 py-1.5 rounded-lg bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
+                              className="px-3 py-1.5 rounded-control bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
                             />
                           </div>
 
@@ -452,7 +452,7 @@ export default function ReceiptScannerModal({ isOpen, onClose }: ReceiptScannerM
                               <select
                                 value={txn.type}
                                 onChange={(e) => updateTransaction(index, 'type', e.target.value)}
-                                className="px-3 py-1.5 rounded-lg bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
+                                className="px-3 py-1.5 rounded-control bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
                               >
                                 <option value="expense">Expense</option>
                                 <option value="income">Income</option>
@@ -463,7 +463,7 @@ export default function ReceiptScannerModal({ isOpen, onClose }: ReceiptScannerM
                                   type="number"
                                   value={txn.amount}
                                   onChange={(e) => updateTransaction(index, 'amount', parseFloat(e.target.value) || 0)}
-                                  className="w-24 pl-7 pr-3 py-1.5 rounded-lg bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
+                                  className="w-24 pl-7 pr-3 py-1.5 rounded-control bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
                                 />
                               </div>
                             </div>
@@ -471,7 +471,7 @@ export default function ReceiptScannerModal({ isOpen, onClose }: ReceiptScannerM
                             <select
                               value={txn.category}
                               onChange={(e) => updateTransaction(index, 'category', e.target.value)}
-                              className="flex-1 px-3 py-1.5 rounded-lg bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
+                              className="flex-1 px-3 py-1.5 rounded-control bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
                             >
                               {EXPENSE_CATEGORIES.map((cat) => (
                                 <option key={cat.value} value={cat.value}>
@@ -486,7 +486,7 @@ export default function ReceiptScannerModal({ isOpen, onClose }: ReceiptScannerM
                             <select
                               value={txn.paymentMethod || 'chase'}
                               onChange={(e) => updateTransaction(index, 'paymentMethod', e.target.value)}
-                              className="flex-1 px-3 py-1.5 rounded-lg bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
+                              className="flex-1 px-3 py-1.5 rounded-control bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
                             >
                               {profile?.paymentAccounts && profile.paymentAccounts.length > 0 ? (
                                 <>
@@ -506,12 +506,12 @@ export default function ReceiptScannerModal({ isOpen, onClose }: ReceiptScannerM
                               ))}
                             </select>
                             {txn.lastFourDigits && (
-                              <span className="text-xs text-[var(--foreground-muted)] px-2 py-1 bg-[var(--background)] rounded">
+                              <span className="text-xs text-[var(--foreground-muted)] px-2 py-1 bg-[var(--background)] rounded-control">
                                 Detected: ****{txn.lastFourDigits}
                               </span>
                             )}
                             {txn.confidence && (
-                              <span className={`text-xs px-2 py-1 rounded ${
+                              <span className={`text-xs px-2 py-1 rounded-control ${
                                 txn.confidence === 'high' ? 'bg-emerald-500/20 text-emerald-500' :
                                 txn.confidence === 'medium' ? 'bg-amber-500/20 text-amber-500' :
                                 'bg-red-500/20 text-red-500'
@@ -525,7 +525,7 @@ export default function ReceiptScannerModal({ isOpen, onClose }: ReceiptScannerM
                         {/* Delete */}
                         <button
                           onClick={() => removeTransaction(index)}
-                          className="p-2 rounded-lg text-[var(--foreground-muted)] hover:text-red-500 hover:bg-red-500/10 transition-colors"
+                          className="p-2 rounded-control text-[var(--foreground-muted)] hover:text-red-500 hover:bg-red-500/10 transition-colors"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>

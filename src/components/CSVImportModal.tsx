@@ -772,7 +772,7 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
           <h2 className="text-2xl font-bold text-[var(--foreground)]">Import Transactions</h2>
           <button
             onClick={onClose}
-            className="p-2 rounded-xl text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] transition-colors"
+            className="p-2 rounded-card text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
@@ -789,7 +789,7 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
           </button>
           
           {showHelp && (
-            <div className="mt-3 p-4 rounded-lg bg-[var(--background-tertiary)] text-sm text-[var(--foreground-secondary)]">
+            <div className="mt-3 p-4 rounded-control bg-[var(--background-tertiary)] text-sm text-[var(--foreground-secondary)]">
               <p className="font-medium text-[var(--foreground)] mb-2">Supported formats:</p>
               <ul className="list-disc list-inside space-y-1 mb-3">
                 <li><strong>Monarch:</strong> Settings → Export Data → Transactions CSV</li>
@@ -812,7 +812,7 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
         {/* File Upload */}
         {!file && !importSuccess && (
           <div 
-            className="border-2 border-dashed border-[var(--border-color)] rounded-xl p-8 text-center hover:border-[var(--accent-primary)] transition-colors cursor-pointer"
+            className="border-2 border-dashed border-[var(--border-color)] rounded-card p-8 text-center hover:border-[var(--accent-primary)] transition-colors cursor-pointer"
             onClick={() => fileInputRef.current?.click()}
           >
             <Upload className="w-12 h-12 mx-auto mb-4 text-[var(--foreground-muted)]" />
@@ -890,16 +890,16 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
 
             {/* Stats */}
             <div className="grid grid-cols-3 gap-4">
-              <div className="p-3 rounded-lg bg-[var(--background-tertiary)]">
+              <div className="p-3 rounded-control bg-[var(--background-tertiary)]">
                 <p className="text-xs text-[var(--foreground-muted)]">Total Found</p>
                 <p className="text-lg font-bold text-[var(--foreground)]">{parsedData.length}</p>
               </div>
-              <div className="p-3 rounded-lg bg-emerald-500/10">
+              <div className="p-3 rounded-control bg-emerald-500/10">
                 <p className="text-xs text-emerald-500">Valid</p>
                 <p className="text-lg font-bold text-emerald-500">{validCount}</p>
               </div>
               {invalidCount > 0 && (
-                <div className="p-3 rounded-lg bg-amber-500/10">
+                <div className="p-3 rounded-control bg-amber-500/10">
                   <p className="text-xs text-amber-500">Invalid</p>
                   <p className="text-lg font-bold text-amber-500">{invalidCount}</p>
                 </div>
@@ -910,7 +910,7 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
                 defaults to "Create" so importing a file also creates its account
                 (typed from the name); the user can relink or unlink any of them. */}
             {(csvAccounts.length > 0 || (profile?.paymentAccounts?.length ?? 0) > 0) && (
-              <div className="p-4 rounded-lg bg-[var(--background-tertiary)] border border-[var(--border-color)] space-y-4">
+              <div className="p-4 rounded-control bg-[var(--background-tertiary)] border border-[var(--border-color)] space-y-4">
                 <div className="flex items-center gap-2">
                   <Link2 className="w-4 h-4 text-[var(--accent-primary)]" />
                   <span className="font-medium text-[var(--foreground)]">Accounts</span>
@@ -939,7 +939,7 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
                         {csvName !== '' && (
                           <button
                             onClick={() => choose(CREATE_ACCOUNT)}
-                            className={`px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-1.5 ${
+                            className={`px-3 py-2 rounded-control text-sm font-medium transition-all flex items-center gap-1.5 ${
                               isCreating
                                 ? 'bg-[var(--accent-primary)] text-[#16181c]'
                                 : 'bg-[var(--background-secondary)] text-[var(--foreground-secondary)] border border-[var(--border-color)]'
@@ -953,7 +953,7 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
                           <button
                             key={account.id}
                             onClick={() => choose(account.id)}
-                            className={`px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
+                            className={`px-3 py-2 rounded-control text-sm font-medium transition-all flex items-center gap-2 ${
                               current === account.id ? 'text-white' : 'text-[var(--foreground-secondary)] border'
                             }`}
                             style={{
@@ -968,7 +968,7 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
                         ))}
                         <button
                           onClick={() => choose('')}
-                          className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                          className={`px-3 py-2 rounded-control text-sm font-medium transition-all ${
                             current === ''
                               ? 'bg-[var(--accent-primary)] text-[#16181c]'
                               : 'bg-[var(--background-secondary)] text-[var(--foreground-secondary)] border border-[var(--border-color)]'
@@ -989,7 +989,7 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
                               <button
                                 key={t}
                                 onClick={() => setCreateTypes((m) => ({ ...m, [csvName]: t }))}
-                                className={`px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${
+                                className={`px-2.5 py-1 rounded-control text-xs font-medium flex items-center gap-1.5 transition-all ${
                                   createType === t
                                     ? 'bg-[var(--accent-primary)] text-[#16181c]'
                                     : 'bg-[var(--background-secondary)] text-[var(--foreground-secondary)] border border-[var(--border-color)]'
@@ -1018,7 +1018,7 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
             )}
 
             {/* Preview */}
-            <div className="max-h-[300px] overflow-y-auto rounded-lg border border-[var(--border-color)]">
+            <div className="max-h-[300px] overflow-y-auto rounded-control border border-[var(--border-color)]">
               <table className="w-full text-sm">
                 <thead className="bg-[var(--background-tertiary)] sticky top-0">
                   <tr>
@@ -1048,7 +1048,7 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
                         {t.type === 'income' || t.transferDirection === 'in' ? '+' : '-'}${t.amount.toFixed(2)}
                       </td>
                       <td className="p-3">
-                        <span className={`text-xs px-2 py-1 rounded-full ${t.type === 'income' ? 'bg-emerald-500/20 text-emerald-500' : t.type === 'transfer' ? 'bg-amber-500/20 text-amber-400' : 'bg-[var(--background-tertiary)] text-[var(--foreground-secondary)]'}`}>
+                        <span className={`text-xs px-2 py-1 rounded-pill ${t.type === 'income' ? 'bg-emerald-500/20 text-emerald-500' : t.type === 'transfer' ? 'bg-amber-500/20 text-amber-400' : 'bg-[var(--background-tertiary)] text-[var(--foreground-secondary)]'}`}>
                           {t.type}
                         </span>
                       </td>
@@ -1065,7 +1065,7 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
 
             {/* Error */}
             {error && (
-              <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 flex items-center gap-2">
+              <div className="p-3 rounded-control bg-red-500/10 border border-red-500/30 flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 text-red-500" />
                 <span className="text-sm text-red-400">{error}</span>
               </div>
@@ -1079,7 +1079,7 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
             >
               {isLoading ? (
                 <>
-                  <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                  <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-pill animate-spin" />
                   Importing...
                 </>
               ) : (

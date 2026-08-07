@@ -36,7 +36,7 @@ export default function ForgotPasswordPage() {
       <div className="w-full max-w-md relative z-10">
         {/* Logo */}
         <div className="text-center mb-8 animate-fade-in-up">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] mb-4 animate-float">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-card bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] mb-4 animate-float">
             <TrendingUp className="w-8 h-8 text-white" />
           </div>
           <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-[var(--accent-primary)] to-[var(--accent-secondary)]">
@@ -48,7 +48,7 @@ export default function ForgotPasswordPage() {
         <div className="glass-card p-8 animate-fade-in-up delay-100">
           {success ? (
             <div className="text-center">
-              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-[var(--accent-success)]/20 mb-4">
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-pill bg-[var(--accent-success)]/20 mb-4">
                 <CheckCircle className="w-8 h-8 text-[var(--accent-success)]" />
               </div>
               <h2 className="text-2xl font-bold text-[var(--foreground)] mb-2">
@@ -84,7 +84,7 @@ export default function ForgotPasswordPage() {
           ) : (
             <>
               <div className="flex items-center gap-4 mb-6">
-                <div className="w-12 h-12 rounded-xl bg-[var(--accent-warning)]/20 flex items-center justify-center">
+                <div className="w-12 h-12 rounded-card bg-[var(--accent-warning)]/20 flex items-center justify-center">
                   <KeyRound className="w-6 h-6 text-[var(--accent-warning)]" />
                 </div>
                 <div>
@@ -98,7 +98,7 @@ export default function ForgotPasswordPage() {
               </div>
 
               {error && (
-                <div role="alert" className="mb-6 p-4 rounded-xl bg-[var(--accent-danger)]/10 border border-[var(--accent-danger)]/30 text-[var(--accent-danger)] text-sm">
+                <div role="alert" className="mb-6 p-4 rounded-card bg-[var(--accent-danger)]/10 border border-[var(--accent-danger)]/30 text-[var(--accent-danger)] text-sm">
                   {error}
                 </div>
               )}

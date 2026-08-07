@@ -298,7 +298,7 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
           </h2>
           <button
             onClick={onClose}
-            className="p-2 rounded-xl text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] transition-colors"
+            className="p-2 rounded-card text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
@@ -310,7 +310,7 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
             <button
               type="button"
               onClick={() => setFormData({ ...formData, type: 'expense' })}
-              className={`flex-1 py-3 rounded-xl font-medium transition-all ${
+              className={`flex-1 py-3 rounded-card font-medium transition-all ${
                 formData.type === 'expense'
                   ? 'bg-[var(--accent-danger)] text-white'
                   : 'bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'
@@ -321,7 +321,7 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
             <button
               type="button"
               onClick={() => setFormData({ ...formData, type: 'income' })}
-              className={`flex-1 py-3 rounded-xl font-medium transition-all ${
+              className={`flex-1 py-3 rounded-card font-medium transition-all ${
                 formData.type === 'income'
                   ? 'bg-[var(--accent-success)] text-white'
                   : 'bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'
@@ -336,7 +336,7 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
               disabled={!editTransaction && accountsList.length < 2}
               title={!editTransaction && accountsList.length < 2 ? 'Transfers need at least two accounts' : undefined}
               onClick={() => setFormData({ ...formData, type: 'transfer' })}
-              className={`flex-1 py-3 rounded-xl font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+              className={`flex-1 py-3 rounded-card font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
                 formData.type === 'transfer'
                   ? 'bg-[var(--accent-primary)] text-[#16181c]'
                   : 'bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'
@@ -356,7 +356,7 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
                   key={dir}
                   type="button"
                   onClick={() => setFormData({ ...formData, transferDirection: dir })}
-                  className={`flex-1 py-2 rounded-xl text-sm font-medium transition-all ${
+                  className={`flex-1 py-2 rounded-card text-sm font-medium transition-all ${
                     formData.transferDirection === dir
                       ? 'bg-[var(--background-secondary)] text-[var(--foreground)] border border-[var(--accent-primary)]'
                       : 'bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'
@@ -473,7 +473,7 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
             {showMerchantSuggestions && (
               <div
                 ref={merchantDropdownRef}
-                className="absolute z-50 w-full mt-1 bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-xl shadow-xl max-h-64 overflow-y-auto"
+                className="absolute z-50 w-full mt-1 bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-card shadow-xl max-h-64 overflow-y-auto"
               >
                 {/* Recent merchants from history */}
                 {filteredMerchants.recent.length > 0 && (
@@ -484,10 +484,10 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
                         key={merchant}
                         type="button"
                         onClick={() => handleMerchantSelect(merchant)}
-                        className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--background-tertiary)] transition-colors text-left"
+                        className="w-full flex items-center gap-3 px-3 py-2 rounded-control hover:bg-[var(--background-tertiary)] transition-colors text-left"
                       >
                         <div
-                          className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold text-sm"
+                          className="w-8 h-8 rounded-control flex items-center justify-center text-white font-bold text-sm"
                           style={{ backgroundColor: getMerchantColor(merchant) }}
                         >
                           {merchant.charAt(0)}
@@ -508,10 +508,10 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
                           key={merchant.name}
                           type="button"
                           onClick={() => handleMerchantSelect(merchant.name)}
-                          className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[var(--background-tertiary)] transition-colors text-left"
+                          className="flex items-center gap-2 px-3 py-2 rounded-control hover:bg-[var(--background-tertiary)] transition-colors text-left"
                         >
                           <div
-                            className="w-6 h-6 rounded flex items-center justify-center text-white text-xs font-bold"
+                            className="w-6 h-6 rounded-control flex items-center justify-center text-white text-xs font-bold"
                             style={{ backgroundColor: merchant.color }}
                           >
                             {merchant.name.charAt(0)}
@@ -603,14 +603,14 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
                     key={account.id}
                     type="button"
                     onClick={() => handleAccountChange(account.id)}
-                    className={`p-3 rounded-xl border-2 transition-all flex items-center gap-2 ${
+                    className={`p-3 rounded-card border-2 transition-all flex items-center gap-2 ${
                       formData.accountId === account.id
                         ? 'border-[var(--accent-primary)] bg-[var(--accent-primary)]/10'
                         : 'border-[var(--border-color)] hover:border-[var(--border-glow)]'
                     }`}
                   >
                     <div
-                      className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                      className="w-8 h-8 rounded-control flex items-center justify-center flex-shrink-0"
                       style={{ backgroundColor: `${account.color}20`, color: account.color }}
                     >
                       {getAccountIcon(account.type)}
@@ -672,7 +672,7 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
               id="isProjected"
               checked={formData.isProjected}
               onChange={(e) => setFormData({ ...formData, isProjected: e.target.checked })}
-              className="w-5 h-5 rounded border-[var(--border-color)] bg-[var(--background-tertiary)] text-[var(--accent-primary)] focus:ring-[var(--accent-primary)] cursor-pointer"
+              className="w-5 h-5 rounded-control border-[var(--border-color)] bg-[var(--background-tertiary)] text-[var(--accent-primary)] focus:ring-[var(--accent-primary)] cursor-pointer"
             />
             <label htmlFor="isProjected" className="text-sm text-[var(--foreground-secondary)] cursor-pointer">
               Mark as projected/future expense
@@ -682,14 +682,14 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
           {/* Recurring Transaction Section — hidden for a new transfer, whose two-leg
               submit path doesn't carry the recurring flag (the control would be a no-op). */}
           {!isNewTransfer && (
-          <div className="p-4 rounded-xl bg-[var(--background-tertiary)] border border-[var(--border-color)]">
+          <div className="p-4 rounded-card bg-[var(--background-tertiary)] border border-[var(--border-color)]">
             <div className="flex items-center gap-3 mb-4">
               <input
                 type="checkbox"
                 id="isRecurring"
                 checked={formData.isRecurring}
                 onChange={(e) => setFormData({ ...formData, isRecurring: e.target.checked })}
-                className="w-5 h-5 rounded border-[var(--border-color)] bg-[var(--background-secondary)] text-[var(--accent-primary)] focus:ring-[var(--accent-primary)] cursor-pointer"
+                className="w-5 h-5 rounded-control border-[var(--border-color)] bg-[var(--background-secondary)] text-[var(--accent-primary)] focus:ring-[var(--accent-primary)] cursor-pointer"
               />
               <label htmlFor="isRecurring" className="text-sm font-medium text-[var(--foreground)] cursor-pointer">
                 This is a recurring {formData.type === 'income' ? 'income' : 'payment'}
@@ -755,7 +755,7 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
 
                 {/* Preview */}
                 {(formData.recurringEndDate || formData.recurringCount) && (
-                  <div className="p-3 rounded-lg bg-[var(--accent-primary)]/10 border border-[var(--accent-primary)]/20">
+                  <div className="p-3 rounded-control bg-[var(--accent-primary)]/10 border border-[var(--accent-primary)]/20">
                     <p className="text-sm text-[var(--foreground)]">
                       {formData.recurringEndDate ? (
                         <>Payments until <strong>{new Date(formData.recurringEndDate).toLocaleDateString()}</strong></>
