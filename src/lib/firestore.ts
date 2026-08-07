@@ -38,6 +38,7 @@ import {
   Timestamp,
   writeBatch,
 } from './firebase';
+import type { Bill } from '@/lib/bills';
 import { 
   Transaction, 
   PaymentAccount, 
@@ -1074,7 +1075,7 @@ export async function hasUserData(userId: string): Promise<boolean> {
  * any new collection() call.
  */
 export const USER_SUBCOLLECTIONS = [
-  'accounts', 'goals', 'income', 'links', 'plannedTransactions',
+  'accounts', 'bills', 'goals', 'income', 'links', 'plannedTransactions',
   'reminders', 'reviewCandidates', 'reviews', 'rules', 'transactions',
 ] as const;
 
@@ -1235,6 +1236,86 @@ export async function completePlannedTransaction(
     }
     throw error;
   }
+}
+
+// ============================================
+// Bills register (BILLS-001)
+// ============================================
+// Manually curated recurring obligations — see src/lib/bills.ts for the
+// model and math. Same read/write posture as savings goals above.
+
+export async function getBills(userId: string): Promise<Bill[]> {
+  try {
+    const billsRef = collection(db, 'users', userId, 'bills');
+    const snapshot = await getDocs(billsRef);
+    return snapshot.docs.map((d) => {
+      const data = d.data();
+      return {
+        ...data,
+        id: d.id,
+        createdAt: data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+        updatedAt: data.updatedAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+      };
+    }) as Bill[];
+  } catch (error) {
+    if (isOfflineError(error)) {
+      console.warn('Firestore offline - no bills loaded');
+      return [];
+    }
+    console.error('Error getting bills:', error);
+    return [];
+  }
+}
+
+export async function addBill(
+  userId: string,
+  bill: Omit<Bill, 'id' | 'createdAt' | 'updatedAt'>
+): Promise<string> {
+  const billsRef = collection(db, 'users', userId, 'bills');
+  const docRef = await addDoc(billsRef, {
+    ...removeUndefined(bill),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  return docRef.id;
+}
+
+export async function updateBill(
+  userId: string,
+  billId: string,
+  updates: Partial<Bill>
+): Promise<void> {
+  const billRef = doc(db, 'users', userId, 'bills', billId);
+  const { id: _id, createdAt: _c, updatedAt: _u, ...rest } = updates;
+  await updateDoc(billRef, { ...removeUndefined(rest), updatedAt: serverTimestamp() });
+}
+
+export async function deleteBill(userId: string, billId: string): Promise<void> {
+  await deleteDoc(doc(db, 'users', userId, 'bills', billId));
+}
+
+/**
+ * One-time starter seed. Idempotent: refuses when any bills already exist —
+ * the register is the owner's source of truth and later seed versions are
+ * never merged into user-edited records.
+ */
+export async function seedBills(
+  userId: string,
+  rows: Array<Omit<Bill, 'id' | 'createdAt' | 'updatedAt'>>
+): Promise<number> {
+  const billsRef = collection(db, 'users', userId, 'bills');
+  const existing = await getDocs(billsRef);
+  if (!existing.empty) return 0;
+  const batch = writeBatch(db);
+  for (const row of rows) {
+    batch.set(doc(billsRef), {
+      ...removeUndefined(row),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  }
+  await batch.commit();
+  return rows.length;
 }
 
 // ============================================

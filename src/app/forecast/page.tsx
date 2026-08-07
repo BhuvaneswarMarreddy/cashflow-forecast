@@ -17,6 +17,7 @@ import UpcomingBillsPanel from '@/components/UpcomingBillsPanel';
 import SavingsGoalsPanel from '@/components/SavingsGoalsPanel';
 import PlannedPaymentsPanel from '@/components/PlannedPaymentsPanel';
 import AssumptionsPanel from '@/components/AssumptionsPanel';
+import BillsTab from '@/components/BillsTab';
 import { generateForecast, calculateCurrentCash, generateAccountForecast, getAllAccountForecasts, withDerivedBalances } from '@/lib/forecast';
 import { buildAssumptions, AssumptionOverrides } from '@/lib/behavior';
 import { formatMoney } from '@/lib/money';
@@ -44,6 +45,21 @@ export default function ForecastPage() {
   const [savingsGoals, setSavingsGoals] = useState<SavingsGoal[]>([]);
   // User corrections to the behavior engine's assumptions (localStorage-backed).
   const [overrides, setOverrides] = useState<AssumptionOverrides>(() => loadOverrides());
+  // Bills register (BILLS-001) lives on a second tab; deep-linkable via ?tab=bills.
+  // Read from location instead of useSearchParams to avoid the Suspense boundary
+  // requirement on a fully client-rendered page.
+  // Lazy init is hydration-safe here: the auth-loading gate renders a spinner on
+  // the first client pass, so the tab bar never hydrates against server markup.
+  const [activeTab, setActiveTab] = useState<'timeline' | 'bills'>(() =>
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('tab') === 'bills'
+      ? 'bills'
+      : 'timeline'
+  );
+  const switchTab = (tab: 'timeline' | 'bills') => {
+    setActiveTab(tab);
+    window.history.replaceState(null, '', tab === 'bills' ? '/forecast?tab=bills' : '/forecast');
+  };
   
   // Load savings goals from Firestore
   useEffect(() => {
@@ -211,6 +227,7 @@ export default function ForecastPage() {
           </div>
 
           {/* Time Period Selector */}
+          {activeTab === 'timeline' && (
           <div className="flex items-center gap-1.5 p-1.5 bg-[var(--background-secondary)] rounded-lg border border-[var(--border-color)] shadow-sm">
             {TIME_PERIODS.map((period) => (
               <button
@@ -227,8 +244,29 @@ export default function ForecastPage() {
               </button>
             ))}
           </div>
+          )}
         </div>
 
+        {/* Tab bar: Timeline | Bills (BILLS-001) */}
+        <div className="mb-6 flex items-center gap-1.5 p-1.5 bg-[var(--background-secondary)] rounded-lg border border-[var(--border-color)] w-fit">
+          {(['timeline', 'bills'] as const).map(tab => (
+            <button
+              key={tab}
+              onClick={() => switchTab(tab)}
+              className={`px-4 py-2.5 text-sm font-semibold rounded-md transition-all ${
+                activeTab === tab
+                  ? 'bg-[var(--accent-primary)] text-[#16181c] shadow-sm'
+                  : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)]'
+              }`}
+            >
+              {tab === 'timeline' ? 'Timeline' : 'Bills'}
+            </button>
+          ))}
+        </div>
+
+        {activeTab === 'bills' && user?.id && <BillsTab userId={user.id} />}
+
+        {activeTab === 'timeline' && (<>
         {/* Account Selector */}
         {forecastableAccounts.length > 0 && (
           <div className="mb-6 bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-xl p-4">
@@ -486,6 +524,7 @@ export default function ForecastPage() {
             <AIQuestionPanel forecast={forecast} />
           </div>
         </div>
+        </>)}
       </main>
     </div>
   );
