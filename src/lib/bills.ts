@@ -58,6 +58,12 @@ export interface Bill {
   paymentMethodId: string;
   migrationStatus: MigrationStatus;
   lifecycleStatus: LifecycleStatus;
+  /**
+   * Owner-declared untouchable (BILLS-003). Contract: every planning /
+   * safe-to-spend consumer subtracts locked bills FIRST and never proposes
+   * them as cuts — the chat brain (BRAIN-002+) must honor this.
+   */
+  nonNegotiable?: boolean;
   matcher?: BillMatcher;
   remarks?: string;
   source?: 'manual' | 'starter-audit';
@@ -114,6 +120,15 @@ export function monthlyCost(bill: Bill): number {
 export function totalMonthlyCost(bills: Bill[]): number {
   return roundCurrency(
     bills.filter(isCharging).reduce((sum, b) => sum + monthlyCostRaw(b), 0)
+  );
+}
+
+/** $/mo the owner has declared untouchable — reserved first in any plan. */
+export function nonNegotiableMonthly(bills: Bill[]): number {
+  return roundCurrency(
+    bills
+      .filter(b => isCharging(b) && b.nonNegotiable)
+      .reduce((s, b) => s + monthlyCostRaw(b), 0)
   );
 }
 

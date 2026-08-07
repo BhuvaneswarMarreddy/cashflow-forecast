@@ -248,3 +248,26 @@ describe('spendBreakdown', () => {
     expect(b.merchants[0].merchant).toBe('SHELL OIL 5744');
   });
 });
+
+// ---------------------------------------------------------------------------
+// BILLS-003 — non-negotiable lock
+// ---------------------------------------------------------------------------
+
+import { nonNegotiableMonthly } from '@/lib/bills';
+
+describe('nonNegotiableMonthly', () => {
+  test('sums locked active bills raw-then-round; cancelled locks charge nothing', () => {
+    const bills = [
+      mk(124.99, 'monthly', { nonNegotiable: true }),
+      mk(10, 'weekly', { nonNegotiable: true }),          // 43.333…
+      mk(98.99, 'annual', { nonNegotiable: true }),       // 8.249…
+      mk(50, 'monthly'),                                   // unlocked — ignored
+      mk(999, 'monthly', { nonNegotiable: true, lifecycleStatus: 'cancelled' }),
+    ];
+    expect(nonNegotiableMonthly(bills)).toBe(176.57); // 124.99 + 43.3333 + 8.2492 → round once
+  });
+
+  test('zero when nothing is locked', () => {
+    expect(nonNegotiableMonthly([mk(100, 'monthly')])).toBe(0);
+  });
+});

@@ -18,6 +18,7 @@ import {
   billsOnRetiredMethods,
   migrationSummary,
   monthlyCost,
+  nonNegotiableMonthly,
   spendBreakdown,
   totalMonthlyCost,
 } from '@/lib/bills';
@@ -32,6 +33,7 @@ import {
   Check,
   ChevronDown,
   ExternalLink,
+  Lock,
   Pencil,
   Plus,
   Receipt,
@@ -243,6 +245,12 @@ export default function BillsTab({ userId, initialBills, initialTransactions }: 
               {money(summary.switchedMonthly)} switched · {money(summary.onCardsMonthly)} still on cards ·{' '}
               {money(summary.exceptionMonthly)} exceptions
             </p>
+            {nonNegotiableMonthly(bills) > 0 && (
+              <p className="text-sm text-[var(--foreground-secondary)] mt-1 flex items-center gap-1">
+                <Lock className="w-3.5 h-3.5" />
+                {money(nonNegotiableMonthly(bills))}{per} non-negotiable — reserved first in every plan
+              </p>
+            )}
             <p className="text-sm text-[var(--foreground-secondary)] mt-2">
               <span className="font-semibold text-[var(--foreground)]">
                 Autopay migration: {summary.completed} / {summary.total} done
@@ -356,6 +364,9 @@ export default function BillsTab({ userId, initialBills, initialTransactions }: 
                       bill.vendor
                     )}
                   </span>
+                  {bill.nonNegotiable && (
+                    <Lock className="w-3.5 h-3.5 text-[var(--accent-primary)] shrink-0" aria-label="Non-negotiable" />
+                  )}
                   {toggleExpand && (
                     <button
                       onClick={(e) => { e.stopPropagation(); toggleExpand(); }}
@@ -529,6 +540,7 @@ function BillForm({ bill, onSave, onDelete, onClose }: BillFormProps) {
   const [paymentMethodId, setPaymentMethodId] = useState(bill?.paymentMethodId ?? 'bofa-debit');
   const [migrationStatus, setMigrationStatus] = useState<MigrationStatus>(bill?.migrationStatus ?? 'to-review');
   const [lifecycleStatus, setLifecycleStatus] = useState<LifecycleStatus>(bill?.lifecycleStatus ?? 'active');
+  const [nonNegotiable, setNonNegotiable] = useState(bill?.nonNegotiable ?? false);
   const [remarks, setRemarks] = useState(bill?.remarks ?? '');
   const [error, setError] = useState('');
 
@@ -551,6 +563,7 @@ function BillForm({ bill, onSave, onDelete, onClose }: BillFormProps) {
         paymentMethodId,
         migrationStatus,
         lifecycleStatus,
+        nonNegotiable: nonNegotiable || undefined,
         remarks: remarks.trim() || undefined,
         source: bill?.source,
         seedVersion: bill?.seedVersion,
@@ -650,6 +663,17 @@ function BillForm({ bill, onSave, onDelete, onClose }: BillFormProps) {
               </select>
             </label>
           </div>
+
+          <label className="flex items-center gap-2 text-sm font-medium text-[var(--foreground-secondary)] py-1 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={nonNegotiable}
+              onChange={(e) => setNonNegotiable(e.target.checked)}
+              className="w-4 h-4 accent-[var(--accent-primary)]"
+            />
+            <Lock className="w-3.5 h-3.5" />
+            Non-negotiable — reserve first in every plan, never suggest cutting
+          </label>
 
           <label className="block text-sm font-medium text-[var(--foreground-secondary)]">
             Remarks
