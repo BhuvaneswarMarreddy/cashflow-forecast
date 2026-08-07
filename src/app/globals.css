@@ -45,6 +45,12 @@
   --gradient-ocean: linear-gradient(135deg, #8a6d2e 0%, #D9A521 100%);
   --gradient-purple: linear-gradient(135deg, #22222A 0%, #B98D18 100%);
 
+  /* Radii and the content measure are NOT declared here — see the @theme block
+     below. Tailwind v4 owns the --radius-* and --container-* namespaces and
+     strips them out of a plain :root, silently: the utility still compiles,
+     `var(--radius-card)` resolves to nothing, and every corner falls back to
+     square. Declaring them in @theme is what makes them real. */
+
   /* Shadows — one level, quiet */
   --shadow-glow: 0 0 32px rgba(217, 165, 33, 0.18);
   --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.4);
@@ -128,6 +134,27 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-outfit), sans-serif;
   --font-mono: var(--font-space-mono), monospace;
+}
+
+/**
+ * UI-112 — the shape contract. Three radii and one measure, so a chip and the
+ * card holding it can never disagree again (the app had five radii applied by
+ * feel: 8/10/12/16/20). Declared in @theme rather than :root because Tailwind
+ * owns these namespaces; it also earns them real utility names.
+ *
+ *   rounded-control  chips, buttons, inputs, list rows
+ *   rounded-card     cards, sheets, panels
+ *   rounded-pill     pills, progress tracks, avatars
+ *   max-w-content    the reading measure — beyond it a row's label and its
+ *                    amount end up a foot apart on desktop
+ *
+ * Pinned by src/__tests__/home-screen-contract.test.ts.
+ */
+@theme {
+  --radius-control: 10px;
+  --radius-card: 16px;
+  --radius-pill: 999px;
+  --container-content: 896px;
 }
 
 /* UI-100 — the hero number: one serif figure owns each screen. */

@@ -13,9 +13,7 @@ import { PAYMENT_METHODS, EXPENSE_CATEGORIES } from '@/types';
 import { isPositive } from '@/lib/classify';
 import {
   TrendingUp,
-  CreditCard,
   Calendar,
-  Filter,
   ChevronRight,
   AlertCircle,
   Settings,
@@ -25,11 +23,12 @@ import { format, parseISO, isAfter, startOfDay } from 'date-fns';
 import { generateForecast, calculateCurrentCash, withDerivedBalances, monthlyAverages } from '@/lib/forecast';
 import { currentOf } from '@/lib/accounts';
 import { clampedMonthlyDate } from '@/lib/dates';
-import { homeSummary } from '@/lib/home';
+import { homeSummary, runwayLabel, RESERVE_TARGET_MONTHS } from '@/lib/home';
+import { displayName } from '@/lib/merchant';
 import { nonNegotiableMonthly, Bill } from '@/lib/bills';
 import * as firestoreService from '@/lib/firestore';
 
-export default function DashboardPage() {
+export default function DashboardPage({ initialBills }: { initialBills?: Bill[] } = {}) {
   const { isAuthenticated, isLoading: authLoading, user } = useAuth();
   const {
     transactions,
@@ -42,13 +41,13 @@ export default function DashboardPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [filter, setFilter] = useState<'all' | 'past' | 'future'>('all');
   // UI-102: the locked (non-negotiable) bills feed the hero's reserved chip.
-  const [bills, setBills] = useState<Bill[]>([]);
+  const [bills, setBills] = useState<Bill[]>(initialBills ?? []);
   useEffect(() => {
-    if (!user?.id) return;
+    if (initialBills || !user?.id) return; // fixtures supply their own; never read Firestore
     let alive = true;
     firestoreService.getBills(user.id).then((rows) => { if (alive) setBills(rows); });
     return () => { alive = false; };
-  }, [user?.id]);
+  }, [user?.id, initialBills]);
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -68,9 +67,10 @@ export default function DashboardPage() {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="bg-pattern" />
-        <div className="animate-pulse-glow w-16 h-16 rounded-2xl bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] flex items-center justify-center">
-          <TrendingUp className="w-8 h-8 text-white" />
+        <div className="animate-pulse-glow w-16 h-16 rounded-card bg-[var(--accent-primary)] flex items-center justify-center">
+          <TrendingUp className="w-8 h-8 text-[var(--background)]" aria-hidden="true" />
         </div>
+        <span className="sr-only">Loading</span>
       </div>
     );
   }
@@ -192,29 +192,32 @@ export default function DashboardPage() {
       <div className="bg-pattern" />
       <Navbar />
       
-      <main className="pt-24 pb-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto relative z-10">
+      {/* UI-112: content caps at the reading measure. At full desktop width a row's
+          merchant and its amount sat a foot apart, which is a stretched phone
+          layout, not a desktop one. */}
+      <main className="pt-24 pb-24 px-4 lg:px-8 max-w-content mx-auto relative z-10">
         {/* Setup Incomplete Banner */}
         {setupIncomplete && (
-          <div className="mb-6 p-4 rounded-xl bg-gradient-to-r from-[var(--accent-primary)]/20 to-[var(--accent-secondary)]/20 border border-[var(--accent-primary)]/30">
+          <div className="mb-6 p-4 rounded-card bg-[var(--background-secondary)] border border-[var(--accent-primary)]">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-[var(--accent-primary)]/30 flex items-center justify-center">
-                  <Settings className="w-5 h-5 text-[var(--accent-primary)]" />
-                </div>
+                <Settings className="w-5 h-5 text-[var(--accent-primary)] flex-shrink-0" />
                 <div>
-                  <p className="font-medium text-[var(--foreground)]">Complete your setup</p>
+                  <p className="font-medium text-[var(--foreground)]">Finish setting up</p>
                   <p className="text-sm text-[var(--foreground-secondary)]">
-                    {!hasAccounts && 'Add your accounts • '}
-                    {!hasIncome && 'Set up income • '}
-                    {!hasBudget && 'Set a budget'}
+                    {[
+                      !hasAccounts && 'add your accounts',
+                      !hasIncome && 'set up income',
+                      !hasBudget && 'set a budget',
+                    ].filter(Boolean).join(' · ')}
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => router.push('/onboarding?continue=true')}
-                className="btn-primary text-sm py-2 px-4 flex items-center gap-2"
+                className="btn-primary text-sm min-h-[44px] px-4 flex items-center gap-2"
               >
-                Continue Setup
+                Continue
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
@@ -226,107 +229,142 @@ export default function DashboardPage() {
             panel) either lives here as one quiet chip or on the screen that owns it. */}
         <h1 className="sr-only">Home</h1>
         {!setupIncomplete && (
-          <section className="mb-6 p-5 lg:p-6 rounded-2xl bg-[var(--background-secondary)] border border-[var(--border-color)]">
+          <section className="mb-4 lg:mb-6 p-4 lg:p-5 rounded-card bg-[var(--background-secondary)] border border-[var(--border-color)]">
             <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--accent-primary)]">Runway</p>
             {txnLoading ? (
               <div className="animate-pulse mt-2 space-y-3">
-                <div className="h-9 w-48 rounded bg-[var(--background-tertiary)]" />
-                <div className="h-4 w-64 rounded bg-[var(--background-tertiary)]" />
-                <div className="h-2 w-full rounded bg-[var(--background-tertiary)]" />
+                <div className="h-9 w-48 rounded-control bg-[var(--background-tertiary)]" />
+                <div className="h-4 w-64 rounded-control bg-[var(--background-tertiary)]" />
+                <div className="h-2 w-full rounded-pill bg-[var(--background-tertiary)]" />
               </div>
+            ) : !home.hasBurn ? (
+              // No burn measured means no runway exists to report. The old code
+              // filled the gap with the 5-month target, which showed a full
+              // reserve to someone who had simply never imported anything.
+              <>
+                <p className="hero-number text-[var(--foreground)] mt-1">Not measured yet</p>
+                <p className="text-sm text-[var(--foreground-secondary)] mt-1">
+                  Import or link an account and your runway appears here.
+                </p>
+                <Link href="/accounts" className="inline-flex items-center gap-1 mt-3 min-h-[44px] font-medium text-[var(--accent-primary)]">
+                  Connect an account <ArrowRight className="w-4 h-4" />
+                </Link>
+              </>
             ) : (
               <>
-                <p className="hero-number text-[var(--foreground)] mt-1">
-                  {format(home.runwayDate, 'MMM d, yyyy')}
+                {/* Days, not "0.3 months" — the unit a short runway is actually
+                    thought in. The date it runs dry stays, one size down. */}
+                <p className="hero-number text-[var(--foreground)] mt-1 tnum">{runwayLabel(home)}</p>
+                <p className="text-sm text-[var(--foreground-secondary)] mt-1">
+                  of cash at your usual spending · dry on {format(home.runwayDate, 'MMM d, yyyy')}
                 </p>
-                <p className="text-sm text-[var(--foreground-secondary)] mt-1 tnum">
-                  Cash lasts {home.runwayMonths} month{home.runwayMonths === 1 ? '' : 's'} at your real spending
-                </p>
-                <div className="mt-4 h-2 rounded-full bg-[var(--background-tertiary)] overflow-hidden" role="img" aria-label={`${Math.round(home.reserveProgress * 100)}% of the 5-month reserve target`}>
-                  <div className="h-full rounded-full bg-[var(--progress)] transition-all" style={{ width: `${home.reserveProgress * 100}%` }} />
+
+                <div
+                  className="mt-4 h-2 rounded-pill bg-[var(--background-tertiary)] overflow-hidden"
+                  role="img"
+                  aria-label={`${Math.round(home.reserveProgress * 100)}% of the ${RESERVE_TARGET_MONTHS}-month reserve target`}
+                >
+                  <div className="h-full rounded-pill bg-[var(--progress)] transition-all" style={{ width: `${home.reserveProgress * 100}%` }} />
                 </div>
-                <p className="text-xs text-[var(--foreground-muted)] mt-1.5 tnum">
-                  {Math.round(home.reserveProgress * 100)}% of the 5-month reserve target
-                </p>
+
+                {/* The motivating line. A percentage is a grade; a dollar figure
+                    with a month attached is something to do this week. */}
+                {home.nextMonthTarget > 0 ? (
+                  <p className="mt-2 font-semibold text-[var(--accent-primary)] tnum">
+                    {formatMoney(home.amountToNextMonth, profile?.currency, 2)} more makes it{' '}
+                    {home.nextMonthTarget} month{home.nextMonthTarget === 1 ? '' : 's'}
+                    <span className="ml-2 font-normal text-xs text-[var(--foreground-muted)]">
+                      {Math.round(home.reserveProgress * 100)}% of {RESERVE_TARGET_MONTHS} months
+                    </span>
+                  </p>
+                ) : (
+                  <p className="mt-2 font-semibold text-[var(--money-in)] tnum">
+                    {RESERVE_TARGET_MONTHS}-month reserve reached
+                  </p>
+                )}
+
                 <div className="mt-4 flex flex-wrap items-center gap-2">
                   {forecast && (
-                    <span className={`px-3 py-1.5 rounded-full text-sm font-medium tnum bg-[var(--background-tertiary)] ${forecast.lowestBalance < (profile?.settings?.safetyThreshold || 500) ? 'text-[var(--money-out)]' : 'text-[var(--foreground-secondary)]'}`}>
-                      Lowest in 90 days: {formatMoney(forecast.lowestBalance, profile?.currency, 2)}
+                    <span className={`px-3 py-1.5 rounded-pill text-sm font-medium tnum bg-[var(--background-tertiary)] ${forecast.lowestBalance < (profile?.settings?.safetyThreshold || 500) ? 'text-[var(--money-out)]' : 'text-[var(--foreground-secondary)]'}`}>
+                      Lowest in 90 days {formatMoney(forecast.lowestBalance, profile?.currency, 2)}
                     </span>
                   )}
                   {home.cardsOwed > 0 && (
-                    <span className="px-3 py-1.5 rounded-full text-sm font-medium tnum bg-[var(--background-tertiary)] text-[var(--money-out)]">
-                      Cards owed: {formatMoney(-home.cardsOwed, profile?.currency, 2)}
+                    <span className="px-3 py-1.5 rounded-pill text-sm font-medium tnum bg-[var(--background-tertiary)] text-[var(--money-out)]">
+                      Cards owed {formatMoney(-home.cardsOwed, profile?.currency, 2)}
                     </span>
                   )}
                   {home.lockedMonthly > 0 && (
-                    <span className="px-3 py-1.5 rounded-full text-sm font-medium tnum bg-[var(--background-tertiary)] text-[var(--accent-primary)]">
-                      🔒 {formatMoney(home.lockedMonthly, profile?.currency, 2)}/mo locked
+                    <span className="px-3 py-1.5 rounded-pill text-sm font-medium tnum bg-[var(--background-tertiary)] text-[var(--accent-primary)]">
+                      Locked {formatMoney(home.lockedMonthly, profile?.currency, 2)}/mo
                     </span>
                   )}
-                  <Link href="/forecast" className="px-3 py-1.5 rounded-full text-sm font-medium text-[var(--accent-primary)] hover:underline">
-                    Full forecast →
-                  </Link>
-                  <Link href="/accounts" className="px-3 py-1.5 rounded-full text-sm font-medium text-[var(--accent-primary)] hover:underline">
-                    Accounts →
-                  </Link>
                 </div>
+
+                {/* Honesty: the runway is only as complete as what is linked. The
+                    hero stated a hard number without ever saying what it counted. */}
+                <p className="mt-3 text-xs text-[var(--foreground-muted)]">
+                  Counting {derivedAccounts.length} linked account{derivedAccounts.length === 1 ? '' : 's'}
+                  {' · '}
+                  <Link href="/accounts" className="text-[var(--accent-primary)] underline underline-offset-2">
+                    manage
+                  </Link>
+                  {' · '}
+                  <Link href="/forecast" className="text-[var(--accent-primary)] underline underline-offset-2">
+                    full forecast
+                  </Link>
+                </p>
               </>
             )}
           </section>
         )}
 
-        {/* Upcoming Bills Alert */}
+        {/* Card payments due. UI-112: the per-account colour chips are gone — a
+            card's brand hue carried no meaning here and put four more colours on
+            a screen that is supposed to run on four. */}
         {upcomingBills.length > 0 && (
-          <div className="mb-8 p-4 rounded-xl bg-[var(--accent-warning)]/10 border border-[var(--accent-warning)]/30">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="w-5 h-5 text-[var(--accent-warning)] mt-0.5 flex-shrink-0" />
-              <div className="flex-1">
-                <h3 className="font-semibold text-[var(--foreground)] mb-2">Upcoming Bills</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {upcomingBills.slice(0, 3).map((bill) => (
-                    <div key={bill.id} className="flex items-center justify-between p-3 rounded-lg bg-[var(--background)]/50">
-                      <div className="flex items-center gap-3">
-                        <div
-                          className="w-8 h-8 rounded-lg flex items-center justify-center"
-                          style={{ backgroundColor: `${bill.color}20`, color: bill.color }}
-                        >
-                          <CreditCard className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium text-[var(--foreground)]">{bill.name}</p>
-                          <p className="text-xs text-[var(--foreground-muted)]">
-                            Due {format(bill.dueDate, 'MMM d')} ({bill.daysUntilDue} days)
-                          </p>
-                        </div>
-                      </div>
-                      <p className="text-sm font-semibold text-[var(--accent-danger)]">
-                        {formatMoney(bill.balanceDue, profile?.currency, 2)}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
+          <div className="mb-4 lg:mb-6 p-4 lg:p-5 rounded-card bg-[var(--background-secondary)] border border-[var(--border-color)]">
+            <div className="flex items-center gap-2 mb-3">
+              <AlertCircle className="w-4 h-4 text-[var(--accent-warning)] flex-shrink-0" />
+              <h2 className="font-semibold text-[var(--foreground)]">Card payments due</h2>
             </div>
+            <ul>
+              {upcomingBills.slice(0, 3).map((bill) => (
+                <li
+                  key={bill.id}
+                  className="flex items-center justify-between gap-3 py-2.5 border-b border-[var(--border-color)] last:border-0"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-[var(--foreground)] truncate">{bill.name}</p>
+                    <p className="text-xs text-[var(--foreground-muted)] tnum">
+                      {format(bill.dueDate, 'MMM d')} · in {bill.daysUntilDue} day{bill.daysUntilDue === 1 ? '' : 's'}
+                    </p>
+                  </div>
+                  <p className="text-sm font-semibold text-[var(--money-out)] tnum flex-shrink-0">
+                    {formatMoney(bill.balanceDue, profile?.currency, 2)}
+                  </p>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 
         {/* Recent Transactions */}
-        <div className="glass-card p-6">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-            <h3 className="text-lg font-semibold text-[var(--foreground)]">Recent Transactions</h3>
+        <div className="p-4 lg:p-5 rounded-card bg-[var(--background-secondary)] border border-[var(--border-color)]">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-3">
+            <h2 className="font-semibold text-[var(--foreground)]">Recent activity</h2>
             {/* UI-102: 3 choices = 3 visible segments (a select is two taps and
                 hides the active state; audit wrongControl). Plain words: no
                 'Projected' jargon. */}
-            <div className="flex items-center gap-1.5 p-1 rounded-lg bg-[var(--background-tertiary)]" role="group" aria-label="Filter transactions">
+            <div className="flex items-center gap-1 p-1 rounded-control bg-[var(--background-tertiary)]" role="group" aria-label="Filter transactions">
               {([['all', 'All'], ['past', 'Past'], ['future', 'Upcoming']] as const).map(([value, label]) => (
                 <button
                   key={value}
                   onClick={() => setFilter(value)}
                   aria-pressed={filter === value}
-                  className={`min-h-[44px] px-4 rounded-md text-sm font-semibold transition-all ${
+                  className={`min-h-[44px] px-4 rounded-control text-sm font-semibold transition-all ${
                     filter === value
-                      ? 'bg-[var(--accent-primary)] text-[#16181c]'
+                      ? 'bg-[var(--accent-primary)] text-[var(--background)]'
                       : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'
                   }`}
                 >
@@ -336,26 +374,26 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <div className="space-y-3">
+          <ul>
             {recentTransactions.length === 0 ? (
               // UI-102: the empty copy must tell the truth about WHICH filter is
               // empty — "No transactions yet" while hundreds exist was a lie.
-              <div className="text-center py-12">
-                <Calendar className="w-16 h-16 text-[var(--foreground-muted)] mx-auto mb-4" />
+              <li className="text-center py-10">
+                <Calendar className="w-10 h-10 text-[var(--foreground-muted)] mx-auto mb-3" aria-hidden="true" />
                 {transactions.length === 0 ? (
                   <>
-                    <h3 className="text-lg font-medium text-[var(--foreground)] mb-2">No transactions yet</h3>
-                    <p className="text-[var(--foreground-secondary)] mb-4">Start tracking your expenses</p>
-                    <button onClick={() => setIsModalOpen(true)} className="btn-primary">
-                      Add First Transaction
+                    <p className="font-medium text-[var(--foreground)] mb-1">No transactions yet</p>
+                    <p className="text-sm text-[var(--foreground-secondary)] mb-4">Start tracking your spending</p>
+                    <button onClick={() => setIsModalOpen(true)} className="btn-primary min-h-[44px] px-4">
+                      Add your first transaction
                     </button>
                   </>
                 ) : (
-                  <h3 className="text-lg font-medium text-[var(--foreground)]">
+                  <p className="font-medium text-[var(--foreground)]">
                     {filter === 'future' ? 'Nothing scheduled ahead' : 'Nothing in this view'}
-                  </h3>
+                  </p>
                 )}
-              </div>
+              </li>
             ) : (
               recentTransactions.map((txn) => {
                 const category = EXPENSE_CATEGORIES.find((c) => c.value === txn.category);
@@ -366,45 +404,53 @@ export default function DashboardPage() {
                 const isFuture = isAfter(parseISO(txn.date), today) || txn.isProjected;
 
                 return (
-                  <div
+                  // UI-112: a divided list, not eight nested cards. The old row wore
+                  // a 48px tile holding the SAME 📋 fallback on every uncategorised
+                  // row — decoration that carried no information and set the row
+                  // height. A real category icon still earns its place.
+                  <li
                     key={txn.id}
-                    className={`flex items-center justify-between p-4 rounded-xl bg-[var(--background-tertiary)] border border-[var(--border-color)] hover:border-[var(--border-glow)] transition-all payment-${txn.paymentMethod}`}
+                    className="flex items-center justify-between gap-3 py-3 border-b border-[var(--border-color)] last:border-0"
                   >
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-xl bg-[var(--background-secondary)] flex items-center justify-center text-2xl">
-                        {category?.icon || '📋'}
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        {/* Full string kept in `title` — the reference blob is the
+                            only handle on a mystery charge, so it is never lost. */}
+                        <p className="font-medium text-[var(--foreground)] truncate" title={txn.title}>
+                          {displayName(txn.title)}
+                        </p>
+                        {isFuture && <span className="badge badge-projected flex-shrink-0">Upcoming</span>}
                       </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <p className="font-medium text-[var(--foreground)]">{txn.title}</p>
-                          {isFuture && (
-                            <span className="badge badge-projected">Projected</span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 text-sm text-[var(--foreground-secondary)]">
-                          <span>{format(parseISO(txn.date), 'MMM dd, yyyy')}</span>
-                          <span>•</span>
-                          <span style={{ color: paymentMethod?.color }}>{paymentMethod?.label}</span>
-                        </div>
-                      </div>
+                      {/* ONE qualifier, never two. "Aug 6 · Other · Bank Account"
+                          was three fields where two said nothing: `other` is the
+                          absence of a category, and the account is identical on
+                          every row for most people. Activity owns the full detail. */}
+                      <p className="text-xs text-[var(--foreground-muted)] truncate">
+                        {format(parseISO(txn.date), 'MMM d')}
+                        {category && txn.category !== 'other'
+                          ? ` · ${category.label}`
+                          : paymentMethod?.label
+                            ? ` · ${paymentMethod.label}`
+                            : ''}
+                      </p>
                     </div>
-                    <p className={`text-lg font-semibold ${isExpense ? 'text-[var(--accent-danger)]' : 'text-[var(--accent-success)]'}`}>
-                      {isExpense ? '-' : '+'}{formatMoney(txn.amount, profile?.currency, 2)}
+                    <p className={`font-semibold tnum flex-shrink-0 ${isExpense ? 'text-[var(--money-out)]' : 'text-[var(--money-in)]'}`}>
+                      {isExpense ? '−' : '+'}{formatMoney(txn.amount, profile?.currency, 2)}
                     </p>
-                  </div>
+                  </li>
                 );
               })
             )}
-          </div>
+          </ul>
 
           {transactions.length > 8 && (
             // #30: the label promises the transactions list — send it there (and as a
             // real link, not a button pretending to be one).
             <Link
               href="/history"
-              className="w-full mt-4 py-3 rounded-xl bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-secondary)] transition-all flex items-center justify-center gap-2"
+              className="w-full mt-3 min-h-[44px] rounded-control bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)] transition-all flex items-center justify-center gap-1 text-sm font-medium"
             >
-              View All Transactions
+              See all activity
               <ChevronRight className="w-4 h-4" />
             </Link>
           )}
