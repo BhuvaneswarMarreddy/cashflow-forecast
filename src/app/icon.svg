@@ -1,1 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="23" fill="#b08d3f"/><circle cx="32" cy="32" r="23" fill="none" stroke="#8f7233" stroke-width="2"/><path d="M42 25A12 12 0 1 0 42 39" fill="none" stroke="#2b3138" stroke-width="6" stroke-linecap="round"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- UI-100: the favicon paints its own full-bleed ground (no more white/black
+       corner boxes) and follows the browser's theme — ink ground on dark tab
+       bars, paper on light. Same shining coin either way. -->
+  <style>
+    .ground { fill: #FAF7EF; }
+    @media (prefers-color-scheme: dark) {
+      .ground { fill: #101014; }
+    }
+  </style>
+  <rect class="ground" width="64" height="64" rx="14"/>
+  <circle cx="32" cy="32" r="21" fill="#D9A521"/>
+  <circle cx="32" cy="32" r="21" fill="none" stroke="#8A6D0B" stroke-width="2"/>
+  <path d="M41 26A11 11 0 1 0 41 38" fill="none" stroke="#221A04" stroke-width="5.5" stroke-linecap="round"/>
+</svg>
