@@ -118,7 +118,8 @@ export default function Navbar() {
               <div className="text-right px-4 py-2 rounded-lg bg-[var(--background-tertiary)]">
                 <p className="text-xs text-[var(--foreground-muted)]">Net Balance</p>
                 <p className={`font-semibold tabular-nums ${totalBalance >= 0 ? 'text-[var(--accent-success)]' : 'text-[var(--accent-danger)]'}`}>
-                  {formatMoney(Math.abs(totalBalance), profile?.currency, 2)}
+                  {/* #29: raw value — the minus must be visible, color is reinforcement only */}
+                  {formatMoney(totalBalance, profile?.currency, 2)}
                 </p>
               </div>
             )}

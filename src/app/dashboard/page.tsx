@@ -461,7 +461,8 @@ export default function DashboardPage() {
               </div>
             </div>
             <p className={`text-3xl font-bold ${netWorth >= 0 ? 'text-[var(--accent-success)]' : 'text-[var(--accent-danger)]'}`}>
-              {netWorth < 0 ? '-' : ''}{formatMoney(Math.abs(netWorth), profile?.currency, 2)}
+              {/* #29: Intl renders the minus itself — no hand-rolled sign */}
+              {formatMoney(netWorth, profile?.currency, 2)}
             </p>
             <p className="text-[var(--foreground-muted)] text-sm mt-1">
               Cash − all debt
@@ -521,7 +522,8 @@ export default function DashboardPage() {
               </div>
             </div>
             <p className={`text-3xl font-bold ${budgetRemaining >= 0 ? 'text-[var(--accent-success)]' : 'text-[var(--accent-danger)]'}`}>
-              {formatMoney(Math.abs(budgetRemaining), profile?.currency, 2)}
+              {/* #29: $412 over budget must read "-$412.00", not "$412.00" in red */}
+              {formatMoney(budgetRemaining, profile?.currency, 2)}
             </p>
             {effectiveBudget > 0 && (
               <div className="mt-2">
