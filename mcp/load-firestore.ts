@@ -71,6 +71,8 @@ export function mapTransaction(doc: DocLike): Transaction {
   const d = fields(doc);
   return {
     id: doc.id,
+    // provenance: which ingest paths wrote this row (audit reads it)
+    sources: Array.isArray(d.sources) ? (d.sources as string[]) : undefined,
     title: str(d.title),
     amount: num(d.amount),
     type: oneOf(d.type, ['expense', 'income', 'transfer'] as const, 'expense'),

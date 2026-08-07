@@ -16,6 +16,7 @@
     "deploy": "sh scripts/predeploy.sh && firebase deploy --only hosting",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
+    "audit": "tsx scripts/audit.ts",
     "diag:export": "node scripts/diagnostics/export-trace.mjs",
     "mcp": "tsx mcp/server.ts",
     "test:mcp": "node --import tsx --test mcp/server.check.ts"
