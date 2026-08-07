@@ -18,13 +18,15 @@ import SavingsGoalsPanel from '@/components/SavingsGoalsPanel';
 import PlannedPaymentsPanel from '@/components/PlannedPaymentsPanel';
 import AssumptionsPanel from '@/components/AssumptionsPanel';
 import BillsTab from '@/components/BillsTab';
-import { generateForecast, calculateCurrentCash, generateAccountForecast, getAllAccountForecasts, withDerivedBalances } from '@/lib/forecast';
+import { generateForecast, calculateCurrentCash, getAllAccountForecasts, withDerivedBalances, monthlyAverages } from '@/lib/forecast';
+import CashflowTab from '@/components/CashflowTab';
 import { buildAssumptions, AssumptionOverrides } from '@/lib/behavior';
+import { homeSummary, RESERVE_TARGET_MONTHS } from '@/lib/home';
 import { formatMoney } from '@/lib/money';
 import { loadOverrides, saveOverrides } from '@/lib/assumption-overrides';
 import * as firestoreService from '@/lib/firestore';
 import { format } from 'date-fns';
-import { TrendingUp, AlertTriangle, ArrowRight, Shield, CreditCard, ChevronDown, Wallet, Landmark, Building } from 'lucide-react';
+import { TrendingUp, Shield, CreditCard, Wallet } from 'lucide-react';
 import { SavingsGoal } from '@/types';
 
 // Time period options
@@ -38,7 +40,7 @@ const TIME_PERIODS = [
 export default function ForecastPage() {
   const { isAuthenticated, isLoading: authLoading, user } = useAuth();
   const { transactions } = useTransactions();
-  const { profile, isLoading: profileLoading, isOnboarded, updateProfile, incomeContext } = useUserProfile();
+  const { profile, isLoading: profileLoading, isOnboarded, incomeContext } = useUserProfile();
   const router = useRouter();
   const [forecastDays, setForecastDays] = useState(90);
   const [selectedAccountId, setSelectedAccountId] = useState<string>('all'); // 'all' for combined view
@@ -50,15 +52,16 @@ export default function ForecastPage() {
   // requirement on a fully client-rendered page.
   // Lazy init is hydration-safe here: the auth-loading gate renders a spinner on
   // the first client pass, so the tab bar never hydrates against server markup.
-  const [activeTab, setActiveTab] = useState<'timeline' | 'bills'>(() =>
-    typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).get('tab') === 'bills'
-      ? 'bills'
-      : 'timeline'
+  const [activeTab, setActiveTab] = useState<'timeline' | 'bills' | 'cashflow'>(() =>
+    (() => {
+      if (typeof window === 'undefined') return 'timeline' as const;
+      const t = new URLSearchParams(window.location.search).get('tab');
+      return t === 'bills' || t === 'cashflow' ? t : 'timeline';
+    })()
   );
-  const switchTab = (tab: 'timeline' | 'bills') => {
+  const switchTab = (tab: 'timeline' | 'bills' | 'cashflow') => {
     setActiveTab(tab);
-    window.history.replaceState(null, '', tab === 'bills' ? '/forecast?tab=bills' : '/forecast');
+    window.history.replaceState(null, '', tab === 'timeline' ? '/forecast' : `/forecast?tab=${tab}`);
   };
   
   // Load savings goals from Firestore
@@ -204,10 +207,20 @@ export default function ForecastPage() {
   if (!isAuthenticated || !forecast) return null;
 
   const currentCash = calculateCurrentCash(derivedAccounts);
-  const hasSetup = (profile?.paymentAccounts?.length || 0) > 0 || (profile?.incomeSources?.length || 0) > 0;
   
   // Calculate monthly expenses for emergency fund calculation
-  const monthlyExpenses = forecast.totalExpenses / (forecastDays / 30);
+  // UI-103: the burn rate is the real 6-month average — the old figure divided
+  // the CHART's display range into itself, so Runway changed when you changed
+  // the range or picked an account. One basis, shared with Home (lib/home.ts).
+  const steadyBurn = monthlyAverages(transactions, derivedAccounts, 6, incomeContext).spending;
+  const runway = homeSummary({
+    currentCash,
+    avgMonthlyExpense: steadyBurn,
+    cardsOwed: 0,
+    lockedMonthly: 0,
+    today: new Date(),
+  });
+  const monthlyExpenses = steadyBurn;
 
   return (
     <div className="min-h-screen relative">
@@ -222,7 +235,11 @@ export default function ForecastPage() {
               Cash Flow Forecast
             </h1>
             <p className="text-base text-[var(--foreground-secondary)]">
-              Project your balance for the next {forecastDays >= 365 ? 'year' : forecastDays >= 30 ? `${Math.round(forecastDays / 30)} months` : `${forecastDays} days`}
+              {activeTab === 'bills'
+                ? 'Your recurring bills and targets'
+                : activeTab === 'cashflow'
+                  ? 'Where your income goes, month by month'
+                  : `Project your balance for the next ${forecastDays >= 365 ? 'year' : forecastDays >= 30 ? `${Math.round(forecastDays / 30)} months` : `${forecastDays} days`}`}
             </p>
           </div>
 
@@ -249,7 +266,7 @@ export default function ForecastPage() {
 
         {/* Tab bar: Timeline | Bills (BILLS-001) */}
         <div className="mb-6 flex items-center gap-1.5 p-1.5 bg-[var(--background-secondary)] rounded-lg border border-[var(--border-color)] w-fit">
-          {(['timeline', 'bills'] as const).map(tab => (
+          {(['timeline', 'bills', 'cashflow'] as const).map(tab => (
             <button
               key={tab}
               onClick={() => switchTab(tab)}
@@ -259,66 +276,39 @@ export default function ForecastPage() {
                   : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)]'
               }`}
             >
-              {tab === 'timeline' ? 'Timeline' : 'Bills'}
+              {tab === 'timeline' ? 'Timeline' : tab === 'bills' ? 'Bills' : 'Cashflow'}
             </button>
           ))}
         </div>
 
         {activeTab === 'bills' && user?.id && <BillsTab userId={user.id} />}
 
+        {activeTab === 'cashflow' && <CashflowTab />}
+
         {activeTab === 'timeline' && (<>
-        {/* Account Selector */}
+        {/* UI-103: the chip-per-account row wrapped to 3 lines on a phone —
+            one dropdown, one line (audit wrongControl). */}
         {forecastableAccounts.length > 0 && (
           <div className="mb-6 bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-xl p-4">
-            <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-              <div className="flex items-center gap-2">
-                <Wallet className="w-5 h-5 text-[var(--foreground-muted)]" />
-                <span className="text-sm font-medium text-[var(--foreground)]">View forecast for:</span>
-              </div>
-              
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={() => setSelectedAccountId('all')}
-                  className={`min-h-[44px] px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
-                    selectedAccountId === 'all'
-                      ? 'bg-[var(--accent-primary)] text-[#16181c]'
-                      : 'bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:bg-[var(--background-primary)] border border-[var(--border-color)]'
-                  }`}
-                >
-                  <TrendingUp className="w-4 h-4" />
-                  All Accounts
-                </button>
-                
-                {forecastableAccounts.map(account => {
-                  const acctForecast = accountForecasts.find(af => af.accountId === account.id);
-                  const Icon = account.type === 'credit_card' ? CreditCard : 
-                               account.type === 'bank_account' ? Landmark : Building;
-                  
-                  return (
-                    <button
-                      key={account.id}
-                      onClick={() => setSelectedAccountId(account.id)}
-                      className={`min-h-[44px] px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
-                        selectedAccountId === account.id
-                          ? 'bg-[var(--accent-primary)] text-[#16181c]'
-                          : 'bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:bg-[var(--background-primary)] border border-[var(--border-color)]'
-                      }`}
-                      style={{
-                        borderColor: selectedAccountId === account.id ? undefined : account.color + '40'
-                      }}
-                    >
-                      <Icon className="w-4 h-4" style={{ color: selectedAccountId !== account.id ? account.color : undefined }} />
-                      <span>{account.name}</span>
-                      {account.lastFourDigits && (
-                        <span className="text-xs opacity-60">•{account.lastFourDigits}</span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
+            <div className="flex items-center gap-3">
+              <label htmlFor="account-select" className="text-sm font-medium text-[var(--foreground)] flex items-center gap-2 shrink-0">
+                <Wallet className="w-5 h-5 text-[var(--foreground-muted)]" aria-hidden="true" />
+                Forecast for
+              </label>
+              <select
+                id="account-select"
+                value={selectedAccountId}
+                onChange={(e) => setSelectedAccountId(e.target.value)}
+                className="select-field min-h-[44px] px-3 text-sm flex-1 max-w-xs"
+              >
+                <option value="all">All accounts</option>
+                {forecastableAccounts.map(account => (
+                  <option key={account.id} value={account.id}>
+                    {account.name}{account.lastFourDigits ? ` ···${account.lastFourDigits}` : ''}
+                  </option>
+                ))}
+              </select>
             </div>
-            
-            {/* Credit Card Payment Preview for Checking Accounts */}
             {selectedAccountForecast?.creditCardPayments && selectedAccountForecast.creditCardPayments.length > 0 && (
               <div className="mt-4 pt-4 border-t border-[var(--border-color)]">
                 <p className="text-xs font-medium text-[var(--foreground-muted)] mb-2">
@@ -346,184 +336,119 @@ export default function ForecastPage() {
           </div>
         )}
 
-        {/* Setup Required Banner */}
-        {!hasSetup && (
-          <div className="mb-8 p-6 bg-[var(--accent-primary)]/10 border-2 border-[var(--accent-primary)]/40 rounded-xl shadow-sm">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              <div className="flex items-start gap-4">
-                <div className="w-12 h-12 rounded-xl bg-[var(--accent-primary)]/20 flex items-center justify-center flex-shrink-0">
-                  <AlertTriangle className="w-6 h-6 text-[var(--accent-primary)]" />
-                </div>
-                <div>
-                  <p className="font-bold text-lg text-[var(--foreground)] mb-1">Setup Required</p>
-                  <p className="text-sm text-[var(--foreground-secondary)]">
-                    Add your bank accounts, income sources, and bills to see your forecast.
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => router.push('/onboarding?continue=true')}
-                className="btn-primary flex items-center gap-2 whitespace-nowrap px-5 py-3 shadow-sm"
-              >
-                Complete Setup
-                <ArrowRight className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Essential Numbers - Only what matters for decisions */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          {/* Current Position */}
-          <div className="p-5 bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-xl shadow-sm hover:shadow-md transition-shadow">
+        {/* UI-103: 4 cards → 3. The Runway pair was ONE number as two cards;
+            "Attention: 45d" never said what happens in 45 days. */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+          <div className="p-5 bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-xl">
             <p className="text-xs font-semibold text-[var(--foreground-muted)] uppercase tracking-wide mb-2">
               {selectedAccountId === 'all' ? 'Total Cash Available' : `${selectedAccountForecast?.accountName || 'Account'} Balance`}
             </p>
-            <p className={`text-3xl font-bold ${
-              selectedAccountForecast?.accountType === 'credit_card' ? 'text-red-500' : 'text-emerald-500'
+            <p className={`text-3xl font-bold tnum ${
+              selectedAccountForecast?.accountType === 'credit_card' ? 'text-[var(--money-out)]' : 'text-[var(--money-in)]'
             }`}>
-              {selectedAccountForecast?.accountType === 'credit_card' ? '-' : ''}${(
+              {formatMoney(
                 selectedAccountId === 'all'
                   ? currentCash
-                  : Math.abs(selectedAccountForecast?.currentBalance || 0)
-              ).toLocaleString()}
+                  : (selectedAccountForecast?.accountType === 'credit_card' ? -1 : 1) * Math.abs(selectedAccountForecast?.currentBalance || 0),
+                profile?.currency, 2
+              )}
             </p>
             {selectedAccountForecast?.accountType === 'credit_card' && (
               <p className="text-xs text-[var(--foreground-muted)] mt-1">Balance owed</p>
             )}
           </div>
 
-          {/* Emergency Runway - Days */}
-          <div className="p-5 bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-xl shadow-sm hover:shadow-md transition-shadow">
+          <div className="p-5 bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-xl">
             <div className="flex items-center gap-2 mb-2">
-              <Shield className="w-4 h-4 text-[var(--foreground-muted)]" />
-              <p className="text-xs font-semibold text-[var(--foreground-muted)] uppercase tracking-wide">Runway (Days)</p>
+              <Shield className="w-4 h-4 text-[var(--foreground-muted)]" aria-hidden="true" />
+              <p className="text-xs font-semibold text-[var(--foreground-muted)] uppercase tracking-wide">Money lasts</p>
             </div>
-            {(() => {
-              const dailyExpense = monthlyExpenses / 30;
-              const days = dailyExpense > 0 ? Math.floor(currentCash / dailyExpense) : 999;
-              return (
-                <p className={`text-3xl font-bold ${
-                  days < 30 ? 'text-red-500' : days < 90 ? 'text-amber-500' : 'text-emerald-500'
-                }`}>
-                  {days > 365 ? '365+' : days}
-                </p>
-              );
-            })()}
-          </div>
-
-          {/* Emergency Runway - Months */}
-          <div className="p-5 bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-xl shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center gap-2 mb-2">
-              <Shield className="w-4 h-4 text-[var(--foreground-muted)]" />
-              <p className="text-xs font-semibold text-[var(--foreground-muted)] uppercase tracking-wide">Runway (Months)</p>
-            </div>
-            {(() => {
-              const months = monthlyExpenses > 0 ? currentCash / monthlyExpenses : 99;
-              return (
-                <>
-                  <p className={`text-3xl font-bold ${
-                    months < 1 ? 'text-red-500' : months < 3 ? 'text-amber-500' : 'text-emerald-500'
-                  }`}>
-                    {months > 12 ? '12+' : months.toFixed(1)}
-                  </p>
-                  <p className="text-xs text-[var(--foreground-muted)] mt-1 font-medium">Goal: 3-6 months</p>
-                </>
-              );
-            })()}
-          </div>
-
-          {/* Critical Warning or All Clear */}
-          <div className={`p-5 rounded-xl border shadow-sm hover:shadow-md transition-shadow ${
-            forecast.daysUntilUnsafe !== null
-              ? 'bg-amber-500/10 border-amber-500/40'
-              : 'bg-emerald-500/10 border-emerald-500/40'
-          }`}>
-            <p className="text-xs font-semibold text-[var(--foreground-muted)] uppercase tracking-wide mb-2">
-              {forecast.daysUntilUnsafe !== null ? 'Attention' : 'Status'}
+            <p className="text-3xl font-bold tnum text-[var(--foreground)]">
+              {runway.runwayMonths} mo
             </p>
+            <p className="text-xs text-[var(--foreground-muted)] mt-1 tnum">
+              to {format(runway.runwayDate, 'MMM d, yyyy')} · goal {RESERVE_TARGET_MONTHS} months
+            </p>
+          </div>
+
+          <div className={`p-5 rounded-xl border ${
+            forecast.daysUntilUnsafe !== null
+              ? 'bg-[var(--progress)]/10 border-[var(--progress)]/40'
+              : 'bg-[var(--money-in)]/10 border-[var(--money-in)]/40'
+          }`}>
+            <p className="text-xs font-semibold text-[var(--foreground-muted)] uppercase tracking-wide mb-2">Heads-up</p>
             {forecast.daysUntilUnsafe !== null ? (
               <div>
-                <p className="text-3xl font-bold text-amber-500">
-                  {forecast.daysUntilUnsafe}d
+                <p className="text-xl font-bold text-[var(--foreground)] tnum">
+                  Cash dips below {formatMoney(profile?.settings?.safetyThreshold || 500, profile?.currency, 0)} in {forecast.daysUntilUnsafe} days
                 </p>
-                <p className="text-xs text-[var(--foreground-muted)] mt-1">
+                <p className="text-xs text-[var(--foreground-muted)] mt-1 tnum">
                   {formatMoney(forecast.lowestBalance, profile?.currency, 2)} on {format(new Date(forecast.lowestBalanceDate), 'MMM d')}
                 </p>
               </div>
             ) : (
-              <p className="text-3xl font-bold text-emerald-500">
-                All Clear
-              </p>
+              <p className="text-3xl font-bold text-[var(--money-in)]">All clear</p>
             )}
           </div>
         </div>
 
-        {/* Main Content Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Column - Chart, Timeline, and AI Insights */}
-          <div className="lg:col-span-2 space-y-6">
-            <AssumptionsPanel assumptions={assumptions} onOverridesChange={handleOverridesChange} />
-            <ForecastChart forecast={forecast} />
-            <ForecastTimeline forecast={forecast} />
-            <AIInsightsPanel
-              transactions={transactions}
-              accounts={derivedAccounts}
-              incomeSources={profile?.incomeSources || []}
-              currentCash={currentCash}
-              safetyThreshold={profile?.settings?.safetyThreshold || 500}
-            />
-          </div>
+        {/* UI-103: the chart and timeline ARE the screen; the nine helper
+            panels collapse into one disclosure — reachable, never shouting.
+            (They stacked 13 deep on a phone before.) */}
+        <div className="space-y-6">
+          <ForecastChart forecast={forecast} />
+          <ForecastTimeline forecast={forecast} />
 
-          {/* Right Column - Decision Tools */}
-          <div className="space-y-6">
-            {/* Decision Check */}
-            <DecisionCheckPanel forecast={forecast} />
-            
-            {/* Budget Status (only if budgets are set) */}
-            {profile?.settings?.categoryBudgets && profile.settings.categoryBudgets.length > 0 && (
-              <BudgetStatusPanel
-                budgets={profile.settings.categoryBudgets}
+          <details className="glass-card p-5">
+            <summary className="cursor-pointer list-none font-semibold text-[var(--foreground)] flex items-center justify-between min-h-[44px]">
+              <span>More tools</span>
+              <span className="text-sm font-normal text-[var(--foreground-secondary)]">assumptions · insights · budgets · goals · plans</span>
+            </summary>
+            <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+              <AssumptionsPanel assumptions={assumptions} onOverridesChange={handleOverridesChange} />
+              <DecisionCheckPanel forecast={forecast} />
+              <AIInsightsPanel
                 transactions={transactions}
-                accounts={profile?.paymentAccounts}
+                accounts={derivedAccounts}
+                incomeSources={profile?.incomeSources || []}
+                currentCash={currentCash}
+                safetyThreshold={profile?.settings?.safetyThreshold || 500}
+              />
+              {profile?.settings?.categoryBudgets && profile.settings.categoryBudgets.length > 0 && (
+                <BudgetStatusPanel
+                  budgets={profile.settings.categoryBudgets}
+                  transactions={transactions}
+                  accounts={profile?.paymentAccounts}
+                  compact={true}
+                />
+              )}
+              <UpcomingBillsPanel
+                accounts={derivedAccounts}
+                transactions={transactions}
+                preferences={profile?.settings?.notificationPreferences}
                 compact={true}
               />
-            )}
-            
-            {/* Upcoming Bills */}
-            <UpcomingBillsPanel
-              accounts={derivedAccounts}
-              transactions={transactions}
-              preferences={profile?.settings?.notificationPreferences}
-              compact={true}
-            />
-            
-            {/* Savings Goals */}
-            <SavingsGoalsPanel
-              goals={savingsGoals}
-              accounts={derivedAccounts}
-              forecast={forecast}
-              safetyThreshold={profile?.settings?.safetyThreshold || 500}
-              onAddGoal={handleAddGoal}
-              onUpdateGoal={handleUpdateGoal}
-              onDeleteGoal={handleDeleteGoal}
-              compact={true}
-            />
-            
-            {/* Planned Payments (Financial Todos) */}
-            <PlannedPaymentsPanel />
-            
-            {/* Emergency Fund */}
-            <EmergencyFundPanel 
-              forecast={forecast} 
-              monthlyExpenses={monthlyExpenses} 
-              currentCash={currentCash} 
-            />
-            
-            {/* AI Q&A */}
-            <AIQuestionPanel forecast={forecast} />
-          </div>
+              <SavingsGoalsPanel
+                goals={savingsGoals}
+                accounts={derivedAccounts}
+                forecast={forecast}
+                safetyThreshold={profile?.settings?.safetyThreshold || 500}
+                onAddGoal={handleAddGoal}
+                onUpdateGoal={handleUpdateGoal}
+                onDeleteGoal={handleDeleteGoal}
+                compact={true}
+              />
+              <PlannedPaymentsPanel />
+              <EmergencyFundPanel
+                forecast={forecast}
+                monthlyExpenses={monthlyExpenses}
+                currentCash={currentCash}
+              />
+              <AIQuestionPanel forecast={forecast} />
+            </div>
+          </details>
         </div>
+
         </>)}
       </main>
     </div>
