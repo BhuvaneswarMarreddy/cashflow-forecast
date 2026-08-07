@@ -23,15 +23,18 @@ import ClientLayout from "@/components/ClientLayout";
 export const metadata: Metadata = {
   title: "CashFlow Forecast - Personal Finance Management",
   description: "Track your expenses, forecast cash flow, manage budgets, and plan for financial goals. Supports US and Indian currencies.",
+  // Every entry here is emitted by `node scripts/gen-icons.mjs` from one palette.
+  // The previous list was hand-maintained with `?v=3` cache-busters, went stale,
+  // and — because an explicit list overrides Next's file convention — quietly
+  // suppressed src/app/icon.svg for five releases while the tab kept painting
+  // white-cornered PNGs. Nothing in this list is hand-drawn; regenerate instead.
   icons: {
     icon: [
-      { url: "/favicons/favicon-16x16.png?v=3", sizes: "16x16", type: "image/png" },
-      { url: "/favicons/favicon-32x32.png?v=3", sizes: "32x32", type: "image/png" },
-      { url: "/favicons/favicon-48x48.png?v=3", sizes: "48x48", type: "image/png" },
-      { url: "/favicons/favicon-64x64.png?v=3", sizes: "64x64", type: "image/png" },
+      { url: "/icon.svg", type: "image/svg+xml" }, // theme-aware, preferred
     ],
+    shortcut: [{ url: "/favicon.ico" }], // raster fallback (Safari, bookmarks)
     apple: [
-      { url: "/logos/icon-512x512.png?v=3", sizes: "512x512", type: "image/png" },
+      { url: "/logos/icon-512x512.png", sizes: "512x512", type: "image/png" },
     ],
   },
   manifest: "/manifest.json",
@@ -45,8 +48,8 @@ export const viewport: Viewport = {
   initialScale: 1,
   viewportFit: "cover",
   themeColor: [
-    { media: "(prefers-color-scheme: dark)", color: "#14161a" },
-    { media: "(prefers-color-scheme: light)", color: "#f6f3ec" },
+    { media: "(prefers-color-scheme: dark)", color: "#101014" }, // Midnight ground
+    { media: "(prefers-color-scheme: light)", color: "#FAF7EF" }, // Paper ground
   ],
 };
 
