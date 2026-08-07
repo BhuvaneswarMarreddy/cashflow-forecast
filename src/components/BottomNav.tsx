@@ -25,7 +25,7 @@ export default function BottomNav() {
               <Link
                 href={href}
                 aria-current={active ? 'page' : undefined}
-                className={`flex flex-col items-center justify-center gap-0.5 min-h-[56px] text-[10px] font-medium transition-colors ${
+                className={`flex flex-col items-center justify-center gap-1 min-h-[56px] text-[10px] font-medium transition-colors ${
                   active
                     ? 'text-[var(--accent-primary)]'
                     : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'

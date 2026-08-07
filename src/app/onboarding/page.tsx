@@ -651,7 +651,7 @@ function OnboardingContent() {
               <button
                 onClick={handleConfirmedDelete}
                 disabled={isDeleting}
-                className="flex-1 px-4 py-2.5 rounded-card bg-[var(--accent-danger)] text-white font-medium hover:bg-[var(--accent-danger)]/90 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                className="flex-1 px-4 py-3 rounded-card bg-[var(--accent-danger)] text-white font-medium hover:bg-[var(--accent-danger)]/90 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 {isDeleting ? (
                   <>
@@ -749,7 +749,7 @@ function OnboardingContent() {
 
                 {connectedBanks.length > 0 && (
                   <div className="mt-4 text-left">
-                    <ul className="space-y-1.5 mb-4">
+                    <ul className="space-y-2 mb-4">
                       {connectedBanks.map((bank, i) => (
                         <li key={`${bank}-${i}`} className="flex items-center gap-2 text-sm text-[var(--foreground)]">
                           <Check className="w-4 h-4 text-[var(--accent-success)]" aria-hidden="true" />

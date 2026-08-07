@@ -23,7 +23,7 @@ export default function QuickAddFAB() {
       <button
         onClick={() => setShowAddModal(true)}
         aria-label="Add transaction"
-        className="fixed bottom-24 md:bottom-6 right-6 z-50 w-14 h-14 rounded-pill flex items-center justify-center shadow-lg bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] shadow-[var(--accent-primary)]/30 transition-transform hover:scale-105"
+        className="fixed bottom-20 md:bottom-6 right-4 md:right-6 z-50 w-14 h-14 rounded-pill flex items-center justify-center shadow-lg bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] shadow-[var(--accent-primary)]/30 transition-transform hover:scale-105"
       >
         <Plus className="w-7 h-7 text-[#16181c]" aria-hidden="true" />
       </button>

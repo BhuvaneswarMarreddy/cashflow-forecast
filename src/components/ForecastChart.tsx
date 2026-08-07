@@ -90,7 +90,7 @@ export default function ForecastChart({ forecast }: ForecastChartProps) {
           <h3 className="text-xl font-bold text-[var(--foreground)] mb-1">Cash Flow Projection</h3>
           <p className="text-sm text-[var(--foreground-muted)]">Track your balance over time</p>
         </div>
-        <div className="flex flex-wrap items-center gap-3 text-sm bg-[var(--background-tertiary)] px-4 py-2.5 rounded-control border border-[var(--border-color)]">
+        <div className="flex flex-wrap items-center gap-3 text-sm bg-[var(--background-tertiary)] px-4 py-3 rounded-control border border-[var(--border-color)]">
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-pill bg-[#c9a24e] shadow-sm" />
             <span className="text-[var(--foreground)] font-medium">Balance</span>
@@ -131,7 +131,7 @@ export default function ForecastChart({ forecast }: ForecastChartProps) {
       {/* Warning if below safety */}
       {forecast.daysUntilUnsafe !== null && (
         <div className="mb-6 p-4 rounded-control bg-amber-500/10 border-2 border-amber-500/40 flex items-start gap-3">
-          <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+          <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-1" />
           <div>
             <p className="text-sm font-semibold text-amber-200 mb-1">Low Balance Alert</p>
             <p className="text-sm text-amber-200/90">

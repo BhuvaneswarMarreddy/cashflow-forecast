@@ -108,7 +108,7 @@ export default function AssumptionsPanel({ assumptions, onOverridesChange }: {
         </div>
         <div className="flex-1 min-w-0">
           <h3 className="text-xl font-bold text-[var(--foreground)]">What this forecast believes</h3>
-          <p className="text-sm text-[var(--foreground-muted)] mt-0.5">
+          <p className="text-sm text-[var(--foreground-muted)] mt-1">
             Detected from your transactions — correct anything that looks wrong
           </p>
         </div>

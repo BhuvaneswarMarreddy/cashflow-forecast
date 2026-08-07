@@ -100,7 +100,7 @@ export default function AccountDetailModal({ account, transactions, onClose }: {
               <button
                 key={r.key}
                 onClick={() => setRange(r.key)}
-                className={`px-3 py-1.5 rounded-control text-sm ${range === r.key ? 'bg-[var(--accent-primary)] text-[#16181c]' : 'text-[var(--foreground-secondary)]'}`}
+                className={`px-3 py-2 rounded-control text-sm ${range === r.key ? 'bg-[var(--accent-primary)] text-[#16181c]' : 'text-[var(--foreground-secondary)]'}`}
               >
                 {r.label}
               </button>

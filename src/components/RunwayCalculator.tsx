@@ -515,7 +515,7 @@ export default function RunwayCalculator({
         {/* Motivational Message */}
         <div className="mt-6 p-4 rounded-card bg-gradient-to-r from-emerald-500/10 to-[var(--accent-primary)]/10 border border-emerald-500/30">
           <div className="flex items-start gap-3">
-            <Target className="w-5 h-5 text-emerald-500 mt-0.5 flex-shrink-0" />
+            <Target className="w-5 h-5 text-emerald-500 mt-1 flex-shrink-0" />
             <div>
               <p className="font-medium text-[var(--foreground)] mb-1">You have options</p>
               <p className="text-sm text-[var(--foreground-secondary)]">

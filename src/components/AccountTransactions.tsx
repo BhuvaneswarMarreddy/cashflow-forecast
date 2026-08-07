@@ -226,7 +226,7 @@ export default function AccountTransactions({ account, transactions }: AccountTr
                         <p className="font-medium text-[var(--foreground)]">{txn.title}</p>
                         {txn.merchant && (
                           <span 
-                            className="text-xs px-2 py-0.5 rounded-pill text-white hidden sm:inline"
+                            className="text-xs px-2 py-1 rounded-pill text-white hidden sm:inline"
                             style={{ backgroundColor: merchantColor || undefined }}
                           >
                             {txn.merchant}

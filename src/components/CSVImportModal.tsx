@@ -939,7 +939,7 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
                         {csvName !== '' && (
                           <button
                             onClick={() => choose(CREATE_ACCOUNT)}
-                            className={`px-3 py-2 rounded-control text-sm font-medium transition-all flex items-center gap-1.5 ${
+                            className={`px-3 py-2 rounded-control text-sm font-medium transition-all flex items-center gap-2 ${
                               isCreating
                                 ? 'bg-[var(--accent-primary)] text-[#16181c]'
                                 : 'bg-[var(--background-secondary)] text-[var(--foreground-secondary)] border border-[var(--border-color)]'
@@ -989,7 +989,7 @@ export default function CSVImportModal({ isOpen, onClose }: CSVImportModalProps)
                               <button
                                 key={t}
                                 onClick={() => setCreateTypes((m) => ({ ...m, [csvName]: t }))}
-                                className={`px-2.5 py-1 rounded-control text-xs font-medium flex items-center gap-1.5 transition-all ${
+                                className={`px-3 py-1 rounded-control text-xs font-medium flex items-center gap-2 transition-all ${
                                   createType === t
                                     ? 'bg-[var(--accent-primary)] text-[#16181c]'
                                     : 'bg-[var(--background-secondary)] text-[var(--foreground-secondary)] border border-[var(--border-color)]'

@@ -17,7 +17,7 @@ const TONE: Record<RelationBadge['tone'], string> = {
 
 export default function TransactionRelationBadge({ badge }: { badge: RelationBadge }) {
   return (
-    <span className={`inline-flex items-center gap-1 rounded-pill border px-2 py-0.5 text-xs ${TONE[badge.tone]}`}>
+    <span className={`inline-flex items-center gap-1 rounded-pill border px-2 py-1 text-xs ${TONE[badge.tone]}`}>
       <span aria-hidden="true">{badge.icon}</span>
       {badge.text}
     </span>

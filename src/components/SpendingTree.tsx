@@ -87,7 +87,7 @@ export default function SpendingTree(props: {
   const max = branches[0]?.cents ?? 1;
 
   const txnRow = (t: Transaction) => (
-    <div key={t.id} className="flex items-baseline gap-3 py-1.5 pl-2 border-b border-[var(--border-color)]/50 last:border-0">
+    <div key={t.id} className="flex items-baseline gap-3 py-2 pl-2 border-b border-[var(--border-color)]/50 last:border-0">
       <span className="text-xs text-[var(--foreground-muted)] tabular-nums shrink-0">{day(t.date)}</span>
       <span className="text-sm text-[var(--foreground-secondary)] truncate flex-1 min-w-0">{(t.merchant || t.title).trim()}</span>
       <span className="text-sm font-medium tabular-nums">{money(toCents(t.amount))}</span>
@@ -110,7 +110,7 @@ export default function SpendingTree(props: {
       </p>
       {branches.map((b) => (
         <details key={b.label} className="rounded-card border border-[var(--border-color)] bg-[var(--background-secondary)] open:bg-[var(--background-tertiary)]/40">
-          <summary className="flex items-center gap-3 px-3 py-2.5 cursor-pointer list-none [&::-webkit-details-marker]:hidden rounded-card hover:bg-[var(--background-tertiary)]">
+          <summary className="flex items-center gap-3 px-3 py-3 cursor-pointer list-none [&::-webkit-details-marker]:hidden rounded-card hover:bg-[var(--background-tertiary)]">
             <span className="text-[var(--foreground-muted)] text-xs select-none">▸</span>
             <span className="flex-1 min-w-0">
               <span className="flex items-baseline justify-between gap-3">
@@ -135,7 +135,7 @@ export default function SpendingTree(props: {
                 txnRow(m.txns[0])
               ) : (
                 <details key={m.label} className="ml-1">
-                  <summary className="flex items-baseline gap-3 py-1.5 cursor-pointer list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--background-tertiary)] rounded-control px-2">
+                  <summary className="flex items-baseline gap-3 py-2 cursor-pointer list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--background-tertiary)] rounded-control px-2">
                     <span className="text-[var(--foreground-muted)] text-xs select-none">▸</span>
                     <span className="text-sm truncate flex-1 min-w-0">{m.label}</span>
                     <span className="text-xs text-[var(--foreground-muted)]">{m.txns.length}×</span>
