@@ -113,7 +113,7 @@ describe('FIN-RECOVERY-UI-001 · Flow, badges and analytics (A1-A6)', () => {
 
     // The existing trace machinery is what lights up: the page's own pin chip, on the
     // node these rows already sit behind.
-    await waitFor(() => expect(screen.getByTitle('Click to clear')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTitle('Tap to clear')).toBeInTheDocument());
     // …and the graph itself is untouched.
     expect(screen.getByText(/View the flow as a table \(\d+ flows\)/).textContent).toBe(countBefore);
   });
