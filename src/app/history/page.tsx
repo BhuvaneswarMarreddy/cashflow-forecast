@@ -13,6 +13,8 @@ import RunwayCalculator from '@/components/RunwayCalculator';
 import { generateForecast, calculateCurrentCash, monthlyAverages, withDerivedBalances } from '@/lib/forecast';
 import { classifyTransaction, isPositive, isReward, sumExpenseCents, sumIncomeCents } from '@/lib/classify';
 import { pairedLegId } from '@/lib/transfers';
+import { executePairedDelete, PairedDeleteChoice } from '@/lib/paired-delete';
+import Sheet from '@/components/Sheet';
 import { EXPENSE_CATEGORIES, Transaction, TransactionType, getMerchantColor, displayCategory } from '@/types';
 import {
   TrendingUp,
@@ -69,6 +71,8 @@ export default function HistoryPage() {
   const [groupBy, setGroupBy] = useState<GroupBy>('month');
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  // #28: a paired row awaiting the three-way delete choice (nothing deletes until chosen).
+  const [pairedDelete, setPairedDelete] = useState<{ id: string; other: string } | null>(null);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   // Mobile-only: filters collapse behind a "Filters (n)" toggle; desktop always shows them
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -293,17 +297,24 @@ export default function HistoryPage() {
   }, [profile, transactions]);
 
   const handleDelete = async (id: string) => {
-    // A card payment / internal move is TWO paired legs. Deleting only one desyncs the
-    // two derived balances, so offer to delete both.
+    // A card payment / internal move is TWO paired halves. Deleting only one desyncs
+    // the two derived balances — but window.confirm can only say OK/Cancel, and Cancel
+    // means ABORT everywhere else in the OS; the old dialog deleted on Cancel too and
+    // users lost rows (#28). Paired rows now get a real three-choice sheet.
     const other = pairedLegId(id, transactions, profile?.paymentAccounts || []);
     if (other) {
-      const both = window.confirm(
-        'This is one leg of a transfer between your accounts. Delete BOTH legs?\n\nOK = delete both · Cancel = delete only this one (balances may drift until you reconcile).'
-      );
-      if (both) await deleteTransaction(other);
+      setPairedDelete({ id, other });
+      setDeleteConfirm(null);
+      return; // nothing is deleted until a choice is made in the sheet
     }
     await deleteTransaction(id);
     setDeleteConfirm(null);
+  };
+
+  const handlePairedChoice = async (choice: PairedDeleteChoice) => {
+    if (!pairedDelete) return;
+    await executePairedDelete(choice, pairedDelete.id, pairedDelete.other, deleteTransaction);
+    setPairedDelete(null);
   };
 
   if (authLoading || profileLoading) {
@@ -835,8 +846,44 @@ export default function HistoryPage() {
         )}
       </main>
 
-      <AddTransactionModal 
-        isOpen={isAddModalOpen} 
+      {/* #28: three-way paired delete — Keep both is a true abort */}
+      <Sheet
+        open={pairedDelete !== null}
+        onClose={() => setPairedDelete(null)}
+        ariaLabel="Delete a paired transfer"
+        className="p-6"
+      >
+        <h3 className="text-lg font-semibold text-[var(--foreground)] mb-2">
+          This payment is half of a transfer
+        </h3>
+        <p className="text-sm text-[var(--foreground-secondary)] mb-5">
+          It has a matching entry in the other account. Deleting only one half can make
+          the two account balances stop matching your bank.
+        </p>
+        <div className="flex flex-col gap-2">
+          <button
+            onClick={() => handlePairedChoice('both')}
+            className="btn-primary min-h-[44px] px-4 rounded-lg font-semibold"
+          >
+            Delete both halves
+          </button>
+          <button
+            onClick={() => handlePairedChoice('one')}
+            className="btn-secondary min-h-[44px] px-4 rounded-lg font-medium"
+          >
+            Delete only this one
+          </button>
+          <button
+            onClick={() => setPairedDelete(null)}
+            className="min-h-[44px] px-4 rounded-lg font-medium text-[var(--foreground-secondary)] hover:text-[var(--foreground)]"
+          >
+            Keep both
+          </button>
+        </div>
+      </Sheet>
+
+      <AddTransactionModal
+        isOpen={isAddModalOpen}
         onClose={() => {
           setIsAddModalOpen(false);
           setEditingTransaction(null);
