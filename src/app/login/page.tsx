@@ -69,7 +69,7 @@ export default function LoginPage() {
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-pulse-glow w-16 h-16 rounded-2xl bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] flex items-center justify-center">
+        <div className="animate-pulse-glow w-16 h-16 rounded-card bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] flex items-center justify-center">
           <TrendingUp className="w-8 h-8 text-white" />
         </div>
       </div>
@@ -84,7 +84,7 @@ export default function LoginPage() {
       <div className="w-full max-w-md relative z-10">
         {/* Logo */}
         <div className="text-center mb-8 animate-fade-in-up">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] mb-4 animate-float">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-card bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] mb-4 animate-float">
             <TrendingUp className="w-8 h-8 text-white" />
           </div>
           <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-[var(--accent-primary)] to-[var(--accent-secondary)]">
@@ -102,7 +102,7 @@ export default function LoginPage() {
           </h2>
 
           {error && (
-            <div role="alert" className="mb-6 p-4 rounded-xl bg-[var(--accent-danger)]/10 border border-[var(--accent-danger)]/30 text-[var(--accent-danger)] text-sm">
+            <div role="alert" className="mb-6 p-4 rounded-card bg-[var(--accent-danger)]/10 border border-[var(--accent-danger)]/30 text-[var(--accent-danger)] text-sm">
               {error}
             </div>
           )}
@@ -112,10 +112,10 @@ export default function LoginPage() {
             type="button"
             onClick={handleGoogleSignIn}
             disabled={isGoogleLoading || isSubmitting}
-            className="w-full flex items-center justify-center gap-3 py-3.5 px-4 rounded-xl bg-white text-gray-800 font-medium hover:bg-gray-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed mb-6 border border-gray-200 shadow-sm"
+            className="w-full flex items-center justify-center gap-3 py-3.5 px-4 rounded-card bg-white text-gray-800 font-medium hover:bg-gray-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed mb-6 border border-gray-200 shadow-sm"
           >
             {isGoogleLoading ? (
-              <div className="w-5 h-5 border-2 border-gray-300 border-t-gray-800 rounded-full animate-spin" />
+              <div className="w-5 h-5 border-2 border-gray-300 border-t-gray-800 rounded-pill animate-spin" />
             ) : (
               <GoogleIcon />
             )}

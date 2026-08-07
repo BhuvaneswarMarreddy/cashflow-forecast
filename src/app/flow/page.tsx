@@ -121,7 +121,7 @@ function SankeyTooltip({ active, payload }: { active?: boolean; payload?: Array<
     cents?: number; grossForwardCents?: number; grossReverseCents?: number; label?: string;
   };
   return (
-    <div className="rounded-lg border border-[var(--border-color)] bg-[var(--background-secondary)] px-3 py-2 text-sm shadow-lg">
+    <div className="rounded-control border border-[var(--border-color)] bg-[var(--background-secondary)] px-3 py-2 text-sm shadow-lg">
       {p?.source && p?.target ? (
         <>
           <p className="font-medium">{p.source.label} → {p.target.label}</p>
@@ -515,13 +515,13 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
 
   const rangeButtons = (
     <div className="flex items-center gap-2 flex-wrap">
-      <div role="group" aria-label="Time range" className="flex gap-1 rounded-lg bg-[var(--background-tertiary)] p-1 flex-wrap">
+      <div role="group" aria-label="Time range" className="flex gap-1 rounded-control bg-[var(--background-tertiary)] p-1 flex-wrap">
         {RANGES.map((r) => (
           <button
             key={r.key}
             onClick={() => setRange(r.key)}
             aria-pressed={range === r.key}
-            className={`px-3 py-1.5 rounded-md text-sm transition-colors ${range === r.key
+            className={`px-3 py-1.5 rounded-control text-sm transition-colors ${range === r.key
               ? 'bg-[var(--accent-primary)] text-[#16181c]'
               : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'}`}
           >
@@ -534,7 +534,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
           value={effectiveYear}
           onChange={(e) => setYear(e.target.value)}
           aria-label="Choose year"
-          className="px-3 py-1.5 text-sm font-medium rounded-lg bg-[var(--background-tertiary)] text-[var(--foreground)] focus:outline-none cursor-pointer"
+          className="px-3 py-1.5 text-sm font-medium rounded-control bg-[var(--background-tertiary)] text-[var(--foreground)] focus:outline-none cursor-pointer"
         >
           {yearOptions.map((y) => (
             <option key={y} value={y} className="bg-[var(--background-secondary)] text-[var(--foreground)]">{y}</option>
@@ -542,7 +542,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
         </select>
       )}
       {range === 'month' && (
-        <div className="flex items-center gap-1 rounded-lg bg-[var(--background-tertiary)] p-1">
+        <div className="flex items-center gap-1 rounded-control bg-[var(--background-tertiary)] p-1">
           <select
             value={month}
             onChange={(e) => setMonth(e.target.value)}
@@ -672,7 +672,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
       {effectivePin && (
         <button
           onClick={() => setPinLabel(null)}
-          className="min-h-[44px] px-3 rounded-full text-sm bg-[var(--background-tertiary)] text-[var(--foreground)]"
+          className="min-h-[44px] px-3 rounded-pill text-sm bg-[var(--background-tertiary)] text-[var(--foreground)]"
           title="Tap to clear"
         >
           📌 {effectivePin} ✕
@@ -693,7 +693,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
     <button
       onClick={() => setShowGross((g) => !g)}
       aria-pressed={showGross}
-      className="px-2.5 py-1 rounded-full text-xs border border-[var(--border-color)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]"
+      className="px-2.5 py-1 rounded-pill text-xs border border-[var(--border-color)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]"
       title="Confirmed refunds reduce the category they reverse. Switch to gross to see every dollar exactly as it moved."
     >
       {showGross ? 'Showing gross' : 'Show gross'}
@@ -703,13 +703,13 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
   // FIN-FLOW-002: Simple regroups the same graph into the four-step story; Detailed
   // is every lane the classifier knows. The choice sticks (localStorage).
   const detailToggle = (
-    <div role="group" aria-label="Detail level" className="flex gap-1 rounded-lg bg-[var(--background-tertiary)] p-1">
+    <div role="group" aria-label="Detail level" className="flex gap-1 rounded-control bg-[var(--background-tertiary)] p-1">
       {([[true, 'Simple'], [false, 'Detailed']] as const).map(([simple, label]) => (
         <button
           key={label}
           onClick={() => chooseView(simple)}
           aria-pressed={simpleView === simple}
-          className={`px-3 py-1.5 rounded-md text-sm transition-colors ${simpleView === simple
+          className={`px-3 py-1.5 rounded-control text-sm transition-colors ${simpleView === simple
             ? 'bg-[var(--accent-primary)] text-[#16181c]'
             : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'}`}
         >
@@ -729,7 +729,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
         window.localStorage.setItem('flow-chart-kind', key);
       }}
       aria-label="Chart type"
-      className="px-3 py-1.5 text-sm font-medium rounded-lg bg-[var(--background-tertiary)] text-[var(--foreground)] focus:outline-none cursor-pointer"
+      className="px-3 py-1.5 text-sm font-medium rounded-control bg-[var(--background-tertiary)] text-[var(--foreground)] focus:outline-none cursor-pointer"
     >
       {CHART_KINDS.map((c) => (
         <option key={c.key} value={c.key} className="bg-[var(--background-secondary)] text-[var(--foreground)]">
@@ -1420,7 +1420,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
             },
             { label: gapTotal > 0 ? '⚠ Not yet in the data' : 'Data complete', cents: gapTotal, sub: gapTotal > 0 ? 'older than your bank feeds reach' : 'every dollar accounted for' },
           ].map((t) => (
-            <div key={t.label} className="rounded-xl border border-[var(--border-color)] bg-[var(--background-secondary)] p-4">
+            <div key={t.label} className="rounded-card border border-[var(--border-color)] bg-[var(--background-secondary)] p-4">
               <p className="text-xs text-[var(--foreground-muted)]">{t.label}</p>
               <p className={`text-xl font-bold mt-1 ${t.label.startsWith('⚠') ? 'text-[var(--accent-danger)]' : 'text-[var(--foreground)]'}`}>
                 {money(t.cents)}
@@ -1443,7 +1443,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
                 <button
                   onClick={() => openReview(null)}
                   aria-label={queueBadgeLabel(counts.total)}
-                  className="min-h-[44px] px-3 py-2 rounded-full text-sm bg-[var(--accent-primary)] text-[#16181c]"
+                  className="min-h-[44px] px-3 py-2 rounded-pill text-sm bg-[var(--accent-primary)] text-[#16181c]"
                 >
                   Needs Review · {counts.total}
                 </button>
@@ -1452,7 +1452,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
                     <button
                       key={s.id}
                       onClick={() => openReview(s.id)}
-                      className="min-h-[44px] px-3 py-2 rounded-full text-sm border border-[var(--border-color)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]"
+                      className="min-h-[44px] px-3 py-2 rounded-pill text-sm border border-[var(--border-color)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]"
                     >
                       {s.chipLabel} · {counts.bySection[s.id]}
                     </button>
@@ -1466,11 +1466,11 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
         <div className="lg:flex lg:items-start lg:gap-4">
         <div className="flex-1 min-w-0 space-y-10">
         {sankeyData.links.length === 0 ? (
-          <div className="rounded-xl border border-[var(--border-color)] p-10 text-center text-[var(--foreground-muted)]">
+          <div className="rounded-card border border-[var(--border-color)] p-10 text-center text-[var(--foreground-muted)]">
             No transactions in this period.
           </div>
         ) : (
-          <section className="rounded-xl border border-[var(--border-color)] bg-[var(--background-secondary)] p-4 relative">
+          <section className="rounded-card border border-[var(--border-color)] bg-[var(--background-secondary)] p-4 relative">
             <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
               <div className="flex items-center gap-2 flex-wrap">
                 {chartToggle}
@@ -1480,7 +1480,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
               </div>
               <button
                 onClick={() => setMaximized(true)}
-                className="p-2 rounded-lg text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)]"
+                className="p-2 rounded-control text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)]"
                 title="Maximize"
                 aria-label="Maximize chart"
               >
@@ -1512,7 +1512,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
             <button
               onClick={() => setShowChartMobile(v => !v)}
               aria-expanded={showChartMobile}
-              className="sm:hidden w-full min-h-[44px] mb-2 px-3 rounded-lg bg-[var(--background-tertiary)] text-sm font-medium text-[var(--foreground-secondary)]"
+              className="sm:hidden w-full min-h-[44px] mb-2 px-3 rounded-control bg-[var(--background-tertiary)] text-sm font-medium text-[var(--foreground-secondary)]"
             >
               {showChartMobile ? 'Hide the diagram' : 'Show the diagram'}
             </button>
@@ -1533,7 +1533,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
 
             {/* Drill-down: the actual transactions behind the pinned node */}
             {pinnedTxns && pinnedTxns.length > 0 && (
-              <div className="mt-3 rounded-xl border border-[var(--accent-primary)]/40 overflow-hidden">
+              <div className="mt-3 rounded-card border border-[var(--accent-primary)]/40 overflow-hidden">
                 <div className="px-3 py-2 bg-[var(--background-tertiary)] flex items-center gap-3 flex-wrap">
                   <span className="text-sm font-medium text-[var(--foreground)] flex-1 min-w-0">
                     {pinnedTxns.length} transaction{pinnedTxns.length > 1 ? 's' : ''} behind “{effectivePin}”
@@ -1544,7 +1544,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
                   <button
                     type="button"
                     onClick={() => askAbout(askAboutNode(effectivePin!, pinnedTxns))}
-                    className="shrink-0 min-h-[36px] flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--background-secondary)] text-xs font-medium text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background)] transition-colors"
+                    className="shrink-0 min-h-[36px] flex items-center gap-1.5 px-3 py-1.5 rounded-control border border-[var(--border-color)] bg-[var(--background-secondary)] text-xs font-medium text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background)] transition-colors"
                   >
                     <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
                     Ask about this
@@ -1584,7 +1584,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
               <summary className="cursor-pointer text-sm text-[var(--foreground-secondary)] hover:text-[var(--foreground)] select-none">
                 View the flow as a table ({linkRows.length} flows)
               </summary>
-              <div className="overflow-x-auto rounded-xl border border-[var(--border-color)] mt-2">
+              <div className="overflow-x-auto rounded-card border border-[var(--border-color)] mt-2">
                 <table className="w-full text-sm">
                   <caption className="sr-only">Every money flow for this period, from source to destination, in dollars.</caption>
                   <thead className="bg-[var(--background-tertiary)] text-left">
@@ -1610,7 +1610,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
                   gains no node and no edge for a confirmed refund — it renders as a linked
                   pair — so the pairs are listed here, where a screen reader can reach them. */}
               {confirmedPairs.length > 0 && (
-                <div className="overflow-x-auto rounded-xl border border-[var(--border-color)] mt-2">
+                <div className="overflow-x-auto rounded-card border border-[var(--border-color)] mt-2">
                   <table className="w-full text-sm">
                     <caption className="sr-only">Linked transactions: which credit reverses which purchase.</caption>
                     <thead className="bg-[var(--background-tertiary)] text-left">
@@ -1658,7 +1658,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
                 {rangeButtons}
                 <button
                   onClick={() => setMaximized(false)}
-                  className="p-2 rounded-lg text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)]"
+                  className="p-2 rounded-control text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)]"
                   title="Minimize (Esc)"
                   aria-label="Minimize chart"
                 >
@@ -1667,7 +1667,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
               </div>
             </div>
             <div className="mb-2 flex items-center gap-2 flex-wrap">{chartToggle}{chart === 'sankey' && detailToggle}{chart === 'sankey' && kindChips}{chart === 'sankey' && grossToggle}</div>
-            <div className="flex-1 min-h-0 overflow-auto rounded-xl border border-[var(--border-color)] bg-[var(--background-secondary)] p-2">
+            <div className="flex-1 min-h-0 overflow-auto rounded-card border border-[var(--border-color)] bg-[var(--background-secondary)] p-2">
               {/* minHeight keeps the chart usable on short/landscape screens — it scrolls in
                   the overflow-auto parent instead of being crushed to a few pixels. */}
               {/* minHeight is the same collision guard as the inline chart: below it a
@@ -1691,7 +1691,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
                 of history (Monarch gaps — the ⚠ nodes in the chart).</>
             )}
           </p>
-          <div className="overflow-x-auto rounded-xl border border-[var(--border-color)]">
+          <div className="overflow-x-auto rounded-card border border-[var(--border-color)]">
             <table className="w-full text-sm">
               <thead className="bg-[var(--background-tertiary)] text-left">
                 <tr>
@@ -1739,7 +1739,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
             <h2 className="text-lg font-semibold mb-3 text-[var(--foreground)]">
               Between your accounts (gross, both directions)
             </h2>
-            <div className="overflow-x-auto rounded-xl border border-[var(--border-color)]">
+            <div className="overflow-x-auto rounded-card border border-[var(--border-color)]">
               <table className="w-full text-sm">
                 <thead className="bg-[var(--background-tertiary)] text-left">
                   <tr><th className="px-3 py-2">From</th><th className="px-3 py-2">To</th>
@@ -1769,7 +1769,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
               <span className="font-semibold text-[var(--foreground)]">{money(activeRecurringCents)}/mo</span>
             </p>
           </div>
-          <div className="overflow-x-auto rounded-xl border border-[var(--border-color)]">
+          <div className="overflow-x-auto rounded-card border border-[var(--border-color)]">
             <table className="w-full text-sm">
               <thead className="bg-[var(--background-tertiary)] text-left">
                 <tr><th className="px-3 py-2">Merchant</th><th className="px-3 py-2">How often</th>
@@ -1805,7 +1805,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
               <span className="font-semibold text-[var(--foreground)]">{money(last.cents)}</span> by {monthLabel(last.month)}
             </p>
           </div>
-          <div className="rounded-xl border border-[var(--border-color)] bg-[var(--background-secondary)] p-4">
+          <div className="rounded-card border border-[var(--border-color)] bg-[var(--background-secondary)] p-4">
             <ResponsiveContainer width="100%" height={260}>
               <LineChart data={projection.points.map((p) => ({ month: p.month, value: p.cents / 100 }))}>
                 <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.2} />

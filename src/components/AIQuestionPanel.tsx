@@ -73,10 +73,10 @@ export default function AIQuestionPanel({ forecast }: AIQuestionPanelProps) {
   };
 
   return (
-    <div className="bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-xl p-6">
+    <div className="bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-card p-6">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-[var(--accent-secondary)]/10 flex items-center justify-center">
+          <div className="w-10 h-10 rounded-control bg-[var(--accent-secondary)]/10 flex items-center justify-center">
             <MessageSquare className="w-5 h-5 text-[var(--accent-secondary)]" />
           </div>
           <div>
@@ -87,7 +87,7 @@ export default function AIQuestionPanel({ forecast }: AIQuestionPanelProps) {
         {messages.length > 0 && (
           <button
             onClick={clearChat}
-            className="p-2 rounded-lg text-[var(--foreground-muted)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)] transition-colors"
+            className="p-2 rounded-control text-[var(--foreground-muted)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)] transition-colors"
             title="Clear chat"
           >
             <RefreshCw className="w-4 h-4" />
@@ -104,7 +104,7 @@ export default function AIQuestionPanel({ forecast }: AIQuestionPanelProps) {
               <button
                 key={i}
                 onClick={() => askQuestion(sq)}
-                className="px-3 py-1.5 text-sm rounded-full bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:bg-[var(--accent-primary)]/10 hover:text-[var(--accent-primary)] transition-colors"
+                className="px-3 py-1.5 text-sm rounded-pill bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:bg-[var(--accent-primary)]/10 hover:text-[var(--accent-primary)] transition-colors"
               >
                 {sq}
               </button>
@@ -119,7 +119,7 @@ export default function AIQuestionPanel({ forecast }: AIQuestionPanelProps) {
           {messages.map((msg, i) => (
             <div
               key={i}
-              className={`p-3 rounded-lg ${
+              className={`p-3 rounded-control ${
                 msg.type === 'user'
                   ? 'bg-[var(--accent-primary)]/10 ml-8'
                   : 'bg-[var(--background-tertiary)] mr-8'
@@ -134,7 +134,7 @@ export default function AIQuestionPanel({ forecast }: AIQuestionPanelProps) {
             </div>
           ))}
           {isLoading && (
-            <div className="p-3 rounded-lg bg-[var(--background-tertiary)] mr-8">
+            <div className="p-3 rounded-control bg-[var(--background-tertiary)] mr-8">
               <div className="flex items-center gap-2 text-[var(--foreground-muted)]">
                 <Loader2 className="w-4 h-4 animate-spin" />
                 <span className="text-sm">Analyzing your forecast...</span>

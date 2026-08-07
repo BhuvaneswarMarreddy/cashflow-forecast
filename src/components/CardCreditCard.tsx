@@ -39,7 +39,7 @@ export default function CardCreditCard({
   );
 
   return (
-    <article className="rounded-xl border border-[var(--border-color)] bg-[var(--background-secondary)] p-4 space-y-3">
+    <article className="rounded-card border border-[var(--border-color)] bg-[var(--background-secondary)] p-4 space-y-3">
       <header>
         <p className="font-medium text-[var(--foreground)]">{creditLine(transaction, ctx.accounts)}</p>
         <p className="text-sm text-[var(--foreground-secondary)]">{transaction.merchant || transaction.title}</p>
@@ -70,7 +70,7 @@ export default function CardCreditCard({
         </details>
       )}
 
-      <section aria-label="What confirming will do" className="rounded-lg bg-[var(--background-tertiary)] p-3 text-sm space-y-1">
+      <section aria-label="What confirming will do" className="rounded-control bg-[var(--background-tertiary)] p-3 text-sm space-y-1">
         <p className="font-medium">If you confirm:</p>
         <p>1 transaction affected · {transaction.date.slice(0, 10)}</p>
         <p>This records what the credit is. It adds nothing to your income, on any screen.</p>

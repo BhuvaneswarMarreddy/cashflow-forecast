@@ -25,7 +25,7 @@ function Row({ account, index, count, render }: {
         {...attributes}
         {...listeners}
         aria-label={`Reorder ${account.name}, currently ${index + 1} of ${count}`}
-        className="flex items-center px-1 text-[var(--foreground-muted)] hover:text-[var(--foreground)] cursor-grab active:cursor-grabbing rounded-md"
+        className="flex items-center px-1 text-[var(--foreground-muted)] hover:text-[var(--foreground)] cursor-grab active:cursor-grabbing rounded-control"
         style={{ touchAction: 'none', WebkitTouchCallout: 'none', userSelect: 'none' }}
       >
         <GripVertical className="w-4 h-4" />

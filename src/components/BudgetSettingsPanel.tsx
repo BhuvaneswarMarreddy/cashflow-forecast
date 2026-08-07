@@ -89,19 +89,19 @@ export default function BudgetSettingsPanel({
     <div>
       {/* Summary */}
       <div className="flex flex-wrap gap-4 mb-6">
-        <div className="flex-1 min-w-[150px] p-4 rounded-xl bg-[var(--background-tertiary)]">
+        <div className="flex-1 min-w-[150px] p-4 rounded-card bg-[var(--background-tertiary)]">
           <p className="text-sm text-[var(--foreground-muted)]">Monthly Income</p>
           <p className="text-xl font-bold text-[var(--accent-success)]">
             ${monthlyIncome.toLocaleString()}
           </p>
         </div>
-        <div className="flex-1 min-w-[150px] p-4 rounded-xl bg-[var(--background-tertiary)]">
+        <div className="flex-1 min-w-[150px] p-4 rounded-card bg-[var(--background-tertiary)]">
           <p className="text-sm text-[var(--foreground-muted)]">Total Budgeted</p>
           <p className="text-xl font-bold text-[var(--foreground)]">
             ${totalBudgeted.toLocaleString()}
           </p>
         </div>
-        <div className="flex-1 min-w-[150px] p-4 rounded-xl bg-[var(--background-tertiary)]">
+        <div className="flex-1 min-w-[150px] p-4 rounded-card bg-[var(--background-tertiary)]">
           <p className="text-sm text-[var(--foreground-muted)]">Remaining</p>
           <p className={`text-xl font-bold ${monthlyIncome - totalBudgeted >= 0 ? 'text-[var(--accent-success)]' : 'text-amber-500'}`}>
             ${(monthlyIncome - totalBudgeted).toLocaleString()}
@@ -111,7 +111,7 @@ export default function BudgetSettingsPanel({
       
       {/* Suggested Budgets */}
       {monthlyIncome > 0 && (
-        <div className="mb-6 p-4 rounded-xl bg-[var(--accent-primary)]/5 border border-[var(--accent-primary)]/20">
+        <div className="mb-6 p-4 rounded-card bg-[var(--accent-primary)]/5 border border-[var(--accent-primary)]/20">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Lightbulb className="w-5 h-5 text-[var(--accent-primary)]" />
@@ -121,7 +121,7 @@ export default function BudgetSettingsPanel({
             </div>
             <button
               onClick={applySuggested}
-              className="text-sm px-3 py-1.5 rounded-lg bg-[var(--accent-primary)] text-[#16181c] hover:opacity-90 transition-opacity"
+              className="text-sm px-3 py-1.5 rounded-control bg-[var(--accent-primary)] text-[#16181c] hover:opacity-90 transition-opacity"
             >
               Apply Suggestions
             </button>
@@ -139,7 +139,7 @@ export default function BudgetSettingsPanel({
           return (
             <div
               key={category.value}
-              className={`p-4 rounded-xl border transition-all ${
+              className={`p-4 rounded-card border transition-all ${
                 isEnabled 
                   ? 'bg-[var(--background-secondary)] border-[var(--accent-primary)]/30' 
                   : 'bg-[var(--background-tertiary)] border-transparent opacity-60'
@@ -173,7 +173,7 @@ export default function BudgetSettingsPanel({
                     onChange={(e) => handleAmountChange(category.value, e.target.value)}
                     placeholder="0"
                     disabled={!isEnabled}
-                    className={`w-32 pl-8 pr-3 py-2 rounded-lg border text-right font-medium ${
+                    className={`w-32 pl-8 pr-3 py-2 rounded-control border text-right font-medium ${
                       isEnabled
                         ? 'bg-[var(--background-primary)] border-[var(--border-color)] text-[var(--foreground)]'
                         : 'bg-transparent border-transparent text-[var(--foreground-muted)] cursor-not-allowed'
@@ -194,7 +194,7 @@ export default function BudgetSettingsPanel({
       >
         {isSaving ? (
           <>
-            <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+            <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-pill animate-spin" />
             Saving...
           </>
         ) : (

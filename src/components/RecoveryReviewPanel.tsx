@@ -71,7 +71,7 @@ export default function RecoveryReviewPanel(props: RecoveryReviewPanelProps) {
     );
   }
   return (
-    <section aria-labelledby="money-review-heading" className="rounded-xl border border-[var(--border-color)] bg-[var(--background-secondary)] p-4 lg:w-[400px] lg:shrink-0">
+    <section aria-labelledby="money-review-heading" className="rounded-card border border-[var(--border-color)] bg-[var(--background-secondary)] p-4 lg:w-[400px] lg:shrink-0">
       <PanelBody {...props} />
     </section>
   );
@@ -237,7 +237,7 @@ function PanelBody({
           {onBatchConfirm && exactMatches.length >= 2 && (sectionFilter === null || sectionFilter === 'refund_matches') && (
             <section
               aria-label="Confirm exact refund matches together"
-              className="rounded-lg border border-[var(--accent-primary)]/40 bg-[var(--background-tertiary)] p-3 text-sm space-y-2"
+              className="rounded-control border border-[var(--accent-primary)]/40 bg-[var(--background-tertiary)] p-3 text-sm space-y-2"
             >
               <p className="font-medium text-[var(--foreground)]">
                 {exactMatches.length} refunds match a purchase exactly — {money(batchCents)} in one press.
@@ -284,7 +284,7 @@ function PanelBody({
           {activeSection && (
             <section
               aria-label={`About ${activeSection.label}`}
-              className="rounded-lg bg-[var(--background-tertiary)] p-3 text-sm space-y-1"
+              className="rounded-control bg-[var(--background-tertiary)] p-3 text-sm space-y-1"
             >
               <p className="font-medium text-[var(--foreground)]">{activeSection.label}</p>
               <p className="text-[var(--foreground-secondary)]">{activeSection.what}</p>

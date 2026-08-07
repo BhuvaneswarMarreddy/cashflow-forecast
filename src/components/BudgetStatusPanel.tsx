@@ -76,7 +76,7 @@ export default function BudgetStatusPanel({
     // Compact view for Forecast page - only show if there are risks
     if (risks.length === 0) {
       return (
-        <div className={`p-4 rounded-xl ${health.bgColor} border ${health.borderColor}`}>
+        <div className={`p-4 rounded-card ${health.bgColor} border ${health.borderColor}`}>
           <div className="flex items-center gap-3">
             <HealthIcon className={`w-5 h-5 ${health.color}`} />
             <div>
@@ -91,7 +91,7 @@ export default function BudgetStatusPanel({
     }
     
     return (
-      <div className={`p-4 rounded-xl ${health.bgColor} border ${health.borderColor}`}>
+      <div className={`p-4 rounded-card ${health.bgColor} border ${health.borderColor}`}>
         <div className="flex items-center gap-2 mb-3">
           <PieChart className="w-4 h-4 text-[var(--foreground-muted)]" />
           <span className="text-sm font-medium text-[var(--foreground)]">Budget Status</span>
@@ -109,9 +109,9 @@ export default function BudgetStatusPanel({
                   <span className="text-sm text-[var(--foreground)]">{status.categoryLabel}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <div className="w-20 h-1.5 rounded-full bg-[var(--background-tertiary)] overflow-hidden">
+                  <div className="w-20 h-1.5 rounded-pill bg-[var(--background-tertiary)] overflow-hidden">
                     <div
-                      className={`h-full rounded-full transition-all ${
+                      className={`h-full rounded-pill transition-all ${
                         status.isOverBudget ? 'bg-amber-500' : 
                         status.percentUsed >= 80 ? 'bg-amber-400' : 
                         'bg-emerald-500'
@@ -143,7 +143,7 @@ export default function BudgetStatusPanel({
   return (
     <div className="space-y-4">
       {/* Overall Summary */}
-      <div className={`p-4 rounded-xl ${health.bgColor} border ${health.borderColor}`}>
+      <div className={`p-4 rounded-card ${health.bgColor} border ${health.borderColor}`}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <HealthIcon className={`w-6 h-6 ${health.color}`} />
@@ -174,7 +174,7 @@ export default function BudgetStatusPanel({
           return (
             <div
               key={status.categoryId}
-              className="p-4 rounded-xl bg-[var(--background-tertiary)]"
+              className="p-4 rounded-card bg-[var(--background-tertiary)]"
             >
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
@@ -190,9 +190,9 @@ export default function BudgetStatusPanel({
               </div>
               
               {/* Progress bar */}
-              <div className="w-full h-2 rounded-full bg-[var(--background-primary)] overflow-hidden">
+              <div className="w-full h-2 rounded-pill bg-[var(--background-primary)] overflow-hidden">
                 <div
-                  className={`h-full rounded-full transition-all ${progressColor}`}
+                  className={`h-full rounded-pill transition-all ${progressColor}`}
                   style={{ width: `${Math.min(status.percentUsed, 100)}%` }}
                 />
               </div>

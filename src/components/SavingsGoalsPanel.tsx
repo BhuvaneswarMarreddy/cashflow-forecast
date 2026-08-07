@@ -177,7 +177,7 @@ export default function SavingsGoalsPanel({
     
     if (topGoals.length === 0) {
       return (
-        <div className="p-4 rounded-xl bg-[var(--background-tertiary)] border border-[var(--border-color)]">
+        <div className="p-4 rounded-card bg-[var(--background-tertiary)] border border-[var(--border-color)]">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
               <Target className="w-4 h-4 text-[var(--foreground-muted)]" />
@@ -185,7 +185,7 @@ export default function SavingsGoalsPanel({
             </div>
             <button
               onClick={() => setShowModal(true)}
-              className="text-xs px-2 py-1 rounded-lg bg-[var(--accent-primary)]/10 text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/20 transition-colors"
+              className="text-xs px-2 py-1 rounded-control bg-[var(--accent-primary)]/10 text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/20 transition-colors"
             >
               Add Goal
             </button>
@@ -199,7 +199,7 @@ export default function SavingsGoalsPanel({
     
     return (
       <>
-        <div className="p-4 rounded-xl bg-[var(--background-tertiary)] border border-[var(--border-color)]">
+        <div className="p-4 rounded-card bg-[var(--background-tertiary)] border border-[var(--border-color)]">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <Target className="w-4 h-4 text-[var(--foreground-muted)]" />
@@ -207,7 +207,7 @@ export default function SavingsGoalsPanel({
             </div>
             <button
               onClick={() => setShowModal(true)}
-              className="p-1 rounded-lg hover:bg-[var(--background-secondary)] transition-colors"
+              className="p-1 rounded-control hover:bg-[var(--background-secondary)] transition-colors"
             >
               <Plus className="w-4 h-4 text-[var(--foreground-muted)]" />
             </button>
@@ -219,7 +219,7 @@ export default function SavingsGoalsPanel({
                 <div className="flex items-center justify-between mb-1">
                   <div className="flex items-center gap-2">
                     <div 
-                      className="w-2 h-2 rounded-full"
+                      className="w-2 h-2 rounded-pill"
                       style={{ backgroundColor: goal.color }}
                     />
                     <span className="text-sm text-[var(--foreground)]">{goal.name}</span>
@@ -228,9 +228,9 @@ export default function SavingsGoalsPanel({
                     ${goal.currentAmount.toLocaleString()} / ${goal.targetAmount.toLocaleString()}
                   </span>
                 </div>
-                <div className="w-full h-1.5 rounded-full bg-[var(--background-secondary)] overflow-hidden">
+                <div className="w-full h-1.5 rounded-pill bg-[var(--background-secondary)] overflow-hidden">
                   <div
-                    className="h-full rounded-full transition-all"
+                    className="h-full rounded-pill transition-all"
                     style={{ 
                       width: `${percentComplete}%`,
                       backgroundColor: goal.color,
@@ -299,7 +299,7 @@ export default function SavingsGoalsPanel({
             {goalProgress.map(({ goal, percentComplete, amountRemaining, daysRemaining, requiredMonthlySavings, isOnTrack }) => (
               <div
                 key={goal.id}
-                className="p-4 rounded-xl bg-[var(--background-tertiary)] border-l-4"
+                className="p-4 rounded-card bg-[var(--background-tertiary)] border-l-4"
                 style={{ borderLeftColor: goal.color }}
               >
                 <div className="flex items-start justify-between mb-3">
@@ -313,13 +313,13 @@ export default function SavingsGoalsPanel({
                   <div className="flex gap-1">
                     <button
                       onClick={() => openEditModal(goal)}
-                      className="p-2 rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors"
+                      className="p-2 rounded-control text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors"
                     >
                       <Edit3 className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => onDeleteGoal(goal.id)}
-                      className="p-2 rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-danger)] hover:bg-[var(--accent-danger)]/10 transition-colors"
+                      className="p-2 rounded-control text-[var(--foreground-muted)] hover:text-[var(--accent-danger)] hover:bg-[var(--accent-danger)]/10 transition-colors"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -336,9 +336,9 @@ export default function SavingsGoalsPanel({
                       ${goal.targetAmount.toLocaleString()}
                     </span>
                   </div>
-                  <div className="w-full h-3 rounded-full bg-[var(--background-secondary)] overflow-hidden">
+                  <div className="w-full h-3 rounded-pill bg-[var(--background-secondary)] overflow-hidden">
                     <div
-                      className="h-full rounded-full transition-all"
+                      className="h-full rounded-pill transition-all"
                       style={{ 
                         width: `${percentComplete}%`,
                         backgroundColor: goal.color,
@@ -360,19 +360,19 @@ export default function SavingsGoalsPanel({
                 {/* Status indicators */}
                 <div className="flex flex-wrap gap-2">
                   {percentComplete >= 100 && (
-                    <span className="flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-500">
+                    <span className="flex items-center gap-1 text-xs px-2 py-1 rounded-pill bg-emerald-500/10 text-emerald-500">
                       <CheckCircle2 className="w-3 h-3" />
                       Goal reached!
                     </span>
                   )}
                   {daysRemaining !== undefined && daysRemaining <= 30 && percentComplete < 100 && (
-                    <span className="flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-amber-500/10 text-amber-500">
+                    <span className="flex items-center gap-1 text-xs px-2 py-1 rounded-pill bg-amber-500/10 text-amber-500">
                       <Calendar className="w-3 h-3" />
                       {daysRemaining} days left
                     </span>
                   )}
                   {requiredMonthlySavings !== undefined && (
-                    <span className="flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">
+                    <span className="flex items-center gap-1 text-xs px-2 py-1 rounded-pill bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">
                       <TrendingUp className="w-3 h-3" />
                       ${Math.round(requiredMonthlySavings).toLocaleString()}/mo needed
                     </span>
@@ -387,7 +387,7 @@ export default function SavingsGoalsPanel({
                       <button
                         key={amount}
                         onClick={() => handleQuickAdd(goal.id, amount)}
-                        className="text-xs px-2 py-1 rounded bg-[var(--background-secondary)] text-[var(--foreground)] hover:bg-[var(--accent-primary)]/10 transition-colors"
+                        className="text-xs px-2 py-1 rounded-control bg-[var(--background-secondary)] text-[var(--foreground)] hover:bg-[var(--accent-primary)]/10 transition-colors"
                       >
                         +${amount}
                       </button>
@@ -448,7 +448,7 @@ function GoalModal({
           <h2 className="text-xl font-bold text-[var(--foreground)]">
             {isEditing ? 'Edit Goal' : 'New Savings Goal'}
           </h2>
-          <button onClick={onClose} aria-label="Close" className="p-2 rounded-lg text-[var(--foreground-muted)] hover:bg-[var(--background-tertiary)]">
+          <button onClick={onClose} aria-label="Close" className="p-2 rounded-control text-[var(--foreground-muted)] hover:bg-[var(--background-tertiary)]">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -515,7 +515,7 @@ function GoalModal({
                 <button
                   key={p}
                   onClick={() => setFormData(prev => ({ ...prev, priority: p as any }))}
-                  className={`flex-1 py-2 rounded-lg font-medium transition-colors ${
+                  className={`flex-1 py-2 rounded-control font-medium transition-colors ${
                     formData.priority === p
                       ? 'bg-[var(--accent-primary)] text-[#16181c]'
                       : 'bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:bg-[var(--background-secondary)]'
@@ -536,7 +536,7 @@ function GoalModal({
                 <button
                   key={color}
                   onClick={() => setFormData(prev => ({ ...prev, color }))}
-                  className={`w-8 h-8 rounded-full transition-transform ${
+                  className={`w-8 h-8 rounded-pill transition-transform ${
                     formData.color === color ? 'ring-2 ring-offset-2 ring-[var(--accent-primary)] scale-110' : ''
                   }`}
                   style={{ backgroundColor: color }}

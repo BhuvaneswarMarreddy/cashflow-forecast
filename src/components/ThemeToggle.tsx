@@ -35,13 +35,13 @@ export default function ThemeToggle() {
   };
 
   return (
-    <div role="group" aria-label="Theme" className="flex gap-1 rounded-lg bg-[var(--background-tertiary)] p-1 w-fit">
+    <div role="group" aria-label="Theme" className="flex gap-1 rounded-control bg-[var(--background-tertiary)] p-1 w-fit">
       {OPTIONS.map(({ key, label, icon: Icon }) => (
         <button
           key={key}
           onClick={() => apply(key)}
           aria-pressed={theme === key}
-          className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${
+          className={`flex items-center gap-2 px-3 py-2 rounded-control text-sm transition-colors ${
             theme === key
               ? 'bg-[var(--accent-primary)] text-[#16181c] font-medium'
               : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'

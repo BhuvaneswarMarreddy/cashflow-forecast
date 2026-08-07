@@ -54,15 +54,15 @@ export default function SubscriptionsPanel({ accounts, transactions, currency }:
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="rounded-xl border border-[var(--border-color)] bg-[var(--background-secondary)] p-4">
+        <div className="rounded-card border border-[var(--border-color)] bg-[var(--background-secondary)] p-4">
           <p className="text-xs text-[var(--foreground-muted)]">Active subscriptions</p>
           <p className="text-xl font-bold text-[var(--foreground)] mt-1">{active.length}</p>
         </div>
-        <div className="rounded-xl border border-[var(--border-color)] bg-[var(--background-secondary)] p-4">
+        <div className="rounded-card border border-[var(--border-color)] bg-[var(--background-secondary)] p-4">
           <p className="text-xs text-[var(--foreground-muted)]">Monthly cost</p>
           <p className="text-xl font-bold text-[var(--foreground)] mt-1">{money(monthlyTotal)}/mo</p>
         </div>
-        <div className="rounded-xl border border-[var(--border-color)] bg-[var(--background-secondary)] p-4">
+        <div className="rounded-card border border-[var(--border-color)] bg-[var(--background-secondary)] p-4">
           <p className="text-xs text-[var(--foreground-muted)]">Due in the next 7 days</p>
           <p className="text-xl font-bold text-[var(--foreground)] mt-1">
             {upcoming7.length} · {money(upcoming7.reduce((s, r) => s + r.medianCents, 0))}
@@ -70,7 +70,7 @@ export default function SubscriptionsPanel({ accounts, transactions, currency }:
         </div>
       </div>
 
-      <ul role="list" className="rounded-xl border border-[var(--border-color)] divide-y divide-[var(--border-color)]">
+      <ul role="list" className="rounded-card border border-[var(--border-color)] divide-y divide-[var(--border-color)]">
         {active.map((r) => (
           <li key={r.merchant} className="p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
             <div className="flex-1 min-w-0">
@@ -92,7 +92,7 @@ export default function SubscriptionsPanel({ accounts, transactions, currency }:
           <summary className="cursor-pointer min-h-[44px] flex items-center text-sm text-[var(--foreground-secondary)] select-none">
             Lapsed / cancelled ({lapsed.length})
           </summary>
-          <ul role="list" className="rounded-xl border border-[var(--border-color)] divide-y divide-[var(--border-color)] mt-2 opacity-70">
+          <ul role="list" className="rounded-card border border-[var(--border-color)] divide-y divide-[var(--border-color)] mt-2 opacity-70">
             {lapsed.map((r) => (
               <li key={r.merchant} className="p-3 flex items-center gap-4">
                 <div className="flex-1 min-w-0">

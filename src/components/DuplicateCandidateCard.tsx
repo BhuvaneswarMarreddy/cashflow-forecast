@@ -49,7 +49,7 @@ export default function DuplicateCandidateCard({
   const merchant = rows[0]?.merchant || rows[0]?.title || 'this service';
 
   return (
-    <article className="rounded-xl border border-[var(--border-color)] bg-[var(--background-secondary)] p-4 space-y-3">
+    <article className="rounded-card border border-[var(--border-color)] bg-[var(--background-secondary)] p-4 space-y-3">
       <header>
         <p className="font-medium text-[var(--foreground)]">
           {isCharge
@@ -109,7 +109,7 @@ export default function DuplicateCandidateCard({
       )}
 
       {estimate && (
-        <div className="rounded-lg bg-[var(--background-tertiary)] p-3">
+        <div className="rounded-control bg-[var(--background-tertiary)] p-3">
           <p className="font-medium capitalize">
             {estimate.label}: {money(estimate.potentialAnnualDuplicateCostCents)}
           </p>
@@ -126,7 +126,7 @@ export default function DuplicateCandidateCard({
         <p className="text-[var(--foreground-muted)]">{reasonSentence(candidate.evidence.reasonCodes ?? [])}</p>
       </details>
 
-      <section aria-label="What confirming will do" className="rounded-lg bg-[var(--background-tertiary)] p-3 text-sm space-y-1">
+      <section aria-label="What confirming will do" className="rounded-control bg-[var(--background-tertiary)] p-3 text-sm space-y-1">
         <p className="font-medium">If you confirm:</p>
         <p>{preview.affectedCount} transactions affected · {preview.dateRange}</p>
         <p>{preview.moneyEffect}</p>
@@ -144,7 +144,7 @@ export default function DuplicateCandidateCard({
         <span>Cancelled on</span>
         <input
           type="date"
-          className="min-h-[44px] rounded-lg border border-[var(--border-color)] bg-[var(--background)] px-2"
+          className="min-h-[44px] rounded-control border border-[var(--border-color)] bg-[var(--background)] px-2"
           value={cancelledOn}
           onChange={(e) => setCancelledOn(e.target.value)}
         />

@@ -48,8 +48,8 @@ export default function Navbar() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
-          <Link href="/dashboard" className="flex items-center gap-3 group">
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center group-hover:scale-105 transition-transform relative overflow-hidden">
+          <Link href="/dashboard" className="flex items-center gap-3 group min-h-[44px] min-w-[44px]">
+            <div className="w-9 h-9 rounded-card flex items-center justify-center group-hover:scale-105 transition-transform relative overflow-hidden">
               <LogoMark size={36} />
             </div>
             <div className="hidden sm:block">
@@ -67,7 +67,7 @@ export default function Navbar() {
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all ${
+                  className={`flex items-center gap-2 px-4 min-h-[44px] rounded-control transition-all ${
                     isActive(item.href)
                       ? 'bg-[var(--accent-primary)] text-[#16181c]'
                       : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)]'
@@ -85,7 +85,7 @@ export default function Navbar() {
             <button
               onClick={() => { setChatSeed(undefined); setIsChatOpen(true); }}
               aria-label="Ask about your data"
-              className="w-11 h-11 flex items-center justify-center rounded-lg text-[var(--foreground-secondary)] hover:text-[var(--accent-primary)] hover:bg-[var(--background-tertiary)] transition-colors"
+              className="w-11 h-11 flex items-center justify-center rounded-control text-[var(--foreground-secondary)] hover:text-[var(--accent-primary)] hover:bg-[var(--background-tertiary)] transition-colors"
             >
               <Sparkles className="w-5 h-5" aria-hidden="true" />
             </button>
@@ -98,9 +98,9 @@ export default function Navbar() {
             <div className="relative">
               <button
                 onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-                className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--background-tertiary)] transition-colors"
+                className="flex items-center gap-3 px-3 min-h-[44px] rounded-control hover:bg-[var(--background-tertiary)] transition-colors"
               >
-                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] flex items-center justify-center text-[#16181c] font-semibold text-sm">
+                <div className="w-8 h-8 rounded-pill bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] flex items-center justify-center text-[#16181c] font-semibold text-sm">
                   {user?.name?.charAt(0).toUpperCase()}
                 </div>
                 <div className="text-left hidden lg:block">
@@ -121,7 +121,7 @@ export default function Navbar() {
                     className="fixed inset-0 z-10" 
                     onClick={() => setIsUserMenuOpen(false)}
                   />
-                  <div className="absolute right-0 mt-2 w-56 rounded-xl bg-[var(--background-secondary)] border border-[var(--border-color)] shadow-lg z-20 overflow-hidden">
+                  <div className="absolute right-0 mt-2 w-56 rounded-card bg-[var(--background-secondary)] border border-[var(--border-color)] shadow-lg z-20 overflow-hidden">
                     <div className="p-3 border-b border-[var(--border-color)]">
                       <p className="font-medium text-[var(--foreground)]">{user?.name}</p>
                       <p className="text-sm text-[var(--foreground-muted)]">{user?.email}</p>
@@ -130,7 +130,7 @@ export default function Navbar() {
                       <Link
                         href="/settings"
                         onClick={() => setIsUserMenuOpen(false)}
-                        className="flex items-center gap-3 px-3 py-2 rounded-lg text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] hover:text-[var(--foreground)] transition-colors"
+                        className="flex items-center gap-3 px-3 min-h-[44px] rounded-control text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] hover:text-[var(--foreground)] transition-colors"
                       >
                         <Settings className="w-4 h-4" />
                         <span className="text-sm">Settings</span>
@@ -138,7 +138,7 @@ export default function Navbar() {
                       <Link
                         href="/accounts"
                         onClick={() => setIsUserMenuOpen(false)}
-                        className="flex items-center gap-3 px-3 py-2 rounded-lg text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] hover:text-[var(--foreground)] transition-colors"
+                        className="flex items-center gap-3 px-3 min-h-[44px] rounded-control text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] hover:text-[var(--foreground)] transition-colors"
                       >
                         <CreditCard className="w-4 h-4" />
                         <span className="text-sm">Manage Accounts</span>
@@ -151,7 +151,7 @@ export default function Navbar() {
                           key={href}
                           href={href}
                           onClick={() => setIsUserMenuOpen(false)}
-                          className="flex items-center gap-3 px-3 py-2 rounded-lg text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] hover:text-[var(--foreground)] transition-colors"
+                          className="flex items-center gap-3 px-3 min-h-[44px] rounded-control text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] hover:text-[var(--foreground)] transition-colors"
                         >
                           <SecIcon className="w-4 h-4" />
                           <span className="text-sm">{label}</span>
@@ -164,7 +164,7 @@ export default function Navbar() {
                           setIsUserMenuOpen(false);
                           handleLogout();
                         }}
-                        className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-[var(--accent-danger)] hover:bg-[var(--accent-danger)]/10 transition-colors"
+                        className="flex items-center gap-3 w-full px-3 min-h-[44px] rounded-control text-[var(--accent-danger)] hover:bg-[var(--accent-danger)]/10 transition-colors"
                       >
                         <LogOut className="w-4 h-4" />
                         <span className="text-sm">Logout</span>
@@ -181,12 +181,12 @@ export default function Navbar() {
             <button
               onClick={() => { setChatSeed(undefined); setIsChatOpen(true); }}
               aria-label="Ask about your data"
-              className="w-11 h-11 flex items-center justify-center rounded-lg text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]"
+              className="w-11 h-11 flex items-center justify-center rounded-control text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]"
             >
               <Sparkles className="w-6 h-6" aria-hidden="true" />
             </button>
             <button
-              className="w-11 h-11 flex items-center justify-center rounded-lg text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]"
+              className="w-11 h-11 flex items-center justify-center rounded-control text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]"
               aria-label={isMobileMenuOpen ? 'Close menu' : 'Open menu'}
               aria-expanded={isMobileMenuOpen}
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
@@ -208,7 +208,7 @@ export default function Navbar() {
                   key={item.href}
                   href={item.href}
                   onClick={() => setIsMobileMenuOpen(false)}
-                  className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
+                  className={`flex items-center gap-3 px-4 py-3 rounded-card transition-all ${
                     isActive(item.href)
                       ? 'bg-[var(--accent-primary)] text-[#16181c]'
                       : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)]'
@@ -223,7 +223,7 @@ export default function Navbar() {
             <div className="pt-4 mt-4 border-t border-[var(--border-color)]">
               <div className="px-4 py-2 mb-2">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] flex items-center justify-center text-white font-medium">
+                  <div className="w-10 h-10 rounded-pill bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] flex items-center justify-center text-white font-medium">
                     {user?.name?.charAt(0).toUpperCase()}
                   </div>
                   <div>
@@ -239,7 +239,7 @@ export default function Navbar() {
                   key={href}
                   href={href}
                   onClick={() => setIsMobileMenuOpen(false)}
-                  className="flex items-center gap-3 px-4 py-3 rounded-xl text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)] transition-all"
+                  className="flex items-center gap-3 px-4 py-3 rounded-card text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)] transition-all"
                 >
                   <SecIcon className="w-5 h-5" />
                   <span className="font-medium">{label}</span>
@@ -249,7 +249,7 @@ export default function Navbar() {
               <Link
                 href="/settings"
                 onClick={() => setIsMobileMenuOpen(false)}
-                className="flex items-center gap-3 px-4 py-3 rounded-xl text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)] transition-all"
+                className="flex items-center gap-3 px-4 py-3 rounded-card text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)] transition-all"
               >
                 <Settings className="w-5 h-5" />
                 <span className="font-medium">Settings</span>
@@ -260,7 +260,7 @@ export default function Navbar() {
                   setIsMobileMenuOpen(false);
                   handleLogout();
                 }}
-                className="flex items-center gap-3 w-full px-4 py-3 rounded-xl text-[var(--accent-danger)] hover:bg-[var(--accent-danger)]/10 transition-all"
+                className="flex items-center gap-3 w-full px-4 py-3 rounded-card text-[var(--accent-danger)] hover:bg-[var(--accent-danger)]/10 transition-all"
               >
                 <LogOut className="w-5 h-5" />
                 <span className="font-medium">Logout</span>

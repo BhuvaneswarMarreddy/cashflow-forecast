@@ -219,10 +219,10 @@ export default function BillsTab({ userId, initialBills, initialTransactions }: 
           history, then validate each one as you migrate autopay to your BofA debit card.
         </p>
         <div className="flex items-center justify-center gap-3">
-          <button onClick={handleSeed} disabled={seeding} className="btn-primary px-5 py-2.5 rounded-lg font-semibold">
+          <button onClick={handleSeed} disabled={seeding} className="btn-primary px-5 py-2.5 rounded-control font-semibold">
             {seeding ? 'Importing…' : 'Import starter list (28)'}
           </button>
-          <button onClick={() => setEditing('new')} className="btn-secondary px-5 py-2.5 rounded-lg font-semibold">
+          <button onClick={() => setEditing('new')} className="btn-secondary px-5 py-2.5 rounded-control font-semibold">
             Add manually
           </button>
         </div>
@@ -261,12 +261,12 @@ export default function BillsTab({ userId, initialBills, initialTransactions }: 
           <div className="flex items-center gap-2">
             <button
               onClick={() => setAnnualView((v) => !v)}
-              className="btn-secondary px-3 py-1.5 rounded-lg text-sm font-medium"
+              className="btn-secondary px-3 py-1.5 rounded-control text-sm font-medium"
               aria-pressed={annualView}
             >
               {annualView ? 'Annual' : 'Monthly'}
             </button>
-            <button onClick={() => setEditing('new')} className="btn-primary px-3 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-1">
+            <button onClick={() => setEditing('new')} className="btn-primary px-3 py-1.5 rounded-control text-sm font-semibold flex items-center gap-1">
               <Plus className="w-4 h-4" /> Add bill
             </button>
           </div>
@@ -276,7 +276,7 @@ export default function BillsTab({ userId, initialBills, initialTransactions }: 
         {retired.length > 0 && (
           <button
             onClick={() => setFilter(filter === 'retired-cards' ? 'all' : 'retired-cards')}
-            className="mt-4 w-full text-left flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-[var(--foreground)] hover:bg-amber-500/20 transition-colors"
+            className="mt-4 w-full text-left flex items-center gap-2 rounded-control border border-amber-500/40 bg-amber-500/10 px-3 min-h-[44px] text-sm text-[var(--foreground)] hover:bg-amber-500/20 transition-colors"
           >
             <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
             <span>
@@ -291,12 +291,12 @@ export default function BillsTab({ userId, initialBills, initialTransactions }: 
       </div>
 
       {/* Filter segmented control */}
-      <div className="flex items-center gap-1.5 p-1.5 bg-[var(--background-secondary)] rounded-lg border border-[var(--border-color)] overflow-x-auto">
+      <div className="flex items-center gap-1.5 p-1.5 bg-[var(--background-secondary)] rounded-control border border-[var(--border-color)] overflow-x-auto">
         {FILTERS.map((f) => (
           <button
             key={f.id}
             onClick={() => setFilter(f.id)}
-            className={`px-3 py-2 text-sm font-semibold rounded-md whitespace-nowrap transition-all ${
+            className={`px-3 min-h-[44px] text-sm font-semibold rounded-control whitespace-nowrap transition-all ${
               filter === f.id
                 ? 'bg-[var(--accent-primary)] text-[#16181c] shadow-sm'
                 : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)]'
@@ -331,16 +331,16 @@ export default function BillsTab({ userId, initialBills, initialTransactions }: 
               {bill.migrationStatus === 'to-switch' ? (
                 <button
                   onClick={() => applyUpdate(bill.id, { migrationStatus: 'switched', paymentMethodId: 'bofa-debit' })}
-                  className="mt-0.5 w-6 h-6 shrink-0 rounded-md border-2 border-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/20 transition-colors"
+                  className="mt-0.5 w-6 h-6 min-w-[44px] min-h-[44px] shrink-0 rounded-control border-2 border-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/20 transition-colors"
                   title="Mark switched to BofA debit"
                   aria-label={`Mark ${bill.vendor} switched to BofA debit`}
                 />
               ) : bill.migrationStatus === 'switched' ? (
-                <div className="mt-0.5 w-6 h-6 shrink-0 rounded-md bg-[var(--accent-primary)] flex items-center justify-center">
+                <div className="mt-0.5 w-6 h-6 min-w-[44px] min-h-[44px] shrink-0 rounded-control bg-[var(--accent-primary)] flex items-center justify-center">
                   <Check className="w-4 h-4 text-[#16181c]" />
                 </div>
               ) : (
-                <div className="mt-0.5 w-6 h-6 shrink-0" />
+                <div className="mt-0.5 w-6 h-6 min-w-[44px] min-h-[44px] shrink-0" />
               )}
 
               <div
@@ -370,7 +370,7 @@ export default function BillsTab({ userId, initialBills, initialTransactions }: 
                   {toggleExpand && (
                     <button
                       onClick={(e) => { e.stopPropagation(); toggleExpand(); }}
-                      className="p-1 -m-1 text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
+                      className="p-1 -m-1 min-w-[44px] min-h-[44px] flex items-center justify-center text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
                       aria-expanded={isExpanded}
                       aria-label={`${isExpanded ? 'Hide' : 'Show'} spending behind ${bill.vendor}`}
                     >
@@ -393,7 +393,7 @@ export default function BillsTab({ userId, initialBills, initialTransactions }: 
                     {MIGRATION_LABELS[bill.migrationStatus]}
                   </button>
                   {statusMenuFor === bill.id && (
-                    <div className="absolute z-20 mt-1 rounded-lg border border-[var(--border-color)] bg-[var(--background-secondary)] shadow-lg py-1">
+                    <div className="absolute z-20 mt-1 rounded-control border border-[var(--border-color)] bg-[var(--background-secondary)] shadow-lg py-1">
                       {(Object.keys(MIGRATION_LABELS) as MigrationStatus[]).map((s) => (
                         <button
                           key={s}
@@ -430,7 +430,7 @@ export default function BillsTab({ userId, initialBills, initialTransactions }: 
                 )}
                 <button
                   onClick={() => setEditing(bill)}
-                  className="mt-1 p-2 -mr-2 text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
+                  className="mt-1 p-2 -mr-2 min-w-[44px] min-h-[44px] flex items-center justify-center text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
                   aria-label={`Edit ${bill.vendor}`}
                 >
                   <Pencil className="w-4 h-4" />
@@ -467,9 +467,9 @@ export default function BillsTab({ userId, initialBills, initialTransactions }: 
                           <span className="w-20 text-right tabular-nums text-[var(--foreground)]">
                             {formatMoney(x.monthly, 'USD', 0)}/mo
                           </span>
-                          <div className="flex-1 h-1.5 rounded bg-[var(--background-tertiary)]">
+                          <div className="flex-1 h-1.5 rounded-control bg-[var(--background-tertiary)]">
                             <div
-                              className="h-1.5 rounded bg-[var(--accent-primary)]"
+                              className="h-1.5 rounded-control bg-[var(--accent-primary)]"
                               style={{ width: `${Math.max(0, (x.monthly / max) * 100)}%` }}
                             />
                           </div>
@@ -577,7 +577,7 @@ function BillForm({ bill, onSave, onDelete, onClose }: BillFormProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4" onClick={onClose}>
       <div
-        className="w-full sm:max-w-lg max-h-[92vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl bg-[var(--background)] border border-[var(--border-color)] p-5"
+        className="w-full sm:max-w-lg max-h-[92vh] overflow-y-auto rounded-t-card sm:rounded-card bg-[var(--background)] border border-[var(--border-color)] p-5"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -691,10 +691,10 @@ function BillForm({ bill, onSave, onDelete, onClose }: BillFormProps) {
               <span />
             )}
             <div className="flex gap-2">
-              <button type="button" onClick={onClose} className="btn-secondary px-4 py-2 rounded-lg font-medium">
+              <button type="button" onClick={onClose} className="btn-secondary px-4 py-2 rounded-control font-medium">
                 Cancel
               </button>
-              <button type="submit" className="btn-primary px-4 py-2 rounded-lg font-semibold">
+              <button type="submit" className="btn-primary px-4 py-2 rounded-control font-semibold">
                 Save
               </button>
             </div>

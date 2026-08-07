@@ -153,10 +153,10 @@ export default function CashflowTab() {
   return (
     <div>
       <div className="flex justify-end mb-4">
-        <div className="flex gap-1 p-1 bg-[var(--background)] rounded-lg border border-[var(--border-color)]">
+        <div className="flex gap-1 p-1 bg-[var(--background)] rounded-control border border-[var(--border-color)]">
           {([['12m', 'Last 12 mo'], ['ytd', 'This year'], ['all', 'All time']] as [Range, string][]).map(([k, label]) => (
             <button key={k} onClick={() => setRange(k)}
-              className={`min-h-[44px] px-3 rounded text-sm font-medium transition-all ${range === k ? 'bg-[var(--accent-primary)] text-[#16181c]' : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'}`}>
+              className={`min-h-[44px] px-3 rounded-control text-sm font-medium transition-all ${range === k ? 'bg-[var(--accent-primary)] text-[#16181c]' : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'}`}>
               {label}
             </button>
           ))}
@@ -213,7 +213,7 @@ export default function CashflowTab() {
               <button
                 onClick={() => setSelectedMonth(null)}
                 aria-label="Close month detail"
-                className="w-11 h-11 flex items-center justify-center rounded-lg text-[var(--foreground-muted)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)]"
+                className="w-11 h-11 flex items-center justify-center rounded-control text-[var(--foreground-muted)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)]"
               >
                 <X className="w-5 h-5" />
               </button>

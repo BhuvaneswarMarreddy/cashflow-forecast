@@ -125,18 +125,18 @@ export default function InsightsTab() {
     <div className="space-y-6">
       {/* Period controls — one idiom */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex gap-1 p-1 bg-[var(--background)] rounded-lg border border-[var(--border-color)]">
+        <div className="flex gap-1 p-1 bg-[var(--background)] rounded-control border border-[var(--border-color)]">
           {(['weekly', 'monthly'] as const).map(v => (
             <button key={v} onClick={() => { setViewMode(v); setCurrentDate(new Date()); }}
               aria-pressed={viewMode === v}
-              className={`min-h-[44px] px-4 rounded text-sm font-semibold transition-all ${viewMode === v ? 'bg-[var(--accent-primary)] text-[#16181c]' : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'}`}>
+              className={`min-h-[44px] px-4 rounded-control text-sm font-semibold transition-all ${viewMode === v ? 'bg-[var(--accent-primary)] text-[#16181c]' : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'}`}>
               {v === 'weekly' ? 'Week' : 'Month'}
             </button>
           ))}
         </div>
         <div className="flex items-center gap-1">
           <button onClick={() => step(-1)} aria-label="Previous period"
-            className="w-11 h-11 flex items-center justify-center rounded-lg text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]">
+            className="w-11 h-11 flex items-center justify-center rounded-control text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]">
             <ChevronLeft className="w-5 h-5" />
           </button>
           <span className="text-sm font-semibold text-[var(--foreground)] min-w-[10ch] text-center tnum">
@@ -145,12 +145,12 @@ export default function InsightsTab() {
               : format(currentDate, 'MMMM yyyy')}
           </span>
           <button onClick={() => step(1)} aria-label="Next period"
-            className="w-11 h-11 flex items-center justify-center rounded-lg text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]">
+            className="w-11 h-11 flex items-center justify-center rounded-control text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)]">
             <ChevronRight className="w-5 h-5" />
           </button>
           {!isCurrentPeriod && (
             <button onClick={() => setCurrentDate(new Date())}
-              className="min-h-[44px] px-3 rounded-lg text-sm font-medium text-[var(--accent-primary)] hover:bg-[var(--background-tertiary)]">
+              className="min-h-[44px] px-3 rounded-control text-sm font-medium text-[var(--accent-primary)] hover:bg-[var(--background-tertiary)]">
               Today
             </button>
           )}
@@ -171,9 +171,9 @@ export default function InsightsTab() {
             {trend >= 0 ? '+' : ''}{trend.toFixed(1)}% vs last {viewMode === 'weekly' ? 'week' : 'month'}
           </div>
         </div>
-        <div className="h-2 rounded-full bg-[var(--background-tertiary)] overflow-hidden" role="img"
+        <div className="h-2 rounded-pill bg-[var(--background-tertiary)] overflow-hidden" role="img"
           aria-label={`${Math.round(budgetUsedPct)}% of the ${viewMode} budget used`}>
-          <div className={`h-full rounded-full transition-all ${budgetUsedPct > 100 ? 'bg-[var(--money-out)]' : 'bg-[var(--progress)]'}`}
+          <div className={`h-full rounded-pill transition-all ${budgetUsedPct > 100 ? 'bg-[var(--money-out)]' : 'bg-[var(--progress)]'}`}
             style={{ width: `${Math.min(budgetUsedPct, 100)}%` }} />
         </div>
         {overPace && (
@@ -220,8 +220,8 @@ export default function InsightsTab() {
               <div key={m.name} className="flex items-center gap-3">
                 <span className="w-36 truncate text-sm text-[var(--foreground-secondary)]">{m.name}</span>
                 <span className="w-24 text-right text-sm font-medium tnum text-[var(--foreground)]">{money(m.value)}</span>
-                <div className="flex-1 h-1.5 rounded bg-[var(--background-tertiary)]">
-                  <div className="h-1.5 rounded bg-[var(--chart-out)]" style={{ width: `${(m.value / maxMerchant) * 100}%` }} />
+                <div className="flex-1 h-1.5 rounded-control bg-[var(--background-tertiary)]">
+                  <div className="h-1.5 rounded-control bg-[var(--chart-out)]" style={{ width: `${(m.value / maxMerchant) * 100}%` }} />
                 </div>
               </div>
             ))}

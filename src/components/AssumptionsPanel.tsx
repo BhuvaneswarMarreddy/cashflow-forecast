@@ -33,7 +33,7 @@ function ConfidenceDot({ confidence }: { confidence: number }) {
       role="img"
       aria-label={`Confidence ${pct}%`}
       title={`Confidence ${pct}%`}
-      className="inline-block w-2 h-2 rounded-full shrink-0"
+      className="inline-block w-2 h-2 rounded-pill shrink-0"
       style={{ backgroundColor: color }}
     />
   );
@@ -64,8 +64,8 @@ function AmountInput({ label, value, onCommit }: {
 }
 
 const sectionTitle = 'text-xs font-semibold text-[var(--foreground-muted)] uppercase tracking-wide mb-2';
-const listClass = 'rounded-xl border border-[var(--border-color)] divide-y divide-[var(--border-color)]';
-const quietBtn = 'min-h-[44px] px-3 text-xs font-semibold rounded-lg border border-[var(--border-color)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)] transition-colors';
+const listClass = 'rounded-card border border-[var(--border-color)] divide-y divide-[var(--border-color)]';
+const quietBtn = 'min-h-[44px] px-3 text-xs font-semibold rounded-control border border-[var(--border-color)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)] transition-colors';
 
 export default function AssumptionsPanel({ assumptions, onOverridesChange }: {
   assumptions: Assumptions;
@@ -101,9 +101,9 @@ export default function AssumptionsPanel({ assumptions, onOverridesChange }: {
   const inc = assumptions.income;
 
   return (
-    <details open className="group bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-xl shadow-sm">
+    <details open className="group bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-card shadow-sm">
       <summary className="cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden p-6 flex items-center gap-3 min-h-[44px]">
-        <div className="w-12 h-12 rounded-xl bg-[var(--accent-primary)]/10 flex items-center justify-center border border-[var(--accent-primary)]/20 shrink-0">
+        <div className="w-12 h-12 rounded-card bg-[var(--accent-primary)]/10 flex items-center justify-center border border-[var(--accent-primary)]/20 shrink-0">
           <Lightbulb className="w-6 h-6 text-[var(--accent-primary)]" aria-hidden="true" />
         </div>
         <div className="flex-1 min-w-0">

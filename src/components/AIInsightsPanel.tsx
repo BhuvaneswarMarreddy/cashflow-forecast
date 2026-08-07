@@ -234,7 +234,7 @@ export default function AIInsightsPanel({
   const displayMonths = showAllMonths ? monthlyData : monthlyData.slice(0, 3);
 
   return (
-    <div className="bg-[var(--background-secondary)] rounded-xl border border-[var(--border-color)] overflow-hidden">
+    <div className="bg-[var(--background-secondary)] rounded-card border border-[var(--border-color)] overflow-hidden">
       {/* Header */}
       <div className="p-4 border-b border-[var(--border-color)]">
         <div className="flex items-center justify-between">
@@ -245,7 +245,7 @@ export default function AIInsightsPanel({
           <button
             onClick={generateAIInsight}
             disabled={isLoading}
-            className="text-xs px-3 py-1.5 rounded-lg bg-[var(--accent-primary)] text-[#16181c] hover:opacity-90 disabled:opacity-50 flex items-center gap-1"
+            className="text-xs px-3 py-1.5 rounded-control bg-[var(--accent-primary)] text-[#16181c] hover:opacity-90 disabled:opacity-50 flex items-center gap-1"
           >
             {isLoading ? (
               <span className="animate-pulse">Analyzing...</span>
@@ -345,7 +345,7 @@ export default function AIInsightsPanel({
 
         <div className="space-y-2">
           {displayMonths.map((month) => (
-            <div key={month.month} className="rounded-lg border border-[var(--border-color)] overflow-hidden">
+            <div key={month.month} className="rounded-control border border-[var(--border-color)] overflow-hidden">
               <button
                 onClick={() => setExpandedMonth(expandedMonth === month.month ? null : month.month)}
                 className="w-full p-3 flex items-center justify-between hover:bg-[var(--background-tertiary)] transition-colors"

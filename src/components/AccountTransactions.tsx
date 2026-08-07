@@ -86,7 +86,7 @@ export default function AccountTransactions({ account, transactions }: AccountTr
   }
 
   return (
-    <div className="bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-xl overflow-hidden">
+    <div className="bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-card overflow-hidden">
       {/* Account Header - Clickable */}
       <button
         onClick={() => setIsExpanded(!isExpanded)}
@@ -94,7 +94,7 @@ export default function AccountTransactions({ account, transactions }: AccountTr
       >
         <div className="flex items-center gap-4">
           <div
-            className="w-12 h-12 rounded-xl flex items-center justify-center"
+            className="w-12 h-12 rounded-card flex items-center justify-center"
             style={{ backgroundColor: `${account.color}20`, color: account.color }}
           >
             {getAccountIcon()}
@@ -209,13 +209,13 @@ export default function AccountTransactions({ account, transactions }: AccountTr
                     {/* Icon */}
                     {txn.merchant ? (
                       <div 
-                        className="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-sm"
+                        className="w-10 h-10 rounded-control flex items-center justify-center text-white font-bold text-sm"
                         style={{ backgroundColor: merchantColor || undefined }}
                       >
                         {txn.merchant.charAt(0).toUpperCase()}
                       </div>
                     ) : (
-                      <div className="w-10 h-10 rounded-lg bg-[var(--background-tertiary)] flex items-center justify-center text-xl">
+                      <div className="w-10 h-10 rounded-control bg-[var(--background-tertiary)] flex items-center justify-center text-xl">
                         {category?.icon || '📋'}
                       </div>
                     )}
@@ -226,7 +226,7 @@ export default function AccountTransactions({ account, transactions }: AccountTr
                         <p className="font-medium text-[var(--foreground)]">{txn.title}</p>
                         {txn.merchant && (
                           <span 
-                            className="text-xs px-2 py-0.5 rounded-full text-white hidden sm:inline"
+                            className="text-xs px-2 py-0.5 rounded-pill text-white hidden sm:inline"
                             style={{ backgroundColor: merchantColor || undefined }}
                           >
                             {txn.merchant}

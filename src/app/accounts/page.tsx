@@ -134,7 +134,7 @@ export default function AccountsPage() {
   if (authLoading || profileLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-pulse-glow w-16 h-16 rounded-2xl bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] flex items-center justify-center">
+        <div className="animate-pulse-glow w-16 h-16 rounded-card bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] flex items-center justify-center">
           <TrendingUp className="w-8 h-8 text-white" />
         </div>
       </div>
@@ -515,7 +515,7 @@ export default function AccountsPage() {
               <button
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key as typeof activeTab)}
-                className={`flex items-center gap-2 min-h-[44px] px-3 sm:px-4 py-2 rounded-lg font-medium transition-all text-sm sm:text-base ${
+                className={`flex items-center gap-2 min-h-[44px] px-3 sm:px-4 py-2 rounded-control font-medium transition-all text-sm sm:text-base ${
                   activeTab === tab.key
                     ? 'bg-[var(--accent-primary)] text-[#16181c]'
                     : 'bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'
@@ -553,7 +553,7 @@ export default function AccountsPage() {
                   onReorder={reorderPaymentAccounts}
                   renderRow={(account) => (
                     <div
-                      className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-0 p-4 rounded-xl bg-[var(--background-tertiary)] border-l-4 hover:bg-[var(--background-secondary)] transition-colors"
+                      className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-0 p-4 rounded-card bg-[var(--background-tertiary)] border-l-4 hover:bg-[var(--background-secondary)] transition-colors"
                       style={{ borderLeftColor: account.color }}
                     >
                       {/* UI-106: the whole row used to be an invisible button 2px
@@ -561,7 +561,7 @@ export default function AccountsPage() {
                           opens from the explicit chart button on the right. */}
                       <div className="flex items-center gap-4 flex-1 min-w-0">
                         <div
-                          className="w-12 h-12 rounded-xl flex items-center justify-center"
+                          className="w-12 h-12 rounded-card flex items-center justify-center"
                           style={{ backgroundColor: `${account.color}20`, color: account.color }}
                         >
                           {getAccountIcon(account.type)}
@@ -626,21 +626,21 @@ export default function AccountsPage() {
                           <button
                             onClick={() => setGraphAccount(account)}
                             aria-label={`${account.name} — view history graph`}
-                            className="p-2.5 min-w-11 min-h-11 sm:p-2 sm:min-w-auto sm:min-h-auto rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors"
+                            className="p-2.5 min-w-11 min-h-11 sm:p-2 sm:min-w-auto sm:min-h-auto rounded-control text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors"
                           >
                             <BarChart3 className="w-4 h-4" />
                           </button>
                           <button
                             onClick={() => openEditAccount(account)}
                             aria-label={`Edit ${account.name}`}
-                            className="p-2.5 min-w-11 min-h-11 sm:p-2 sm:min-w-auto sm:min-h-auto rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors"
+                            className="p-2.5 min-w-11 min-h-11 sm:p-2 sm:min-w-auto sm:min-h-auto rounded-control text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors"
                           >
                             <Edit3 className="w-4 h-4" />
                           </button>
                           <button
                             onClick={() => confirmDelete(account.id, 'account')}
                             aria-label={`Delete ${account.name}`}
-                            className="p-2.5 min-w-11 min-h-11 sm:p-2 sm:min-w-auto sm:min-h-auto rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-danger)] hover:bg-[var(--accent-danger)]/10 transition-colors"
+                            className="p-2.5 min-w-11 min-h-11 sm:p-2 sm:min-w-auto sm:min-h-auto rounded-control text-[var(--foreground-muted)] hover:text-[var(--accent-danger)] hover:bg-[var(--accent-danger)]/10 transition-colors"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -700,10 +700,10 @@ export default function AccountsPage() {
                   {profile.incomeSources.map((income) => (
                     <div
                       key={income.id}
-                      className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-0 p-4 rounded-xl bg-[var(--background-tertiary)] border-l-4 border-l-[var(--accent-success)] hover:bg-[var(--background-secondary)] transition-colors"
+                      className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-0 p-4 rounded-card bg-[var(--background-tertiary)] border-l-4 border-l-[var(--accent-success)] hover:bg-[var(--background-secondary)] transition-colors"
                     >
                       <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-[var(--accent-success)]/20 text-[var(--accent-success)]">
+                        <div className="w-12 h-12 rounded-card flex items-center justify-center bg-[var(--accent-success)]/20 text-[var(--accent-success)]">
                           <Banknote className="w-5 h-5" />
                         </div>
                         <div>
@@ -722,14 +722,14 @@ export default function AccountsPage() {
                           <button
                             onClick={() => openEditIncome(income)}
                             aria-label={`Edit ${income.name}`}
-                            className="p-2.5 min-w-11 min-h-11 sm:p-2 sm:min-w-auto sm:min-h-auto rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors"
+                            className="p-2.5 min-w-11 min-h-11 sm:p-2 sm:min-w-auto sm:min-h-auto rounded-control text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors"
                           >
                             <Edit3 className="w-4 h-4" />
                           </button>
                           <button
                             onClick={() => confirmDelete(income.id, 'income')}
                             aria-label={`Delete ${income.name}`}
-                            className="p-2.5 min-w-11 min-h-11 sm:p-2 sm:min-w-auto sm:min-h-auto rounded-lg text-[var(--foreground-muted)] hover:text-[var(--accent-danger)] hover:bg-[var(--accent-danger)]/10 transition-colors"
+                            className="p-2.5 min-w-11 min-h-11 sm:p-2 sm:min-w-auto sm:min-h-auto rounded-control text-[var(--foreground-muted)] hover:text-[var(--accent-danger)] hover:bg-[var(--accent-danger)]/10 transition-colors"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -759,7 +759,7 @@ export default function AccountsPage() {
               </h2>
 
               <div className="max-w-md">
-                <div className="p-6 rounded-xl bg-[var(--background-tertiary)] mb-6">
+                <div className="p-6 rounded-card bg-[var(--background-tertiary)] mb-6">
                   <label className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">
                     Target Monthly Spending
                   </label>
@@ -780,7 +780,7 @@ export default function AccountsPage() {
                 </button>
 
                 {monthlyIncome > 0 && (
-                  <div className="mt-6 p-4 rounded-xl bg-[var(--accent-success)]/10 border border-[var(--accent-success)]/30">
+                  <div className="mt-6 p-4 rounded-card bg-[var(--accent-success)]/10 border border-[var(--accent-success)]/30">
                     <p className="text-sm text-[var(--foreground-secondary)] mb-1">Monthly Income</p>
                     <p className="text-xl font-bold text-[var(--accent-success)]">{formatMoney(monthlyIncome, 'USD', 2)}</p>
                     {parseFloat(budgetAmount) > 0 && (
@@ -883,7 +883,7 @@ export default function AccountsPage() {
               <h2 className="text-xl font-bold text-[var(--foreground)]">
                 {editingAccount ? 'Edit Account' : 'Add Account'}
               </h2>
-              <button onClick={resetAccountForm} aria-label="Close" className="p-2 rounded-lg text-[var(--foreground-muted)] hover:bg-[var(--background-tertiary)]">
+              <button onClick={resetAccountForm} aria-label="Close" className="p-2 rounded-control text-[var(--foreground-muted)] hover:bg-[var(--background-tertiary)]">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -1019,7 +1019,7 @@ export default function AccountsPage() {
 
               {/* Payment Source Account (for credit cards and loans) */}
               {(accountForm.type === 'credit_card' || accountForm.type === 'personal_loan') && (
-                <div className="p-4 rounded-lg bg-[var(--accent-primary)]/5 border border-[var(--accent-primary)]/20">
+                <div className="p-4 rounded-control bg-[var(--accent-primary)]/5 border border-[var(--accent-primary)]/20">
                   <label className="block text-sm font-medium text-[var(--foreground)] mb-2">
                     Pay this {accountForm.type === 'credit_card' ? 'card' : 'loan'} from:
                   </label>
@@ -1066,7 +1066,7 @@ export default function AccountsPage() {
               <h2 className="text-xl font-bold text-[var(--foreground)]">
                 {editingIncome ? 'Edit Income' : 'Add Income'}
               </h2>
-              <button onClick={resetIncomeForm} aria-label="Close" className="p-2 rounded-lg text-[var(--foreground-muted)] hover:bg-[var(--background-tertiary)]">
+              <button onClick={resetIncomeForm} aria-label="Close" className="p-2 rounded-control text-[var(--foreground-muted)] hover:bg-[var(--background-tertiary)]">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -1183,7 +1183,7 @@ export default function AccountsPage() {
               >
                 {isDeleting ? (
                   <>
-                    <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                    <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-pill animate-spin" />
                     Deleting...
                   </>
                 ) : (

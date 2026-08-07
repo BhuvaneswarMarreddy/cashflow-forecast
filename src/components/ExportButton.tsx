@@ -76,7 +76,7 @@ export default function ExportButton({
     <button
       onClick={handleExport}
       disabled={isExporting || !profile}
-      className={`w-full flex items-center justify-between p-4 rounded-xl transition-colors ${
+      className={`w-full flex items-center justify-between p-4 rounded-card transition-colors ${
         exportStatus === 'success' 
           ? 'bg-emerald-500/10 border border-emerald-500/30' 
           : exportStatus === 'error'
@@ -85,7 +85,7 @@ export default function ExportButton({
       }`}
     >
       <div className="flex items-center gap-4">
-        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+        <div className={`w-10 h-10 rounded-card flex items-center justify-center ${
           exportStatus === 'success'
             ? 'bg-emerald-500/20 text-emerald-500'
             : exportStatus === 'error'

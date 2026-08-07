@@ -288,7 +288,7 @@ export default function DataChatSheet({ open, onClose, seed }: {
         onPointerMove={onDrag}
         onKeyDown={onHandleKey}
         onDoubleClick={() => setRailWidth(null)}
-        className="hidden sm:block absolute left-0 top-0 h-full w-2 -ml-1 cursor-col-resize rounded-full
+        className="hidden sm:block absolute left-0 top-0 h-full w-2 -ml-1 cursor-col-resize rounded-pill
           hover:bg-[var(--accent-primary)]/30 focus-visible:bg-[var(--accent-primary)]/40
           focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent-primary)]"
       />
@@ -302,7 +302,7 @@ export default function DataChatSheet({ open, onClose, seed }: {
           type="button"
           onClick={onClose}
           aria-label="Close chat"
-          className="shrink-0 w-11 h-11 -mt-1 -mr-1 flex items-center justify-center rounded-lg text-[var(--foreground-muted)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)] transition-colors"
+          className="shrink-0 w-11 h-11 -mt-1 -mr-1 flex items-center justify-center rounded-control text-[var(--foreground-muted)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)] transition-colors"
         >
           <X className="w-5 h-5" aria-hidden="true" />
         </button>
@@ -318,7 +318,7 @@ export default function DataChatSheet({ open, onClose, seed }: {
                   key={ex}
                   type="button"
                   onClick={() => send(ex)}
-                  className="min-h-[44px] text-left px-4 py-2 rounded-xl border border-[var(--border-color)] bg-[var(--background-secondary)] text-sm text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)] transition-colors"
+                  className="min-h-[44px] text-left px-4 py-2 rounded-card border border-[var(--border-color)] bg-[var(--background-secondary)] text-sm text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)] transition-colors"
                 >
                   {ex}
                 </button>
@@ -329,7 +329,7 @@ export default function DataChatSheet({ open, onClose, seed }: {
 
         {messages.map((m) => (
           <div key={m.id} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
-            <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
+            <div className={`max-w-[85%] rounded-card px-4 py-2.5 text-sm leading-relaxed ${
               m.role === 'user'
                 ? 'bg-[var(--accent-primary)]/15 text-[var(--foreground)]'
                 : 'bg-[var(--background-secondary)] border border-[var(--border-color)] text-[var(--foreground-secondary)]'
@@ -418,7 +418,7 @@ function RulePreviewCard({ rule, pending, busy, money, onApply, onCancel }: {
   const { matches, sample } = useMemo(() => rulePreview(draft, transactions), [draft, transactions]);
 
   return (
-    <div className="mt-3 rounded-xl border border-[var(--border-color)] bg-[var(--background)] p-3">
+    <div className="mt-3 rounded-card border border-[var(--border-color)] bg-[var(--background)] p-3">
       <p className="font-medium text-[var(--foreground)]">{describeRule(draft)}</p>
       {/* Counts are the "what would this do?" preview — meaningless once applied,
           because `transactions` already has the rule folded in. */}
@@ -444,7 +444,7 @@ function RulePreviewCard({ rule, pending, busy, money, onApply, onCancel }: {
       {pending ? (
         <div className="flex gap-2 mt-3">
           <button type="button" onClick={onApply} disabled={busy} className="btn-primary min-h-[44px] px-4 text-sm disabled:opacity-50">Apply</button>
-          <button type="button" onClick={onCancel} disabled={busy} className="min-h-[44px] px-4 text-sm rounded-xl border border-[var(--border-color)] text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] transition-colors disabled:opacity-50">Cancel</button>
+          <button type="button" onClick={onCancel} disabled={busy} className="min-h-[44px] px-4 text-sm rounded-card border border-[var(--border-color)] text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] transition-colors disabled:opacity-50">Cancel</button>
         </div>
       ) : (
         <p className="mt-3 text-xs text-[var(--accent-success)]">Applied</p>
@@ -485,7 +485,7 @@ function IncomeProposalCard({ proposal, transactions, currency, pending, busy, o
     );
   }
   return (
-    <div className="mt-3 rounded-xl border border-[var(--border-color)] bg-[var(--background)] p-3">
+    <div className="mt-3 rounded-card border border-[var(--border-color)] bg-[var(--background)] p-3">
       <p className="font-medium text-[var(--foreground)]">
         {`Count ${stats.count} deposit${stats.count === 1 ? '' : 's'} as income from ${proposal.name}`}
       </p>
@@ -540,7 +540,7 @@ function BalanceProposalCard({ proposal, currency, accounts, pending, busy, mone
   // is the cents-exact number the owner just read off their bank.
   const m2 = (n: number) => formatMoney(n, currency, 2);
   return (
-    <div className="mt-3 rounded-xl border border-[var(--border-color)] bg-[var(--background)] p-3">
+    <div className="mt-3 rounded-card border border-[var(--border-color)] bg-[var(--background)] p-3">
       <p className="font-medium text-[var(--foreground)]">
         {`Set ${account.name} — ${label} ${m2(Math.abs(currentOf(account)))} → ${m2(proposal.balance)}`}
       </p>
@@ -550,7 +550,7 @@ function BalanceProposalCard({ proposal, currency, accounts, pending, busy, mone
       {pending ? (
         <div className="flex gap-2 mt-3">
           <button type="button" onClick={onApply} disabled={busy} className="btn-primary min-h-[44px] px-4 text-sm disabled:opacity-50">Apply</button>
-          <button type="button" onClick={onCancel} disabled={busy} className="min-h-[44px] px-4 text-sm rounded-xl border border-[var(--border-color)] text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] transition-colors disabled:opacity-50">Cancel</button>
+          <button type="button" onClick={onCancel} disabled={busy} className="min-h-[44px] px-4 text-sm rounded-card border border-[var(--border-color)] text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] transition-colors disabled:opacity-50">Cancel</button>
         </div>
       ) : (
         <p className="mt-3 text-xs text-[var(--accent-success)]">Applied</p>
