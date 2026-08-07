@@ -82,6 +82,8 @@ Receipt scan          ─┘    │                    │
 
 **The money-flow graph** (`/flow`) turns the ledger into a conserving Sankey: every account node balances, and any residual is explained by a *named* stub rather than silently absorbed. Lanes keep a refund, a cashback credit and a card charge out of the column where paychecks live. The residual category states its own size (*"63 smaller categories"*) instead of hiding a quarter of spending behind the word "other".
 
+How work moves through this repo — issues, dependencies, PRs, merge gates: **[CONTRIBUTING-PROCESS.md](CONTRIBUTING-PROCESS.md)**
+
 Deeper detail: **[FLOW_ENGINE.md](FLOW_ENGINE.md)** · **[ARCHITECTURE.md](ARCHITECTURE.md)** · **[AI.md](AI.md)** · **[docs/DECISIONS.md](docs/DECISIONS.md)**
 
 ---
