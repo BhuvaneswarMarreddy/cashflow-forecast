@@ -18,14 +18,19 @@ import {
   billsOnRetiredMethods,
   migrationSummary,
   monthlyCost,
+  spendBreakdown,
   totalMonthlyCost,
 } from '@/lib/bills';
 import * as firestoreService from '@/lib/firestore';
 import { formatMoney } from '@/lib/money';
+import { useTransactions } from '@/context/TransactionContext';
+import type { Transaction } from '@/types';
+import { format } from 'date-fns';
 import starterRows from '@/data/bills-starter.json';
 import {
   AlertTriangle,
   Check,
+  ChevronDown,
   ExternalLink,
   Pencil,
   Plus,
@@ -51,10 +56,12 @@ const LIFECYCLE_LABELS: Record<LifecycleStatus, string> = {
 
 type Filter = 'all' | 'todo' | 'done' | 'exceptions' | 'cancelled' | 'retired-cards';
 
+// "Autopay to-do", not "To do": the filter tracks the autopay-migration
+// checklist, and the shorter label read as a transaction list to the owner.
 const FILTERS: Array<{ id: Filter; label: string }> = [
   { id: 'all', label: 'All' },
-  { id: 'todo', label: 'To do' },
-  { id: 'done', label: 'Done' },
+  { id: 'todo', label: 'Autopay to-do' },
+  { id: 'done', label: 'Autopay done' },
   { id: 'exceptions', label: 'Exceptions' },
   { id: 'cancelled', label: 'Cancelled' },
 ];
@@ -80,9 +87,11 @@ interface BillsTabProps {
   userId: string;
   /** Fixture escape hatch for /dev routes and e2e — skips Firestore entirely. */
   initialBills?: Bill[];
+  /** Fixture escape hatch: drill-down data without the transactions context. */
+  initialTransactions?: Transaction[];
 }
 
-export default function BillsTab({ userId, initialBills }: BillsTabProps) {
+export default function BillsTab({ userId, initialBills, initialTransactions }: BillsTabProps) {
   const [bills, setBills] = useState<Bill[]>(initialBills ?? []);
   const [loading, setLoading] = useState(!initialBills);
   const [seeding, setSeeding] = useState(false);
@@ -90,6 +99,9 @@ export default function BillsTab({ userId, initialBills }: BillsTabProps) {
   const [annualView, setAnnualView] = useState(false);
   const [editing, setEditing] = useState<Bill | 'new' | null>(null);
   const [statusMenuFor, setStatusMenuFor] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const { transactions: ctxTransactions } = useTransactions();
+  const transactions = initialTransactions ?? ctxTransactions;
 
   useEffect(() => {
     if (initialBills) return;
@@ -108,6 +120,22 @@ export default function BillsTab({ userId, initialBills }: BillsTabProps) {
   const summary = useMemo(() => migrationSummary(bills), [bills]);
   const retired = useMemo(() => billsOnRetiredMethods(bills), [bills]);
   const total = useMemo(() => totalMonthlyCost(bills), [bills]);
+
+  // Live actuals behind every matcher row (target-vs-actual on the row face),
+  // and the full breakdown for whichever row is expanded.
+  const actuals = useMemo(() => {
+    const map = new Map<string, number>();
+    const now = new Date();
+    for (const b of bills) {
+      if (b.matcher) map.set(b.id, spendBreakdown(b.matcher, transactions, now).actualMonthly);
+    }
+    return map;
+  }, [bills, transactions]);
+  const expandedBreakdown = useMemo(() => {
+    const b = bills.find(x => x.id === expandedId);
+    if (!b?.matcher) return null;
+    return spendBreakdown(b.matcher, transactions, new Date());
+  }, [expandedId, bills, transactions]);
 
   const visible = useMemo(
     () =>
@@ -207,7 +235,7 @@ export default function BillsTab({ userId, initialBills }: BillsTabProps) {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div className="flex items-baseline gap-2">
-              <h2 className="text-lg font-semibold text-[var(--foreground)]">Fixed bills</h2>
+              <h2 className="text-lg font-semibold text-[var(--foreground)]">Recurring bills</h2>
               <span className="text-2xl font-bold text-[var(--foreground)]">{money(total)}</span>
               <span className="text-sm text-[var(--foreground-muted)]">{per}</span>
             </div>
@@ -282,11 +310,15 @@ export default function BillsTab({ userId, initialBills }: BillsTabProps) {
           const method = PAYMENT_METHODS[bill.paymentMethodId];
           const cancelled = bill.lifecycleStatus === 'cancelled';
           const needsAttention = billsOnRetiredMethods([bill]).length > 0;
+          const actual = actuals.get(bill.id);
+          const overTarget = actual !== undefined && actual > monthlyCost(bill);
+          const isExpanded = expandedId === bill.id;
+          const toggleExpand = bill.matcher
+            ? () => setExpandedId(isExpanded ? null : bill.id)
+            : undefined;
           return (
-            <div
-              key={bill.id}
-              className={`glass-card p-4 flex items-start gap-3 ${cancelled ? 'opacity-55' : ''}`}
-            >
+            <div key={bill.id} className={`glass-card p-4 ${cancelled ? 'opacity-55' : ''}`}>
+            <div className="flex items-start gap-3">
               {/* Fast path: To switch → Switched as a literal checkbox */}
               {bill.migrationStatus === 'to-switch' ? (
                 <button
@@ -303,7 +335,10 @@ export default function BillsTab({ userId, initialBills }: BillsTabProps) {
                 <div className="mt-0.5 w-6 h-6 shrink-0" />
               )}
 
-              <div className="min-w-0 flex-1">
+              <div
+                className={`min-w-0 flex-1 ${toggleExpand ? 'cursor-pointer' : ''}`}
+                onClick={toggleExpand}
+              >
                 <div className="flex items-center gap-2">
                   <span className="font-semibold text-[var(--foreground)] truncate">
                     {bill.url ? (
@@ -311,6 +346,7 @@ export default function BillsTab({ userId, initialBills }: BillsTabProps) {
                         href={bill.url}
                         target="_blank"
                         rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
                         className="hover:underline inline-flex items-center gap-1"
                       >
                         {bill.vendor}
@@ -320,6 +356,16 @@ export default function BillsTab({ userId, initialBills }: BillsTabProps) {
                       bill.vendor
                     )}
                   </span>
+                  {toggleExpand && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleExpand(); }}
+                      className="p-1 -m-1 text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
+                      aria-expanded={isExpanded}
+                      aria-label={`${isExpanded ? 'Hide' : 'Show'} spending behind ${bill.vendor}`}
+                    >
+                      <ChevronDown className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                    </button>
+                  )}
                   {needsAttention && <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />}
                 </div>
                 <div className="text-sm text-[var(--foreground-secondary)] mt-0.5">
@@ -330,7 +376,7 @@ export default function BillsTab({ userId, initialBills }: BillsTabProps) {
                 <div className="text-sm text-[var(--foreground-muted)] mt-0.5 relative">
                   {method?.label || bill.paymentMethodId} ·{' '}
                   <button
-                    onClick={() => setStatusMenuFor(statusMenuFor === bill.id ? null : bill.id)}
+                    onClick={(e) => { e.stopPropagation(); setStatusMenuFor(statusMenuFor === bill.id ? null : bill.id); }}
                     className="font-medium text-[var(--foreground-secondary)] underline decoration-dotted underline-offset-2 hover:text-[var(--foreground)]"
                   >
                     {MIGRATION_LABELS[bill.migrationStatus]}
@@ -366,6 +412,11 @@ export default function BillsTab({ userId, initialBills }: BillsTabProps) {
                   {money(monthlyCost(bill))}
                   <span className="text-xs text-[var(--foreground-muted)]">{per}</span>
                 </div>
+                {actual !== undefined && (
+                  <div className={`text-xs ${overTarget ? 'text-amber-500 font-medium' : 'text-[var(--foreground-muted)]'}`}>
+                    actual {money(actual)}{per}
+                  </div>
+                )}
                 <button
                   onClick={() => setEditing(bill)}
                   className="mt-1 p-2 -mr-2 text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
@@ -374,6 +425,73 @@ export default function BillsTab({ userId, initialBills }: BillsTabProps) {
                   <Pencil className="w-4 h-4" />
                 </button>
               </div>
+            </div>
+
+            {/* Merchant drill-down: the actual spending behind a target row */}
+            {isExpanded && bill.matcher && expandedBreakdown && (
+              <div className="mt-3 pt-3 border-t border-[var(--border-color)] text-sm">
+                <div className="flex flex-wrap items-baseline gap-x-2 mb-2">
+                  <span className="font-semibold text-[var(--foreground)]">
+                    Target {formatMoney(monthlyCost(bill), 'USD', 2)}/mo
+                  </span>
+                  <span className="text-[var(--foreground-secondary)]">
+                    · 3-mo actual {formatMoney(expandedBreakdown.actualMonthly, 'USD', 2)}/mo
+                  </span>
+                  {expandedBreakdown.actualMonthly > monthlyCost(bill) ? (
+                    <span className="text-amber-500 font-medium">over target</span>
+                  ) : (
+                    <span className="text-emerald-500 font-medium">on target</span>
+                  )}
+                </div>
+                {(() => {
+                  const top = expandedBreakdown.merchants.slice(0, 8);
+                  const rest = expandedBreakdown.merchants.slice(8);
+                  const others = rest.reduce((s, x) => s + x.monthly, 0);
+                  const max = Math.max(...top.map(x => Math.abs(x.monthly)), 0.01);
+                  return (
+                    <div className="space-y-1.5">
+                      {top.map(x => (
+                        <div key={x.merchant} className="flex items-center gap-2">
+                          <span className="w-36 truncate text-[var(--foreground-secondary)]">{x.merchant}</span>
+                          <span className="w-20 text-right tabular-nums text-[var(--foreground)]">
+                            {formatMoney(x.monthly, 'USD', 0)}/mo
+                          </span>
+                          <div className="flex-1 h-1.5 rounded bg-[var(--background-tertiary)]">
+                            <div
+                              className="h-1.5 rounded bg-[var(--accent-primary)]"
+                              style={{ width: `${Math.max(0, (x.monthly / max) * 100)}%` }}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                      {rest.length > 0 && (
+                        <div className="flex items-center gap-2">
+                          <span className="w-36 truncate text-[var(--foreground-muted)]">
+                            {rest.length} others
+                          </span>
+                          <span className="w-20 text-right tabular-nums text-[var(--foreground-muted)]">
+                            {formatMoney(others, 'USD', 0)}/mo
+                          </span>
+                        </div>
+                      )}
+                      {expandedBreakdown.merchants.length === 0 && (
+                        <p className="text-[var(--foreground-muted)]">
+                          No matching transactions in the last 3 months.
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
+                <p className="text-xs text-[var(--foreground-muted)] mt-2">
+                  {expandedBreakdown.months
+                    .map(mm => `${format(new Date(`${mm.month}-15`), 'MMM')} ${formatMoney(mm.total, 'USD', 0)}`)
+                    .join(' · ')}
+                  {' · '}
+                  {format(new Date(`${expandedBreakdown.currentMonth.month}-15`), 'MMM')} so far{' '}
+                  {formatMoney(expandedBreakdown.currentMonth.total, 'USD', 0)}
+                </p>
+              </div>
+            )}
             </div>
           );
         })}
