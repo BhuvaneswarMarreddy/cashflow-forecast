@@ -393,6 +393,12 @@ export interface UserProfile {
     emergencyFundAmount?: number; // Fixed amount goal (alternative to months)
     categoryBudgets?: CategoryBudget[]; // Per-category spending limits
     notificationPreferences?: NotificationPreferences; // Reminder settings
+    /**
+     * FIN-PENDING-001 (#87). Treat provider holds as settled WHEN CALCULATING.
+     * Never mutates a transaction — see FinancialPolicy in src/lib/classify.ts.
+     * Absent = off: the app does not count money the bank has not moved.
+     */
+    includePendingInCalculations?: boolean;
   };
 }
 

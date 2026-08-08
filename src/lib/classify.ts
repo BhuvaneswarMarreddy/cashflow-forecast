@@ -214,13 +214,40 @@ const COST_MEANINGS: readonly FinancialMeaning[] = [
 export const personalCostSign = (m: FinancialMeaning): 1 | 0 | -1 =>
   COST_MEANINGS.includes(m) ? 1 : m === 'refund' ? -1 : 0;
 
-/** What the app knows about the owner's income when it reads a row. */
-export interface IncomeContext {
+/**
+ * Owner intent, resolved ONCE in UserProfileContext and threaded into every
+ * calculation. This is the app's financial policy object — the single answer to
+ * "what does this owner consider real money" — not a bag of options.
+ *
+ * FIN-PENDING-001 (#86) widened it from income-only. It is deliberately the SAME
+ * object rather than a second context: every screen that makes a financial claim
+ * already passes this, so a new policy field reaches all of them without a single
+ * call-site edit. A parallel `PendingContext` would have to be threaded through the
+ * same thirty call sites and could drift out of step with this one.
+ */
+export interface FinancialPolicy {
   /** `users/{uid}/income` — the approved sources. */
   sources?: IncomeSource[];
   /** `users/{uid}/reviews`, keyed by transaction id. */
   reviews?: Record<string, InflowReview>;
+  /**
+   * FIN-PENDING-001. Treat provider holds as effective financial activity.
+   *
+   * Read-time interpretation ONLY. Nothing ever writes `pending: false` — storage
+   * keeps provider truth, so this flips back losslessly and the audit trail survives.
+   * Rows stay badged `Pending` in every mode.
+   *
+   * Scope is deliberately asymmetric — STATE yes, PATTERN INFERENCE no. Balances,
+   * income, spending, budgets, Flow and the forecast baseline honour it. Recurring
+   * detection, behaviour projections, bill matching and the review queue never do:
+   * a $1 fuel pre-auth must not seed a permanent recurring bill, and a 6-month
+   * average must not move daily on rows that post at a different amount.
+   */
+  includePending?: boolean;
 }
+
+/** @deprecated Use `FinancialPolicy`. Kept so no call site had to change in #86. */
+export type IncomeContext = FinancialPolicy;
 
 /** Reason ids, sharing FIN-REVIEW-002 §2.4's vocabulary so there is one set. */
 export type InflowReviewReason =
@@ -468,9 +495,10 @@ export function interpretTransaction(
       : 'personal_expense';
   }
 
-  // A hold is not settled history. Excluding it here is the ONE place that
-  // decision lives; a consumer that forgets to ask still gets 'excluded'.
-  const held = pending === 'pending';
+  // A hold is not settled history — unless the owner has said to treat it as one
+  // (FIN-PENDING-001). This is the ONE place that decision lives; a consumer that
+  // forgets to ask still gets 'excluded', which is why the default is the safe one.
+  const held = pending === 'pending' && !income?.includePending;
   if (held) reason += '; pending hold, excluded from posted totals';
 
   // A CONFIRMED meaning decides its own treatment; a DERIVED one still defers to the

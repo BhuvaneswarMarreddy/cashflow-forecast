@@ -117,8 +117,9 @@ export function calculateCurrentCash(accounts: PaymentAccount[]): number {
 export function deriveAccountBalance(
   account: PaymentAccount,
   transactions: Transaction[],
-  includePending = false
+  policy?: IncomeContext
 ): number {
+  const includePending = policy?.includePending ?? false;
   const todayKey = format(new Date(), 'yyyy-MM-dd');
   const openingKey = account.openingDate || '0000-00-00';
   const isDebt = account.type === 'credit_card' || account.type === 'personal_loan';
@@ -152,9 +153,9 @@ export function deriveAccountBalance(
 export function withDerivedBalances(
   accounts: PaymentAccount[],
   transactions: Transaction[],
-  includePending = false
+  policy?: IncomeContext
 ): PaymentAccount[] {
-  return accounts.map((a) => ({ ...a, currentBalance: deriveAccountBalance(a, transactions, includePending) }));
+  return accounts.map((a) => ({ ...a, currentBalance: deriveAccountBalance(a, transactions, policy) }));
 }
 
 /**

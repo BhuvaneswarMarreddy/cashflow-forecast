@@ -40,6 +40,8 @@ describe('deriveAccountBalance with opening anchor', () => {
 // the opening anchor is the provider's POSTED balance, so folding them in by
 // default would double-count. The flag is the owner asking "and once these clear?".
 describe('deriveAccountBalance includePending', () => {
+  /** FIN-PENDING-001 policy, on. The owner's setting, not a bare flag. */
+  const ON = { includePending: true };
   const bank = acct({ id: 'b', openingBalance: 1000, openingDate: '2026-02-01' });
   const txns = [
     tx({ id: 'posted', amount: 50, type: 'expense', accountId: 'b', date: '2026-02-10' }),
@@ -52,18 +54,18 @@ describe('deriveAccountBalance includePending', () => {
   });
 
   it('folds holds in — both directions — when asked', () => {
-    expect(deriveAccountBalance(bank, txns, true)).toBeCloseTo(950 + 4334.93 - 92.73, 2);
+    expect(deriveAccountBalance(bank, txns, ON)).toBeCloseTo(950 + 4334.93 - 92.73, 2);
   });
 
   it('a debt account nets holds the other way', () => {
     const card = acct({ id: 'c', type: 'credit_card', provider: 'amex', openingBalance: 500, openingDate: '2026-02-01' });
     const holds = [tx({ id: 'buy', amount: 40, type: 'expense', accountId: 'c', date: '2026-02-05', pending: true })];
     expect(deriveAccountBalance(card, holds)).toBe(500);       // hold ignored
-    expect(deriveAccountBalance(card, holds, true)).toBe(540); // a pending purchase raises owed
+    expect(deriveAccountBalance(card, holds, ON)).toBe(540); // a pending purchase raises owed
   });
 
   it('withDerivedBalances passes the flag through', () => {
     expect(withDerivedBalances([bank], txns)[0].currentBalance).toBe(950);
-    expect(withDerivedBalances([bank], txns, true)[0].currentBalance).toBeCloseTo(5192.20, 2);
+    expect(withDerivedBalances([bank], txns, ON)[0].currentBalance).toBeCloseTo(5192.20, 2);
   });
 });
