@@ -50,16 +50,56 @@ export function monthlyAverages(
     window.add(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1)).toISOString().slice(0, 7));
   }
   let inc = 0, sp = 0;
+  /**
+   * Months inside the window that the user was actually present for. This is the
+   * divisor, and it is NOT `months`.
+   *
+   * Dividing by the window understated burn for anyone whose history is shorter
+   * than it: ten weeks of data over a 6-month window divided spending by six.
+   * Runway is cash ÷ burn, so the same mistake overstated runway ~2.3× — the
+   * direction that tells someone they have more cushion than they do. A
+   * five-persona review caught it as "Monthly Expenses $1,060" on a household
+   * paying $1,850 of rent.
+   *
+   * A month with no rows because nothing happened is a real zero and still
+   * counts — it is spanned by the earliest observation. A month before the
+   * user's history begins is not an observation of zero; it is missing data.
+   */
+  const observed = new Set<string>();
   for (const t of transactions) {
-    if (!window.has(t.date.split('T')[0].slice(0, 7))) continue;
+    const month = t.date.split('T')[0].slice(0, 7);
+    if (!window.has(month)) continue;
     // PENDING: excluded — this is the settled-history baseline the forecast
     // projects forward, and a hold is not settled history.
     if (!isPosted(t)) continue;
+    // Recorded before classification: a month containing only transfers is still
+    // a month the user was here, and skipping it would restore the over-estimate
+    // through a side door.
+    observed.add(month);
     const i = interpretTransaction(t, accounts, income);
     if (i.income === 'counted') inc += t.amount;
     else if (i.expense === 'counted') sp += t.amount;
   }
-  return { income: Math.round(inc / months), spending: Math.round(sp / months) };
+
+  if (observed.size === 0) return { income: 0, spending: 0 };
+
+  // Span from the earliest observed month to the most recent one in the window,
+  // so quiet months inside a user's real history are counted and months before
+  // it are not.
+  const sorted = [...observed].sort();
+  const first = sorted[0];
+  const latest = [...window].sort().pop()!;
+  const span = monthsBetweenInclusive(first, latest);
+  const divisor = Math.min(Math.max(span, 1), months);
+
+  return { income: Math.round(inc / divisor), spending: Math.round(sp / divisor) };
+}
+
+/** Inclusive count of calendar months from one `YYYY-MM` to another. */
+function monthsBetweenInclusive(from: string, to: string): number {
+  const [fy, fm] = from.split('-').map(Number);
+  const [ty, tm] = to.split('-').map(Number);
+  return (ty - fy) * 12 + (tm - fm) + 1;
 }
 
 export function calculateCurrentCash(accounts: PaymentAccount[]): number {
