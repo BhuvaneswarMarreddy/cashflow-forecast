@@ -6,9 +6,14 @@ live extraction from the bank at call time (p50 ~3s, p95 ~11s), and
 /transactions/sync pulls up to 730 days of history with cursor-exact deltas.
 
 Trial-plan discipline (10 PRODUCTION ITEMS, LIFETIME — deleting does NOT free a
-slot): this module never calls /item/remove. A broken connection is repaired
-with Link UPDATE MODE (create_link_token with the existing access_token), never
-by re-linking, because a fresh link burns a slot forever.
+slot): /item/remove is NEVER a repair. A broken connection is repaired with Link
+UPDATE MODE (create_link_token with the existing access_token), never by
+re-linking, because a fresh link burns a slot forever.
+
+remove_item() exists for exactly one caller: account deletion (#72). Revoking on
+the way out costs a slot the owner was never getting back anyway, and the
+alternative — dropping our token while the Item lives on — leaves the bank
+consent granted with nothing left that could ever revoke it.
 
 Credentials: PLAID_CLIENT_ID / PLAID_SECRET are Firebase secrets. Access tokens
 live in meta/plaid (default-deny to clients; admin SDK only) and are NEVER
