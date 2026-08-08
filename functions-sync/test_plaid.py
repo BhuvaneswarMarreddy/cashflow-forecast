@@ -220,5 +220,79 @@ class SyncWalk(unittest.TestCase):
         self.assertEqual(calls, [None, "c1"])  # first call sends NO cursor key
 
 
+class PendingDeletes(unittest.TestCase):
+    """PEND-004. The sweep that heals orphaned holds must not eat live ones.
+
+    Scenario throughout: one hold we wrote earlier (`pending_pl_HOLD`) that is STILL
+    pending, plus whatever this run reported.
+    """
+    EXISTING = {"pending_pl_HOLD", "pl_POSTED", "pending_pl_OTHER"}
+
+    def test_incremental_run_keeps_a_hold_it_did_not_re_report(self):
+        # The bug this pins: /transactions/sync reports a still-pending row ONCE.
+        # A delta carrying only an unrelated posted row used to delete every hold
+        # inside MATCH_DAYS of it.
+        self.assertEqual(
+            plaid_ingest.pending_deletes_for(self.EXISTING, set(), [], full_walk=False),
+            [])
+
+    def test_removed_list_is_honoured_on_an_incremental_run(self):
+        # Plaid's own signal: this hold posted or was declined. Always authoritative.
+        self.assertEqual(
+            plaid_ingest.pending_deletes_for(self.EXISTING, set(), ["HOLD"], full_walk=False),
+            ["pending_pl_HOLD"])
+
+    def test_full_walk_sweeps_holds_absent_from_the_fetch(self):
+        # Cursor reset / first run: the fetch IS the whole picture, so absence means
+        # gone. This is the orphan-healing the sweep was added for.
+        self.assertEqual(
+            plaid_ingest.pending_deletes_for(
+                self.EXISTING, {"pending_pl_OTHER"}, [], full_walk=True),
+            ["pending_pl_HOLD"])
+
+    def test_full_walk_keeps_holds_it_re_reported(self):
+        self.assertEqual(
+            plaid_ingest.pending_deletes_for(
+                self.EXISTING, {"pending_pl_HOLD", "pending_pl_OTHER"}, [], full_walk=True),
+            [])
+
+    def test_posted_rows_are_never_swept(self):
+        # A removed POSTED row is a bank-side reversal — history is the owner's to edit.
+        out = plaid_ingest.pending_deletes_for(self.EXISTING, set(), [], full_walk=True)
+        self.assertNotIn("pl_POSTED", out)
+
+
+class PendingLinkage(unittest.TestCase):
+    """PEND-004. Explicit hold->posted linkage, so the twin guard never has to
+    guess from amount and date."""
+
+    def test_posted_row_carries_its_holds_doc_id(self):
+        row = plaid_ingest.map_pl_txn(
+            {"transaction_id": "posted1", "amount": 58.90, "date": "2026-08-09",
+             "name": "RESTAURANT", "pending_transaction_id": "hold1"},
+            "acct1", "chase")
+        # Stored as the doc id we actually wrote the hold under, not the raw Plaid id,
+        # so the read side can look it up without re-deriving the prefix.
+        self.assertEqual(row["pendingTransactionId"], "pending_pl_hold1")
+        self.assertIn("pendingTransactionId", plaid_ingest.PLAID_DOC_FIELDS)
+
+    def test_absent_when_the_row_never_was_a_hold(self):
+        row = plaid_ingest.map_pl_txn(
+            {"transaction_id": "posted2", "amount": 12.34, "date": "2026-08-09",
+             "name": "STARBUCKS"},
+            "acct1", "chase")
+        self.assertNotIn("pendingTransactionId", row)
+
+    def test_amount_may_differ_from_the_hold_it_replaces(self):
+        # A $50 authorization posting at $58.90 with a tip is the normal case, and the
+        # reason amount-based twin matching was rejected.
+        row = plaid_ingest.map_pl_txn(
+            {"transaction_id": "posted3", "amount": 58.90, "date": "2026-08-09",
+             "name": "RESTAURANT", "pending_transaction_id": "hold_at_50"},
+            "acct1", "chase")
+        self.assertEqual(row["amount"], 58.90)
+        self.assertEqual(row["pendingTransactionId"], "pending_pl_hold_at_50")
+
+
 if __name__ == "__main__":
     unittest.main()
