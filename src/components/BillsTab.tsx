@@ -233,7 +233,7 @@ export default function BillsTab({ userId, initialBills, initialTransactions }: 
   return (
     <div className="space-y-4">
       {/* Header: financial total + migration progress */}
-      <div className="glass-card p-5">
+      <div className="glass-card p-4">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div className="flex items-baseline gap-2">
@@ -261,12 +261,12 @@ export default function BillsTab({ userId, initialBills, initialTransactions }: 
           <div className="flex items-center gap-2">
             <button
               onClick={() => setAnnualView((v) => !v)}
-              className="btn-secondary px-3 py-2 rounded-control text-sm font-medium"
+              className="btn-secondary px-3 min-h-[44px] rounded-control text-sm font-medium"
               aria-pressed={annualView}
             >
               {annualView ? 'Annual' : 'Monthly'}
             </button>
-            <button onClick={() => setEditing('new')} className="btn-primary px-3 py-2 rounded-control text-sm font-semibold flex items-center gap-1">
+            <button onClick={() => setEditing('new')} className="btn-primary px-3 min-h-[44px] rounded-control text-sm font-semibold flex items-center gap-1">
               <Plus className="w-4 h-4" /> Add bill
             </button>
           </div>
@@ -291,12 +291,12 @@ export default function BillsTab({ userId, initialBills, initialTransactions }: 
       </div>
 
       {/* Filter segmented control */}
-      <div className="flex items-center gap-2 p-2 bg-[var(--background-secondary)] rounded-control border border-[var(--border-color)] overflow-x-auto">
+      <div className="flex items-center gap-2 p-2 bg-[var(--background-secondary)] rounded-control border border-[var(--border-color)] scroll-x-mobile">
         {FILTERS.map((f) => (
           <button
             key={f.id}
             onClick={() => setFilter(f.id)}
-            className={`px-3 min-h-[44px] text-sm font-semibold rounded-control whitespace-nowrap transition-all ${
+            className={`px-3 min-w-[44px] min-h-[44px] text-sm font-semibold rounded-control whitespace-nowrap transition-all ${
               filter === f.id
                 ? 'bg-[var(--accent-primary)] text-[#16181c] shadow-sm'
                 : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)]'
@@ -308,7 +308,7 @@ export default function BillsTab({ userId, initialBills, initialTransactions }: 
       </div>
 
       {/* Bill list */}
-      <div className="space-y-2">
+      <div className="space-y-4">
         {visible.length === 0 && (
           <div className="glass-card p-6 text-center text-sm text-[var(--foreground-secondary)]">
             Nothing matches this filter.
@@ -327,57 +327,75 @@ export default function BillsTab({ userId, initialBills, initialTransactions }: 
           return (
             <div key={bill.id} className={`glass-card p-4 ${cancelled ? 'opacity-55' : ''}`}>
             <div className="flex items-start gap-3">
-              {/* Fast path: To switch → Switched as a literal checkbox */}
+              {/* Fast path: To switch → Switched as a literal checkbox.
+                  UI-115: the box occupies 24px of LAYOUT and 44px of TOUCH —
+                  `p-2 -m-2` grows the hit area outward without reserving the
+                  space. Reserving it (min-w-[44px]) gave every row a 44px empty
+                  column, which is what starved the title until vendor names
+                  clipped mid-word. */}
               {bill.migrationStatus === 'to-switch' ? (
                 <button
                   onClick={() => applyUpdate(bill.id, { migrationStatus: 'switched', paymentMethodId: 'bofa-debit' })}
-                  className="mt-1 w-6 h-6 min-w-[44px] min-h-[44px] shrink-0 rounded-control border-2 border-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/20 transition-colors"
+                  className="tap-target shrink-0 text-[var(--accent-primary)]"
                   title="Mark switched to BofA debit"
                   aria-label={`Mark ${bill.vendor} switched to BofA debit`}
-                />
+                >
+                  <span className="block w-6 h-6 rounded-control border-2 border-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/20 transition-colors" />
+                </button>
               ) : bill.migrationStatus === 'switched' ? (
-                <div className="mt-1 w-6 h-6 min-w-[44px] min-h-[44px] shrink-0 rounded-control bg-[var(--accent-primary)] flex items-center justify-center">
-                  <Check className="w-4 h-4 text-[#16181c]" />
+                <div className="shrink-0 w-6 h-6 rounded-control bg-[var(--accent-primary)] flex items-center justify-center">
+                  <Check className="w-4 h-4 text-[var(--background)]" />
                 </div>
               ) : (
-                <div className="mt-1 w-6 h-6 min-w-[44px] min-h-[44px] shrink-0" />
+                // A 24px spacer keeps every row's text on the same left edge.
+                <div className="shrink-0 w-6" aria-hidden="true" />
               )}
 
               <div
                 className={`min-w-0 flex-1 ${toggleExpand ? 'cursor-pointer' : ''}`}
                 onClick={toggleExpand}
               >
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-[var(--foreground)] truncate">
-                    {bill.url ? (
-                      <a
-                        href={bill.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        className="hover:underline inline-flex items-center gap-1"
-                      >
-                        {bill.vendor}
-                        <ExternalLink className="w-3.5 h-3.5 text-[var(--foreground-muted)]" />
-                      </a>
-                    ) : (
-                      bill.vendor
-                    )}
-                  </span>
-                  {bill.nonNegotiable && (
-                    <Lock className="w-3.5 h-3.5 text-[var(--accent-primary)] shrink-0" aria-label="Non-negotiable" />
+                {/* UI-115: `truncate` on a span wrapping an inline-flex anchor
+                    cannot ellipsize — overflow does not apply to an inline box,
+                    so the name was hard-clipped mid-word ("Progressive Auto
+                    Insurar") and the link icon was cut off entirely. The
+                    truncating element is now the flex item itself, and the icon
+                    sits outside it where it can never be clipped. */}
+                <div className="flex items-center gap-2 min-w-0">
+                  {bill.url ? (
+                    <a
+                      href={bill.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="font-semibold text-[var(--foreground)] truncate min-w-0 hover:underline"
+                    >
+                      {bill.vendor}
+                    </a>
+                  ) : (
+                    <span className="font-semibold text-[var(--foreground)] truncate min-w-0">
+                      {bill.vendor}
+                    </span>
                   )}
+                  {bill.url && (
+                    <ExternalLink className="w-4 h-4 text-[var(--foreground-muted)] shrink-0" aria-hidden="true" />
+                  )}
+                  {bill.nonNegotiable && (
+                    <Lock className="w-4 h-4 text-[var(--accent-primary)] shrink-0" aria-label="Non-negotiable" />
+                  )}
+                  {needsAttention && <AlertTriangle className="w-4 h-4 text-[var(--accent-warning)] shrink-0" />}
                   {toggleExpand && (
+                    // 24px of layout, 44px of touch — the old min-w-[44px] grew
+                    // the title row and stole the width the name needed.
                     <button
                       onClick={(e) => { e.stopPropagation(); toggleExpand(); }}
-                      className="p-1 -m-1 min-w-[44px] min-h-[44px] flex items-center justify-center text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
+                      className="tap-target shrink-0 text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
                       aria-expanded={isExpanded}
                       aria-label={`${isExpanded ? 'Hide' : 'Show'} spending behind ${bill.vendor}`}
                     >
                       <ChevronDown className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                     </button>
                   )}
-                  {needsAttention && <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />}
                 </div>
                 <div className="text-sm text-[var(--foreground-secondary)] mt-1">
                   {formatMoney(bill.amount, 'USD', 2)} · {bill.frequency}
@@ -388,7 +406,7 @@ export default function BillsTab({ userId, initialBills, initialTransactions }: 
                   {method?.label || bill.paymentMethodId} ·{' '}
                   <button
                     onClick={(e) => { e.stopPropagation(); setStatusMenuFor(statusMenuFor === bill.id ? null : bill.id); }}
-                    className="font-medium text-[var(--foreground-secondary)] underline decoration-dotted underline-offset-2 hover:text-[var(--foreground)]"
+                    className="tap-target font-medium text-[var(--foreground-secondary)] underline decoration-dotted underline-offset-2 hover:text-[var(--foreground)]"
                   >
                     {MIGRATION_LABELS[bill.migrationStatus]}
                   </button>
@@ -418,19 +436,23 @@ export default function BillsTab({ userId, initialBills, initialTransactions }: 
                 )}
               </div>
 
-              <div className="text-right shrink-0">
-                <div className={`font-semibold ${cancelled ? 'line-through text-[var(--foreground-muted)]' : 'text-[var(--foreground)]'}`}>
-                  {money(monthlyCost(bill))}
-                  <span className="text-xs text-[var(--foreground-muted)]">{per}</span>
-                </div>
-                {actual !== undefined && (
-                  <div className={`text-xs ${overTarget ? 'text-amber-500 font-medium' : 'text-[var(--foreground-muted)]'}`}>
-                    actual {money(actual)}{per}
+              {/* A fixed right column, so amounts line up down the list instead
+                  of each row sizing its own. tnum keeps the digits in step. */}
+              <div className="shrink-0 flex items-start gap-2">
+                <div className="text-right tnum">
+                  <div className={`font-semibold whitespace-nowrap ${cancelled ? 'line-through text-[var(--foreground-muted)]' : 'text-[var(--foreground)]'}`}>
+                    {money(monthlyCost(bill))}
+                    <span className="text-xs text-[var(--foreground-muted)]">{per}</span>
                   </div>
-                )}
+                  {actual !== undefined && (
+                    <div className={`text-xs whitespace-nowrap ${overTarget ? 'text-[var(--accent-warning)] font-medium' : 'text-[var(--foreground-muted)]'}`}>
+                      actual {money(actual)}{per}
+                    </div>
+                  )}
+                </div>
                 <button
                   onClick={() => setEditing(bill)}
-                  className="mt-1 p-2 -mr-2 min-w-[44px] min-h-[44px] flex items-center justify-center text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
+                  className="tap-target shrink-0 text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
                   aria-label={`Edit ${bill.vendor}`}
                 >
                   <Pencil className="w-4 h-4" />

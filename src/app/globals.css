@@ -217,6 +217,33 @@ body {
 }
 }
 
+/**
+ * UI-115 — a 44px touch target that costs 0px of layout.
+ *
+ * The two obvious approaches both fail. Padding the button to 44px makes it a
+ * 44px flex item, which grows its row and steals the width the text beside it
+ * needs — that is what clipped bill vendor names mid-word. Shrinking it back
+ * with a negative margin leaves the real hit box at whatever the padding made
+ * it, which is how these ended up at 32px.
+ *
+ * An absolutely-positioned pseudo-element is outside flow: the button stays
+ * icon-sized for layout while the thumb gets its full 44px, centred.
+ */
+@layer components {
+  .tap-target {
+    position: relative;
+  }
+  .tap-target::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    transform: translate(-50%, -50%);
+  }
+}
+
 /* Glass morphism card */
 @layer components {
 .glass-card {
@@ -978,6 +1005,11 @@ dialog.sheet {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
+    /* The scrollbar is hidden, so without this the last chip is sliced flush at
+       the gutter and reads as a rendering bug rather than as more content. The
+       fade only appears while there IS overflow to the right. */
+    mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
   }
 
   .scroll-x-mobile::-webkit-scrollbar {
