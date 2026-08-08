@@ -6,7 +6,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import { useTransactions } from '@/context/TransactionContext';
 import { PAYMENT_METHODS, PaymentAccount, IncomeSource, AccountType, PaymentMethod } from '@/types';
-import { currentOf } from '@/lib/accounts';
+import { currentOf, openingAnchor } from '@/lib/accounts';
 import { formatMoney, monthlyIncomeOf } from '@/lib/money';
 import { connectBankWithPlaid, syncNow } from '@/lib/sync-client';
 import {
@@ -255,8 +255,7 @@ function OnboardingContent() {
       name: bankForm.name,
       type: bankForm.type,
       provider: bankForm.provider,
-      openingBalance: parseFloat(bankForm.balance) || 0,
-      openingDate: new Date().toISOString().slice(0, 10),
+      ...openingAnchor(bankForm.balance, new Date().toISOString().slice(0, 10)),
       lastFourDigits: bankForm.lastFourDigits || undefined,
       color: providerInfo?.color || '#8b949e',
       isActive: true,
@@ -390,8 +389,7 @@ function OnboardingContent() {
       name: cardForm.name,
       type: 'credit_card',
       provider: cardForm.provider,
-      openingBalance: parseFloat(cardForm.balance) || 0,
-      openingDate: new Date().toISOString().slice(0, 10),
+      ...openingAnchor(cardForm.balance, new Date().toISOString().slice(0, 10)),
       creditLimit: parseFloat(cardForm.creditLimit) || undefined,
       apr: parseFloat(cardForm.apr) || undefined,
       statementDate: cardForm.statementDate ? parseInt(cardForm.statementDate) : undefined,
@@ -446,8 +444,7 @@ function OnboardingContent() {
       name: loanForm.name,
       type: 'personal_loan',
       provider: loanForm.provider,
-      openingBalance: parseFloat(loanForm.balance) || 0,
-      openingDate: new Date().toISOString().slice(0, 10),
+      ...openingAnchor(loanForm.balance, new Date().toISOString().slice(0, 10)),
       originalAmount: parseFloat(loanForm.originalAmount) || undefined,
       apr: parseFloat(loanForm.apr) || undefined,
       monthlyPayment: parseFloat(loanForm.monthlyPayment) || undefined,

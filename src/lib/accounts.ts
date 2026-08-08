@@ -18,6 +18,33 @@ export function sortAccounts(accounts: PaymentAccount[]): PaymentAccount[] {
   });
 }
 
+/**
+ * The opening anchor — or no anchor at all (#83).
+ *
+ * An anchor is a claim: "as of THIS date, the balance was THIS." `deriveAccountBalance`
+ * believes it completely and skips every row dated before `openingDate`, on the grounds
+ * that those rows are already inside `openingBalance`.
+ *
+ * That is only true when a human actually made the claim. Every creation site used to
+ * write `parseFloat(form.balance) || 0` with `openingDate: today`, and `|| 0` collapses
+ * a BLANK field and a typed `0` into the same value — so leaving the balance empty
+ * asserted "$0.00, as of today", and two years of imported history silently vanished
+ * behind it. The CSV importer hardcoded exactly that pair for every auto-created account.
+ *
+ * So the raw string decides, not the parsed number: blank means the user asserted
+ * nothing and there is no anchor, which lets `openingKey` fall back to '0000-00-00' and
+ * the whole history count. A typed `0` is a real claim and anchors normally.
+ */
+export function openingAnchor(
+  raw: string | number | null | undefined,
+  todayISO: string
+): { openingBalance: number; openingDate?: string } {
+  const trimmed = typeof raw === 'number' ? String(raw) : (raw ?? '').trim();
+  const parsed = Number(trimmed);
+  if (trimmed === '' || !Number.isFinite(parsed)) return { openingBalance: 0 };
+  return { openingBalance: parsed, openingDate: todayISO };
+}
+
 /** New contiguous sortIndex for each id in orderedIds that exists in accounts. */
 export function reindex(orderedIds: string[], accounts: PaymentAccount[]): Array<{ id: string; sortIndex: number }> {
   const known = new Set(accounts.map((a) => a.id));

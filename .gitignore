@@ -75,3 +75,6 @@ firestore-debug.log
 
 # batch reanalysis artifacts — live data, never committed
 reanalysis-*.local.json
+
+# every script that plans a write before making it drops its plan here
+*.local.json

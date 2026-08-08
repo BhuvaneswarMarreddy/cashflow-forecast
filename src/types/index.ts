@@ -180,7 +180,15 @@ export interface PaymentAccount {
   isActive: boolean;
   sortIndex?: number; // user-defined display order; undefined sorts to the end
   openingBalance: number; // balance AT openingDate; cash +, debt = amount owed
-  openingDate: string;    // ISO yyyy-MM-dd; net is summed from here forward
+  /**
+   * ISO yyyy-MM-dd; net is summed from here forward. OPTIONAL, and absent is the
+   * meaningful case (#83): an anchor is a claim that the balance was known on a date,
+   * so an account nobody stated a balance for has no anchor and its whole history
+   * counts. Required-ness is what forced every creation site to invent `today`, which
+   * hid every pre-existing row behind a $0 opening balance. Build it with
+   * `openingAnchor()` in src/lib/accounts.ts — never stamp a date next to a `|| 0`.
+   */
+  openingDate?: string;
   currentBalance?: number; // DERIVED in memory by withDerivedBalances; never stored
   // Payment linking - which account pays this card/loan
   paymentFromAccountId?: string; // ID of the account that pays this credit card or loan
