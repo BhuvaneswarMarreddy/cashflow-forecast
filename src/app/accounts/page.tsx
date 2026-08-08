@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { formatMoney, monthlyIncomeOf } from '@/lib/money';
+import { reconcileAllIncome, type Cadence } from '@/lib/income-cadence';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useUserProfile } from '@/context/UserProfileContext';
@@ -392,6 +393,10 @@ export default function AccountsPage() {
   // from the last 6 months of transactions (so these never read a bare $0).
   // ACTIVE sources only: getIncomeSources() now returns paused sources too (so they
   // can be resumed), and a paused source is not money arriving.
+  // #75: cross-check each source's declared frequency against its own deposits.
+  // The first confident disagreement suppresses the figure everywhere it feeds.
+  const incomeReconciliations = reconcileAllIncome(profile?.incomeSources, transactions);
+  const incomeConflict = incomeReconciliations.find((r) => r.conflict) ?? null;
   const incomeFromSources = monthlyIncomeOf(profile?.incomeSources?.filter((i) => i.isActive) ?? []);
   const derivedMonthly = monthlyAverages(transactions, derivedAccounts, 6, incomeContext);
   const monthlyIncome = incomeFromSources > 0 ? incomeFromSources : derivedMonthly.income;
@@ -483,12 +488,30 @@ export default function AccountsPage() {
           <div className="stat-card">
             <div className="flex items-center justify-between mb-2">
               <span className="text-[var(--foreground-secondary)] text-sm">Monthly Income</span>
-              <Banknote className="w-5 h-5 text-[var(--accent-success)]" />
+              <Banknote className="w-5 h-5 text-[var(--money-in)]" />
             </div>
-            <p className="text-2xl font-bold text-[var(--accent-success)]">
-              {formatMoney(monthlyIncome, 'USD', 2)}
-            </p>
-            <p className="text-xs text-[var(--foreground-muted)]">{incomeIsDerived ? 'avg (from transactions)' : 'from income sources'}</p>
+            {/* #75: when the declared pay frequency disagrees with the deposits
+                that actually landed, this figure is wrong by the ratio between
+                them — declaring biweekly while being paid monthly inflates it
+                2.17×. It is the largest number on the screen and it feeds the
+                budget's "savings potential", so it is not shown at all until the
+                disagreement is settled. Same contract as the runway hero. */}
+            {incomeConflict ? (
+              <>
+                <p className="text-lg font-bold text-[var(--accent-warning)]">Needs checking</p>
+                <p className="text-xs text-[var(--foreground-secondary)]">
+                  {incomeConflict.sourceName} is set to {incomeConflict.declared}, but deposits
+                  arrive about every {Math.round(incomeConflict.medianGapDays)} days
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-2xl font-bold text-[var(--money-in)]">
+                  {formatMoney(monthlyIncome, 'USD', 2)}
+                </p>
+                <p className="text-xs text-[var(--foreground-muted)]">{incomeIsDerived ? 'avg (from transactions)' : 'from income sources'}</p>
+              </>
+            )}
           </div>
           <div className="stat-card">
             <div className="flex items-center justify-between mb-2">
@@ -1120,7 +1143,7 @@ export default function AccountsPage() {
                   <label className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">Frequency</label>
                   <select
                     value={incomeForm.frequency}
-                    onChange={(e) => setIncomeForm({ ...incomeForm, frequency: e.target.value as any })}
+                    onChange={(e) => setIncomeForm({ ...incomeForm, frequency: e.target.value as Cadence })}
                     className="select-field"
                   >
                     <option value="weekly">Weekly</option>
