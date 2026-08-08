@@ -12,7 +12,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { PaymentAccount, Transaction } from '@/types';
-import { sumExpenseCents } from '@/lib/classify';
+import { sumExpenseCents, POSTED_ONLY } from '@/lib/classify';
 import { getAllCategorySpending } from '@/lib/budgets';
 import { buildFlowGraph } from '@/lib/flows';
 import { mergeCandidateRun, rankCandidates } from '@/lib/candidates';
@@ -177,7 +177,7 @@ describe('U8 confirming a duplicate charge changes no total', () => {
   it('leaves sumExpenseCents, category spending and Flow conservation identical', () => {
     const month = new Date('2026-05-15T00:00:00Z');
     const before = {
-      expense: sumExpenseCents(DOUBLE_TAP, ACCOUNTS),
+      expense: sumExpenseCents(DOUBLE_TAP, ACCOUNTS, POSTED_ONLY),
       categories: getAllCategorySpending(DOUBLE_TAP, month, ACCOUNTS),
       flow: buildFlowGraph(DOUBLE_TAP, ACCOUNTS).links.map((l) => l.cents),
       rows: JSON.stringify(DOUBLE_TAP),
@@ -188,7 +188,7 @@ describe('U8 confirming a duplicate charge changes no total', () => {
     const confirmed = { ...candidate, status: 'confirmed' as const };
     expect(confirmed.status).toBe('confirmed');
 
-    expect(sumExpenseCents(DOUBLE_TAP, ACCOUNTS)).toBe(before.expense);
+    expect(sumExpenseCents(DOUBLE_TAP, ACCOUNTS, POSTED_ONLY)).toBe(before.expense);
     expect(getAllCategorySpending(DOUBLE_TAP, month, ACCOUNTS)).toEqual(before.categories);
     expect(buildFlowGraph(DOUBLE_TAP, ACCOUNTS).links.map((l) => l.cents)).toEqual(before.flow);
     expect(JSON.stringify(DOUBLE_TAP)).toBe(before.rows);

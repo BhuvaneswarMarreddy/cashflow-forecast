@@ -1,10 +1,11 @@
+import { POSTED_ONLY } from '@/lib/classify';
 import { accountsSummaryProvenance, lastSourceSync, CALCULATION_NAME } from '@/lib/obs/provenance';
 import { FIXTURE_ACCOUNTS, FIXTURE_TRANSACTIONS } from '@/lib/obs/fixtures';
 import { withDerivedBalances } from '@/lib/forecast';
 import { currentOf } from '@/lib/accounts';
 import { PaymentAccount } from '@/types';
 
-const derived = () => withDerivedBalances(FIXTURE_ACCOUNTS, FIXTURE_TRANSACTIONS);
+const derived = () => withDerivedBalances(FIXTURE_ACCOUNTS, FIXTURE_TRANSACTIONS, POSTED_ONLY);
 const ctx = { traceId: 'a'.repeat(32), dataSource: 'Firestore', cacheStatus: 'miss' as const };
 
 const metric = (name: string) => accountsSummaryProvenance(derived(), FIXTURE_TRANSACTIONS, ctx).metrics.find((m) => m.metric === name)!;

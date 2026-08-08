@@ -288,7 +288,7 @@ export default function HistoryPage() {
   // runway starts from the real current cash, not the stored opening figure.
   const forecast = useMemo(() => {
     if (!profile) return null;
-    const derivedAccounts = withDerivedBalances(profile?.paymentAccounts || [], transactions);
+    const derivedAccounts = withDerivedBalances(profile?.paymentAccounts || [], transactions, incomeContext);
     const currentCash = calculateCurrentCash(derivedAccounts);
     return generateForecast(
       currentCash,
@@ -342,7 +342,7 @@ export default function HistoryPage() {
     (accountFilter !== 'all' ? 1 : 0) +
     (categoryFilter !== 'all' ? 1 : 0);
 
-  const currentCash = calculateCurrentCash(withDerivedBalances(profile?.paymentAccounts || [], transactions));
+  const currentCash = calculateCurrentCash(withDerivedBalances(profile?.paymentAccounts || [], transactions, incomeContext));
   // ACTIVE sources only: getIncomeSources() now returns paused sources too (so they
   // can be resumed), and a paused source is not money arriving.
   const monthlyIncome = monthlyIncomeOf(profile?.incomeSources?.filter((i) => i.isActive) ?? []) || monthlyStats.avgIncome;

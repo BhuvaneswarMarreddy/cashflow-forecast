@@ -6,11 +6,20 @@
  */
 import { UserProfile, Transaction } from '@/types';
 import { withDerivedBalances, monthlyAverages } from './forecast';
-import { classifyTransaction } from './classify';
+import { classifyTransaction, IncomeContext } from './classify';
 
-export function financialContext(profile: UserProfile | null, transactions: Transaction[]) {
+/**
+ * `policy` is required (#102): the AI must be told the same financial state the owner is
+ * looking at. Answering "can I afford this?" from posted-only balances while the screen
+ * shows an effective one is worse than not answering.
+ */
+export function financialContext(
+  profile: UserProfile | null,
+  transactions: Transaction[],
+  policy: IncomeContext
+) {
   if (!profile) return {};
-  const accounts = withDerivedBalances(profile.paymentAccounts || [], transactions);
+  const accounts = withDerivedBalances(profile.paymentAccounts || [], transactions, policy);
 
   const cards = accounts.filter((a) => a.type === 'credit_card');
   const loans = accounts.filter((a) => a.type === 'personal_loan');
@@ -37,7 +46,7 @@ export function financialContext(profile: UserProfile | null, transactions: Tran
   const spentThisMonth = transactions
     .filter((t) => t.date.slice(0, 7) === month && classifyTransaction(t, accounts) === 'expense')
     .reduce((s, t) => s + t.amount, 0);
-  const derived = monthlyAverages(transactions, accounts, 6, { sources: profile.incomeSources });
+  const derived = monthlyAverages(transactions, accounts, 6, { ...policy, sources: profile.incomeSources });
   const budget = profile.monthlyBudget > 0 ? profile.monthlyBudget : derived.spending;
   const budgetContext = budget > 0 ? {
     monthlyBudget: budget,

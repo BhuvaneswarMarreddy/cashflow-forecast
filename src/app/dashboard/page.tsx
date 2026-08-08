@@ -91,7 +91,7 @@ export default function DashboardPage({ initialBills }: { initialBills?: Bill[] 
 
   // Balances are derived from linked transactions (opening balance + past effects),
   // so every card/total/forecast below reflects reality, not the stored opening figure.
-  const derivedAccounts = withDerivedBalances(profile?.paymentAccounts || [], transactions);
+  const derivedAccounts = withDerivedBalances(profile?.paymentAccounts || [], transactions, incomeContext);
 
   // Calculate account summaries
 

@@ -29,7 +29,7 @@ export function buildExportWorkbook(data: ExportData): XLSX.WorkBook {
   const income: IncomeContext = { sources: data.incomeSources, reviews: data.inflowReviews };
   // Export the balances the app shows (derived from transactions), not the raw
   // opening figures — otherwise auto-created accounts export as $0.
-  const accounts = withDerivedBalances(data.accounts, data.transactions);
+  const accounts = withDerivedBalances(data.accounts, data.transactions, income);
 
   const wb = XLSX.utils.book_new();
 

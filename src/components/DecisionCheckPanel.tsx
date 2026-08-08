@@ -15,7 +15,7 @@ interface DecisionCheckPanelProps {
 }
 
 export default function DecisionCheckPanel({ forecast }: DecisionCheckPanelProps) {
-  const { profile } = useUserProfile();
+  const { profile, incomeContext } = useUserProfile();
   const { transactions } = useTransactions();
   const [amount, setAmount] = useState('');
   const [cautionReasons, setCautionReasons] = useState<string[]>([]);
@@ -33,7 +33,7 @@ export default function DecisionCheckPanel({ forecast }: DecisionCheckPanelProps
 
     // Run local simulation (source of truth), then let the wider picture
     // downgrade a green verdict: cash-safe is not the same as financially wise.
-    const ctx = financialContext(profile, transactions);
+    const ctx = financialContext(profile, transactions, incomeContext);
     const cautions: string[] = [];
     if (ctx.budgetContext && ctx.budgetContext.remainingThisMonth < 0) {
       cautions.push(`You're over budget this month by $${Math.abs(ctx.budgetContext.remainingThisMonth).toLocaleString()}`);

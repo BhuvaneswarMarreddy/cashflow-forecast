@@ -10,7 +10,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { PaymentAccount, Transaction } from '@/types';
-import { sumExpenseCents } from '@/lib/classify';
+import { sumExpenseCents, POSTED_ONLY } from '@/lib/classify';
 import { getAllCategorySpending } from '@/lib/budgets';
 import { generateForecast } from '@/lib/forecast';
 import { mergeCandidateRun } from '@/lib/candidates';
@@ -169,14 +169,14 @@ describe('A7 the different-owner case stays a real, shared expense', () => {
   it('leaves both sides fully counted in every total', () => {
     const rows = pair(20, 20);
     const month = new Date('2026-05-15T00:00:00Z');
-    const expense = sumExpenseCents(rows, ACCOUNTS);
+    const expense = sumExpenseCents(rows, ACCOUNTS, POSTED_ONLY);
     const categories = getAllCategorySpending(rows, month, ACCOUNTS);
 
     const [candidate] = run(rows).candidates;
     const decided = { ...candidate, status: 'intentional' as const };
     expect(decided.status).toBe('intentional');
 
-    expect(sumExpenseCents(rows, ACCOUNTS)).toBe(expense);
+    expect(sumExpenseCents(rows, ACCOUNTS, POSTED_ONLY)).toBe(expense);
     expect(getAllCategorySpending(rows, month, ACCOUNTS)).toEqual(categories);
     expect(expense).toBe(12000); // 6 charges x $20, nothing reduced
   });

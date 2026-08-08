@@ -1,3 +1,4 @@
+import { POSTED_ONLY } from '@/lib/classify';
 /**
  * Forecast Engine Unit Tests
  * Tests the core cash flow forecast calculations
@@ -116,7 +117,7 @@ describe('Forecast Engine', () => {
         row({ accountId: chase.id, type: 'income', amount: 4000, title: 'Payroll' }),
         row({ accountId: chase.id, type: 'transfer', transferDirection: 'out', amount: 1000, title: 'Transfer to BofA' }),
       ];
-      expect(deriveAccountBalance(chase, txns)).toBe(3000);
+      expect(deriveAccountBalance(chase, txns, POSTED_ONLY)).toBe(3000);
     });
 
     test('bank: +1000 transfer-in and -950 transfer-out => 50', () => {
@@ -125,7 +126,7 @@ describe('Forecast Engine', () => {
         row({ accountId: bofa.id, type: 'transfer', transferDirection: 'in', amount: 1000, title: 'Transfer from Chase' }),
         row({ accountId: bofa.id, type: 'transfer', transferDirection: 'out', amount: 950, title: 'Transfer to Amazon Card' }),
       ];
-      expect(deriveAccountBalance(bofa, txns)).toBe(50);
+      expect(deriveAccountBalance(bofa, txns, POSTED_ONLY)).toBe(50);
     });
 
     test('credit card: 950 purchase and 950 transfer-in payment => debt 0', () => {
@@ -134,7 +135,7 @@ describe('Forecast Engine', () => {
         row({ accountId: card.id, type: 'expense', amount: 950, title: 'Amazon order' }),
         row({ accountId: card.id, type: 'transfer', transferDirection: 'in', amount: 950, title: 'Transfer from BofA' }),
       ];
-      expect(deriveAccountBalance(card, txns)).toBe(0);
+      expect(deriveAccountBalance(card, txns, POSTED_ONLY)).toBe(0);
     });
 
     test('a card with derived debt and a due date does NOT synthesize a payment', () => {
@@ -143,7 +144,7 @@ describe('Forecast Engine', () => {
       // double-counting. Card payments must come from recorded transactions only.
       const card = { ...acct('card', 'credit_card'), dueDate: 15 };
       const txns = [row({ accountId: card.id, type: 'expense', amount: 950, title: 'Purchase' })];
-      const accounts = withDerivedBalances([card], txns); // card now derives 950 debt
+      const accounts = withDerivedBalances([card], txns, POSTED_ONLY); // card now derives 950 debt
       const f = generateForecast(1000, accounts, [], txns, 500, 90);
       expect(f.events.some(e => e.type === 'bill' || e.type === 'credit_card_payment')).toBe(false);
     });

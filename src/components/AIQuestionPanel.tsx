@@ -26,7 +26,7 @@ const SUGGESTED_QUESTIONS = [
 ];
 
 export default function AIQuestionPanel({ forecast }: AIQuestionPanelProps) {
-  const { profile } = useUserProfile();
+  const { profile, incomeContext } = useUserProfile();
   const { transactions } = useTransactions();
   const [question, setQuestion] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
@@ -45,7 +45,7 @@ export default function AIQuestionPanel({ forecast }: AIQuestionPanelProps) {
         type: 'question',
         forecastData: prepareForecastForAI(forecast),
         question: userQuestion,
-        ...financialContext(profile, transactions), // debts/budget/goals in scope for any question
+        ...financialContext(profile, transactions, incomeContext), // debts/budget/goals in scope for any question
       });
 
       if (data.explanation) {

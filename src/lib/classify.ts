@@ -249,6 +249,20 @@ export interface FinancialPolicy {
 /** @deprecated Use `FinancialPolicy`. Kept so no call site had to change in #86. */
 export type IncomeContext = FinancialPolicy;
 
+/**
+ * "This calculation is posted-only, and that is the intended answer."
+ *
+ * Every money function takes the policy as a REQUIRED argument (#102). It used to be
+ * optional, and six of seven balance call sites simply never passed one — so the owner
+ * turned the setting on and Dashboard, Forecast and History did not move. The tests were
+ * green because they called the library with a policy; nothing checked that the PAGES
+ * did. An optional argument cannot be audited, only remembered.
+ *
+ * Pass this where posted-only is deliberate — pattern inference, bill matching, the
+ * review queue — so intent is written down instead of inferred from an absent argument.
+ */
+export const POSTED_ONLY: FinancialPolicy = Object.freeze({});
+
 /** Reason ids, sharing FIN-REVIEW-002 §2.4's vocabulary so there is one set. */
 export type InflowReviewReason =
   | 'inflow_unknown_credit'
@@ -605,7 +619,7 @@ const sumBy = (
  * screen reads. Without an `income` context there are no approved sources, so the
  * honest answer is 0 — the app does not guess money into existence.
  */
-export const sumIncomeCents = (ts: Summable[], accounts?: PaymentAccount[], income?: IncomeContext) =>
+export const sumIncomeCents = (ts: Summable[], accounts: PaymentAccount[] | undefined, income: FinancialPolicy) =>
   sumBy(ts, accounts, 'income', income);
 
 /**
@@ -615,7 +629,7 @@ export const sumIncomeCents = (ts: Summable[], accounts?: PaymentAccount[], inco
  * it this function cannot see a confirmation, so a row the owner has confirmed as
  * spending would be silently left out. Callers that hold the context pass it.
  */
-export const sumExpenseCents = (ts: Summable[], accounts?: PaymentAccount[], income?: IncomeContext) =>
+export const sumExpenseCents = (ts: Summable[], accounts: PaymentAccount[] | undefined, income: FinancialPolicy) =>
   sumBy(ts, accounts, 'expense', income);
 
 // ----------------------------------------------------------------------------
