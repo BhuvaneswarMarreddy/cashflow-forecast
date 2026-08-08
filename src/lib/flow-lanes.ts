@@ -159,6 +159,10 @@ export function spendingCategoryIndex(
 ): Set<string> {
   const out = new Set<string>();
   for (const t of transactions) {
+    // POSTED ONLY, in both modes. This asks "which categories does this ledger spend
+    // in" over the WHOLE ledger — pattern inference, not state — so FIN-PENDING-001
+    // does not reach it. A hold cannot introduce a category the ledger has never
+    // spent in without changing which lane an unrelated credit lands in.
     if (!isPosted(t)) continue;
     if (classifyTransaction(t, accounts) !== 'expense') continue;
     const c = displayCategory(t);

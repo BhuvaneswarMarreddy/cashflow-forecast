@@ -401,6 +401,9 @@ function transactionsToEvents(
     // hand-entered future card payment to occur — and over-counting an outflow is the
     // safe direction for a runway. Suppress it here if that ever stops being true.
     const transferAccount = t.accountId ? accounts.find(a => a.id === t.accountId) : undefined;
+    // POSTED ONLY, in both modes: this is the recurrence/behaviour baseline the forecast
+    // projects FORWARD, and FIN-PENDING-001 stops at state. A hold projected as a repeating
+    // obligation would keep firing long after the single charge behind it settled.
     const isCountableTransfer =
       i.type === 'transfer' &&
       isPosted(t) &&

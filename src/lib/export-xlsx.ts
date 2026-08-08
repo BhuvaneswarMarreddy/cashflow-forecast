@@ -61,11 +61,17 @@ export function buildExportWorkbook(data: ExportData): XLSX.WorkBook {
     ['Total Transactions', data.transactions.length],
     // The app's authoritative classification, not the stored type: a card payment is
     // a transfer, so it is neither income nor spending here — same as every screen.
-    // PENDING: EXCLUDED from these totals (they are the posted accounting truth) but
-    // still exported row-by-row below with a Pending column, so nothing is hidden.
+    // PENDING: whether holds are inside these totals follows the owner's setting
+    // (FIN-PENDING-001). The label below says WHICH, because an export outlives the UI
+    // that produced it — a spreadsheet that does not state its own basis is a number
+    // someone will later reconcile against the wrong thing. Rows are exported either
+    // way, with a Pending column, so nothing is hidden in either mode.
     ['Total Income', sumIncomeCents(data.transactions, accounts, income) / 100],
     ['Total Expenses', sumExpenseCents(data.transactions, accounts, income) / 100],
-    ['Pending (not in the totals above)', data.transactions.filter(t => t.pending).length],
+    [income?.includePending
+      ? 'Pending (INCLUDED in the totals above)'
+      : 'Pending (not in the totals above)',
+     data.transactions.filter(t => t.pending).length],
   ];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryData), 'Summary');
 

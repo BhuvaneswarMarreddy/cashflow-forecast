@@ -3,7 +3,7 @@
  * dollars exist only at the render layer. Pure functions, no React.
  */
 import { PaymentAccount, Transaction } from '@/types';
-import { isPositive, isPosted } from './classify';
+import { isPositive, countsUnder } from './classify';
 
 export const toCents = (n: number) => Math.round(n * 100);
 export const day = (iso: string) => iso.slice(0, 10);
@@ -106,11 +106,12 @@ export function buildFlowGraph(
   const startedAt = Date.now();
   const start = period.start ?? '0000-00-00';
   const end = period.end ?? '9999-12-31';
-  // PENDING: excluded. Flow reconciles gross movement against the derived account
-  // balances, which are posted-only — a hold in here puts the reconciliation out by
-  // its amount and then out again when the charge posts at a different figure.
+  // PENDING: follows the owner's policy, and MUST. Flow reconciles gross movement
+  // against the derived account balances — so the moment those balances count holds
+  // (FIN-PENDING-001), excluding holds here would put the reconciliation out by
+  // exactly their amount. The two have to make the same choice or neither is right.
   const rows = transactions.filter(
-    (t) => isPosted(t) && day(t.date) >= start && day(t.date) <= end
+    (t) => countsUnder(t, options.income) && day(t.date) >= start && day(t.date) <= end
   );
   const byId = new Map(accounts.map((a) => [a.id, a]));
 
