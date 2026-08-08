@@ -173,8 +173,12 @@ export function migrationSummary(bills: Bill[]): MigrationSummary {
 
 /**
  * Does this settled income/expense row belong to the bill's spending bucket?
- * Transfers and pending holds never count — a hold is not posted truth
- * (see interpretTransaction in classify.ts for the app-wide policy).
+ *
+ * Transfers and pending holds never count, in BOTH modes. FIN-PENDING-001 deliberately
+ * does not reach here: "is this bill paid this month" is a question about a settlement
+ * the biller has actually received, and a hold routinely posts at a different amount.
+ * Marking a bill paid off an authorisation that later posts $8 higher is worse than
+ * marking it paid a day late.
  */
 export function matcherApplies(m: BillMatcher, t: Transaction): boolean {
   if (t.type === 'transfer' || t.pending) return false;

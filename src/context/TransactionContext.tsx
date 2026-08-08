@@ -7,7 +7,7 @@ import * as firestoreService from '@/lib/firestore';
 import { db, collection, doc, getDocs, setDoc, updateDoc, deleteDoc } from '@/lib/firebase';
 import { applyMappingRules, definedSet, MappingRule, NewMappingRule } from '@/lib/mapping-rules';
 import { generateSampleData } from '@/lib/storage';
-import { interpretTransaction, IncomeContext } from '@/lib/classify';
+import { interpretTransaction, withoutSupersededHolds, IncomeContext } from '@/lib/classify';
 
 export interface TransactionContextType {
   transactions: Transaction[];
@@ -152,8 +152,15 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
 
   // The single place rules are applied. Every screen reads `transactions` from this
   // context, so one rule corrects history and every future sync with no per-screen change.
+  //
+  // The superseded-hold guard rides here for the same reason: a hold whose posted row has
+  // already arrived must not be visible to ANY screen, and one filter at the entrance is
+  // the only version of that nobody can forget. `raw` below is untouched, so the audit
+  // view still shows exactly what was stored.
   const transactions = useMemo(
-    () => (rules.length ? rawTransactions.map((t) => applyMappingRules(t, rules)) : rawTransactions),
+    () => withoutSupersededHolds(
+      rules.length ? rawTransactions.map((t) => applyMappingRules(t, rules)) : rawTransactions
+    ),
     [rawTransactions, rules]
   );
 

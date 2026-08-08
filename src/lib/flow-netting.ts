@@ -20,7 +20,7 @@
  */
 
 import { PaymentAccount, Transaction } from '@/types';
-import { IncomeContext, classifyTransaction, isPosted, isRefund } from '@/lib/classify';
+import { IncomeContext, classifyTransaction, countsUnder, isRefund } from '@/lib/classify';
 import { CARD_CREDIT_TO_INFLOW_MEANING, cardPaymentPairedIds, classifyCardCredit } from '@/lib/card-credit';
 import { REFUND_SOURCE_TYPES, TransactionLink } from '@/lib/relations';
 import { FlowNetting, Lane, MONEY_BACK, REWARDS, RefundAllocation } from '@/lib/flow-lanes';
@@ -53,7 +53,9 @@ export function flowNetting(
 
   // matchTransfers() is O(outs x ins); the paired set is computed ONCE for the run, as
   // card-credit.ts's own doc requires, never per credit.
-  const posted = transactions.filter(isPosted);
+  // Follows the policy, because the graph this nets against does (flows.ts). A hold the
+  // Sankey routes but the netting cannot see would leave its category ungrossed.
+  const posted = transactions.filter((t) => countsUnder(t, income));
   const pairedTransactionIds = cardPaymentPairedIds([...posted], accounts);
   const byId = new Map(accounts.map((a) => [a.id, a]));
 

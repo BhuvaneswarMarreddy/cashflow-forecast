@@ -17,8 +17,8 @@ import BudgetSettingsPanel from '@/components/BudgetSettingsPanel';
 import BudgetStatusPanel from '@/components/BudgetStatusPanel';
 import DebtPlannerPanel from '@/components/DebtPlannerPanel';
 import { PAYMENT_METHODS, ACCOUNT_TYPES, PaymentAccount, IncomeSource, AccountType, PaymentMethod, CategoryBudget } from '@/types';
-import { withDerivedBalances, monthlyAverages } from '@/lib/forecast';
-import { currentOf } from '@/lib/accounts';
+import { withDerivedBalances, monthlyAverages, calculateCurrentCash } from '@/lib/forecast';
+import { currentOf, isDebtAccount, netWorthOf } from '@/lib/accounts';
 import { syncNow, describeSync, connectBankWithPlaid } from '@/lib/sync-client';
 import { useAccountsObservability } from '@/lib/obs/useAccountsObservability';
 import { safeSyncResult } from '@/lib/obs/sync-metadata';
@@ -383,15 +383,12 @@ export default function AccountsPage() {
     .filter((a) => a.type === 'credit_card')
     .reduce((sum, a) => sum + currentOf(a), 0);
 
-  const totalBankBalance = derivedAccounts
-    .filter((a) => a.type === 'bank_account' || a.type === 'debit_card' || a.type === 'cash')
-    .reduce((sum, a) => sum + currentOf(a), 0);
-
-  // All debt (cards + loans) and net worth — the headline number this page was missing.
-  const totalDebt = derivedAccounts
-    .filter((a) => a.type === 'credit_card' || a.type === 'personal_loan')
-    .reduce((sum, a) => sum + currentOf(a), 0);
-  const netWorth = totalBankBalance - totalDebt;
+  // These were inline copies of calculateCurrentCash()/netWorthOf(). That duplication is
+  // exactly how this page came to disagree with Home and Forecast: the copy here took an
+  // includePending argument the shared helper never saw. One definition, one answer.
+  const totalBankBalance = calculateCurrentCash(derivedAccounts);
+  const totalDebt = derivedAccounts.filter(isDebtAccount).reduce((sum, a) => sum + currentOf(a), 0);
+  const netWorth = netWorthOf(derivedAccounts);
   const creditUtilization = totalCreditLimit > 0 ? Math.round((totalCreditUsed / totalCreditLimit) * 100) : 0;
 
   // Income & budget: use hand-entered income sources / budget when present, else DERIVE

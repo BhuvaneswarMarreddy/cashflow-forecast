@@ -329,9 +329,16 @@ export function generateRefundCandidates(
   const startedAt = Date.now();
   const generatedAt = options.generatedAt ?? new Date().toISOString();
 
-  // A hold is not settled history. It may be SHOWN with a Pending label, but it
-  // generates no candidate, writes no link and reduces no cost — and when it is
-  // replaced by its posted row, only the posted row is here to be matched (M12/M14).
+  // POSTED ONLY — and deliberately NOT following FIN-PENDING-001, unlike the Flow graph
+  // this feeds. The audit first filed this as a "honour the policy" site; closer reading
+  // says no, for a reason the policy cannot override: a candidate becomes a LINK DOCUMENT
+  // keyed by transaction id, and a hold's doc (`pending_pl_*`) is DELETED the moment the
+  // charge posts under its own id. Every link to a hold would dangle. Counting a hold in
+  // a total is reversible; writing a link to a row that is about to vanish is not.
+  //
+  // It may still be SHOWN with a Pending label. It generates no candidate, writes no
+  // link and reduces no cost, and when the posted row arrives that row is matched
+  // instead (M12/M14).
   const posted = transactions.filter(isPosted);
 
   // One O(n) indexing pass per run, not a scan per credit (§9). The date sort is what

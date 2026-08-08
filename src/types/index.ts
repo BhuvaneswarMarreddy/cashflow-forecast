@@ -490,6 +490,12 @@ export interface Transaction {
   // the app untyped and being counted as posted truth. Every financial consumer must
   // decide about it explicitly — see interpretTransaction() in src/lib/classify.ts.
   pending?: boolean;
+  /**
+   * On a POSTED row: the doc id of the hold this charge replaced, from Plaid's
+   * `pending_transaction_id` (#85). The explicit lifecycle linkage — see
+   * withoutSupersededHolds() in src/lib/classify.ts.
+   */
+  pendingTransactionId?: string;
   isRecurring?: boolean;
   recurringFrequency?: 'weekly' | 'monthly' | 'yearly';
   recurringEndDate?: string; // When recurring payments end (ISO date)

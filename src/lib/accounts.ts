@@ -54,3 +54,25 @@ export function sortByDisplayOrder<T extends { sortIndex?: number }>(accounts: r
   const key = (a: T) => a.sortIndex ?? Number.MAX_SAFE_INTEGER;
   return [...accounts].sort((a, b) => key(a) - key(b));
 }
+
+/** Every account whose balance IS cash the owner can spend. */
+export const isCashAccount = (a: PaymentAccount) =>
+  a.type === 'bank_account' || a.type === 'debit_card' || a.type === 'cash';
+
+/** Every account whose balance is money the owner OWES. */
+export const isDebtAccount = (a: PaymentAccount) =>
+  a.type === 'credit_card' || a.type === 'personal_loan';
+
+/**
+ * Cash minus everything owed. ONE definition, because two screens showing different
+ * net-worth figures is the failure this module exists to prevent — Accounts computed
+ * it inline and nothing else could reuse it.
+ *
+ * Balances must already be DERIVED (withDerivedBalances), so whether holds count is
+ * decided upstream by the owner's policy and is not re-litigated here.
+ */
+export function netWorthOf(accounts: readonly PaymentAccount[]): number {
+  const cash = accounts.filter(isCashAccount).reduce((s, a) => s + currentOf(a), 0);
+  const debt = accounts.filter(isDebtAccount).reduce((s, a) => s + currentOf(a), 0);
+  return cash - debt;
+}

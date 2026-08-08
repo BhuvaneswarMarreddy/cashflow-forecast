@@ -551,6 +551,42 @@ export const isPosted = (t: Pick<Transaction, 'pending'>) => t.pending !== true;
 export const postedOnly = <T extends Pick<Transaction, 'pending'>>(ts: T[]): T[] =>
   ts.filter(isPosted);
 
+/**
+ * Does this row participate in totals under `policy`? Posted rows always; a hold only
+ * when the owner opted in (FIN-PENDING-001).
+ *
+ * Use this instead of a bare `isPosted` wherever the answer should follow the owner's
+ * setting. Where a module deliberately stays posted-only — pattern inference — it keeps
+ * calling `isPosted` directly, so the two cases stay visibly different at the call site
+ * rather than hiding behind an omitted argument.
+ */
+export const countsUnder = (t: Pick<Transaction, 'pending'>, policy?: FinancialPolicy): boolean =>
+  isPosted(t) || !!policy?.includePending;
+
+/**
+ * Drop holds that a posted row has already replaced (FIN-PENDING-001 / #85).
+ *
+ * The sync deletes a hold when the charge posts, but there is a window — between the
+ * bank posting it and our next run — where both rows exist. Counting both would double
+ * the charge, which is only invisible today because holds count for nothing.
+ *
+ * The match is Plaid's OWN `pending_transaction_id`, captured at ingest as
+ * `pendingTransactionId`. Deliberately NOT amount+date: a hold routinely posts at a
+ * different figure (tips, fuel pre-auth), so amount matching would both miss real twins
+ * and fuse unrelated same-value rows. No linkage means no drop — a visible duplicate the
+ * owner can act on beats a silent guess about their money.
+ *
+ * Applied once where transactions enter the app, so no screen can forget it.
+ */
+export function withoutSupersededHolds<T extends Pick<Transaction, 'id' | 'pending' | 'pendingTransactionId'>>(
+  ts: T[]
+): T[] {
+  const superseded = new Set<string>();
+  for (const t of ts) if (t.pendingTransactionId) superseded.add(t.pendingTransactionId);
+  if (!superseded.size) return ts;
+  return ts.filter((t) => !(t.pending && superseded.has(t.id)));
+}
+
 type Summable = Inflow & Pick<Transaction, 'amount'>;
 
 const sumBy = (
