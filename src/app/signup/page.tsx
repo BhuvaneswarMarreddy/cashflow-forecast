@@ -34,7 +34,7 @@ export default function SignupPage() {
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
-      router.push('/forecast');
+      router.push('/dashboard');
     }
   }, [isAuthenticated, isLoading, router]);
 
@@ -71,7 +71,7 @@ export default function SignupPage() {
     if (result.success) {
       setSuccess('Account created successfully! Redirecting...');
       setStatus('');
-      setTimeout(() => router.push('/forecast'), 1000);
+      router.push('/dashboard');
     } else {
       setError(result.error || 'Signup failed. Please try again.');
       setStatus('');
@@ -92,7 +92,7 @@ export default function SignupPage() {
     if (result.success) {
       setSuccess('Signed in with Google! Redirecting...');
       setStatus('');
-      setTimeout(() => router.push('/forecast'), 1000);
+      router.push('/dashboard');
     } else {
       setError(result.error || 'Google sign-in failed. Please try again.');
       setStatus('');

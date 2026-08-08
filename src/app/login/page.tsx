@@ -31,7 +31,7 @@ export default function LoginPage() {
   // Redirect to Forecast - the core decision-making screen
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
-      router.push('/forecast');
+      router.push('/dashboard');
     }
   }, [isAuthenticated, isLoading, router]);
 
@@ -43,7 +43,7 @@ export default function LoginPage() {
     const result = await login(email, password);
     
     if (result.success) {
-      router.push('/forecast');
+      router.push('/dashboard');
     } else {
       setError(result.error || 'Login failed');
     }
@@ -58,7 +58,7 @@ export default function LoginPage() {
     const result = await signInWithGoogle();
     
     if (result.success) {
-      router.push('/forecast');
+      router.push('/dashboard');
     } else {
       setError(result.error || 'Google sign-in failed');
     }
@@ -222,7 +222,7 @@ export default function LoginPage() {
 
         {/* Demo hint */}
         <p className="text-center text-[var(--foreground-muted)] text-sm mt-6 animate-fade-in-up delay-300">
-          New here? Create an account to get started with sample data.
+          New here? Create an account — it takes about a minute.
         </p>
       </div>
     </main>
