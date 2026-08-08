@@ -86,8 +86,51 @@ const auth = withNoops<AuthContextType>({
   isLoading: false,
 });
 
+/**
+ * The observability fixtures are named "Fixture Checking", "Fixture Salary" and
+ * dated 2020-01-01, which is correct for their job — asserting provenance in
+ * tests. It is wrong for this one.
+ *
+ * A five-persona UX review of these routes spent a large share of its findings
+ * on those names and dates: every reviewer flagged "as of 2020-01-01" as a stale
+ * balance that voided the app, and one said they "would not link a bank to an
+ * app currently showing a mock-up of my finances". None of that was true of the
+ * product. Test data that looks broken makes a review report the harness.
+ *
+ * So the journey routes carry their own plausible household, ids untouched so
+ * the obs tests that count and reference them keep passing.
+ */
+const daysAgo = (n: number) => {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 10);
+};
+
+const REALISTIC_ACCOUNTS = FIXTURE_PROFILE.paymentAccounts.map((a, i) => ({
+  ...a,
+  name: [
+    'Everyday Checking',
+    'Emergency Savings',
+    'Cash',
+    'Rewards Card',
+    'Travel Card',
+    'Car Loan',
+  ][i] ?? a.name,
+  // Balances that were current this morning, not six years ago.
+  openingDate: daysAgo(90),
+}));
+
 const profile = withNoops<UserProfileContextType>({
-  profile: FIXTURE_PROFILE,
+  profile: {
+    ...FIXTURE_PROFILE,
+    paymentAccounts: REALISTIC_ACCOUNTS,
+    // The name has to MATCH the deposits in recentLedger(), or income falls
+    // through the approved-source check and every month reports +$0.00 beside a
+    // visible paycheck — which is exactly what the review reported as a bug.
+    incomeSources: [
+      { id: 'fx-inc', name: 'Payroll deposit', amount: 4300, frequency: 'biweekly', payDate: 1, isActive: true },
+    ],
+  },
   isLoading: false,
   isOnboarded: true,
   error: null,

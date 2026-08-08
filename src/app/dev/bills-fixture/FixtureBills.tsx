@@ -73,7 +73,7 @@ export default function FixtureBills() {
       <div className="bg-pattern" />
       <main className="pt-10 pb-12 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto relative z-10">
         <h1 className="text-2xl font-bold text-[var(--foreground)] mb-6">
-          Bills — fixture preview
+          Bills
         </h1>
         <BillsTab
           userId="fixture-user"
