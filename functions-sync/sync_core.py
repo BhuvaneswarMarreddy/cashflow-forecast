@@ -25,6 +25,7 @@ Module-level imports are stdlib only so test_sync.py runs without the cloud deps
 from __future__ import annotations
 
 import datetime as dt
+from decimal import Decimal, ROUND_HALF_UP
 import re
 from collections import defaultdict
 from urllib.parse import quote
@@ -542,3 +543,82 @@ async def run_sync(db, uid: str, email: str, password: str, mfa_secret: str,
         f"{len(reanchored)} re-anchored, cursor -> {next_cursor}, "
         f"unmatched={sorted(set(unmatched))}")
     return status
+
+
+# ---------------------------------------------------------------------------
+# Shared ingest primitives
+#
+# These are PROVIDER-AGNOSTIC and moved here from simplefin.py, which is the
+# retired source. They were never SimpleFIN's: plaid_ingest.py imports all of
+# them, so the live Plaid pipeline depended on a module named after a source
+# that no longer runs. `from simplefin import fingerprint` in the Plaid ingest
+# read as though Plaid needed SimpleFIN. It does not; it needs these.
+# ---------------------------------------------------------------------------
+
+MATCH_DAYS = 3
+
+DOC_FIELDS = ("title", "amount", "type", "category", "merchant", "description",
+              "paymentMethod", "accountId", "date", "fingerprint")
+
+def to_cents(amount) -> int:
+    """SimpleFIN amounts are DECIMAL STRINGS. float('-12.34') * 100 is
+    -1233.9999999999998, so the conversion goes through Decimal."""
+    return int(Decimal(str(amount)).scaleb(2).quantize(Decimal(1), rounding=ROUND_HALF_UP))
+def fingerprint(account_id: str, amount_signed_cents: int, date_key: str) -> str:
+    """Byte-identical to fingerprintOf() in src/lib/fingerprint.ts — both ingest
+    paths match on this string, so `accountId ?? 'none'` is reproduced too."""
+    return f"{account_id or 'none'}|{int(amount_signed_cents)}|{date_key}"
+def signed_cents_of(doc: dict) -> int:
+    """Signed cents of an EXISTING app row, mirroring centsOf() in fingerprint.ts:
+    the app stores amount positive with the direction in `type` (and, for transfers,
+    `transferDirection`). A transfer with NO direction counts as money leaving,
+    same as isPositive() in classify.ts."""
+    cents = to_cents(doc.get("amount") or 0)
+    positive = (doc.get("type") == "income"
+                or (doc.get("type") == "transfer" and doc.get("transferDirection") == "in"))
+    return cents if positive else -cents
+def date_key_of(value) -> str:
+    """Existing rows store `date` as a Firestore timestamp; render it in the app's
+    zone so the +/-3-day compare uses the calendar day the UI actually shows."""
+    if hasattr(value, "astimezone"):
+        return value.astimezone(sync_core.TZ).date().isoformat()
+    return str(value or "")[:10]
+def pick_match(candidates: list, date_key: str, source: str):
+    """`source` is now REQUIRED. It defaulted to SimpleFIN's SOURCE constant, which was
+    invisible in every Plaid call site — the Plaid ingest read as though it were matching
+    SimpleFIN rows. Each caller names its own source."""
+    """Nearest unclaimed candidate within MATCH_DAYS that this source did not
+    already write, else None. The caller REMOVES the winner: matching is one-to-one
+    so two genuinely distinct same-amount charges can never collapse into one row
+    (a wrongly merged pair silently understates spending).
+
+    Same tie-break as findTwin() in fingerprint.ts: nearest date wins, ties go to
+    the earlier row so the result never depends on Firestore's return order."""
+    d0 = dt.date.fromisoformat(date_key)
+    best, best_gap = None, None
+    for c in candidates:
+        if source in c["sources"] or not c["date_key"]:
+            continue
+        gap = abs((dt.date.fromisoformat(c["date_key"]) - d0).days)
+        if gap > MATCH_DAYS:
+            continue
+        if best is None or gap < best_gap or (gap == best_gap and c["date_key"] < best["date_key"]):
+            best, best_gap = c, gap
+    return best
+def merge_fields(existing: dict, row: dict) -> dict:
+    """Fields to write onto an existing row when enriching it from SimpleFIN — the
+    mergeFields() rule from fingerprint.ts for a non-Monarch source: only Monarch
+    REPLACES a rich field, everything else may only fill a blank one. Hand-edited
+    fields (userEdited.<field>) are never touched by any source.
+
+    amount/date/accountId are absent by construction — they are what matched."""
+    edited = existing.get("userEdited") or {}
+    patch = {}
+    for field in ("category", "merchant", "title", "description"):
+        value = row.get(field)
+        if not value or edited.get(field) is True or existing.get(field):
+            continue
+        patch[field] = value
+    if not existing.get("fingerprint"):
+        patch["fingerprint"] = row["fingerprint"]
+    return patch
