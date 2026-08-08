@@ -13,11 +13,12 @@ import Link from 'next/link';
 import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import ChartSrTable from '@/components/ChartSrTable';
-import { classifyTransaction, isPositive, isReward } from '@/lib/classify';
+import { classifyTransaction, interpretTransaction, isPosted, isPositive, isReward } from '@/lib/classify';
 import { matchTransfers } from '@/lib/transfers';
 import { displayCategory } from '@/types';
 import { CAT_COLORS } from '@/lib/palette';
 import { formatMoney } from '@/lib/money';
+import { MONEY_ROLES, ROLE_LABELS, ROLE_BLURBS, totalsByRole } from '@/lib/money-roles';
 import { format, parseISO, subMonths, startOfMonth } from 'date-fns';
 import { TrendingUp, ArrowDownRight, ArrowUpRight, Wallet, X } from 'lucide-react';
 import {
@@ -129,6 +130,35 @@ export default function CashflowTab() {
   }, [rows, accounts]);
   const totalRewards = rewardsByCard.reduce((s, r) => s + r.value, 0);
 
+  // MODEL-004 (#45). Consumes financialMeaning from interpretTransaction() and
+  // only adds up — no second opinion about what a row means.
+  const roleRows = useMemo(() => {
+    const posted = rows
+      .filter(isPosted)
+      .map((t) => ({ meaning: interpretTransaction(t, accounts ?? []).financialMeaning, amount: t.amount }));
+    const totalsByR = totalsByRole(posted);
+    const rolled = MONEY_ROLES
+      // A role with nothing behind it is left out, not printed as $0.00 — the
+      // app has a habit of rendering absence as a measured zero.
+      .filter((role) => totalsByR[role] > 0)
+      .map((role) => ({
+        role,
+        label: ROLE_LABELS[role],
+        blurb: ROLE_BLURBS[role],
+        value: totalsByR[role],
+      }));
+
+    // Deposits the app could not confirm as pay. They are correctly kept OUT of
+    // Earned — calling an unrecognised credit income is how income inflates —
+    // but rolling them silently into Moved reads as though a paycheck merely
+    // shuffled between accounts. Name the amount and the way to fix it.
+    const unconfirmed = posted
+      .filter((r) => r.meaning === 'unknown_inflow' || r.meaning === 'other_non_income_credit')
+      .reduce((sum, r) => sum + r.amount, 0);
+
+    return { rolled, unconfirmed };
+  }, [rows, accounts]);
+
   // The drill-down: the selected month's rows, newest first (calendar's day view).
   const monthRows = useMemo(() => {
     if (!selectedMonth) return [];
@@ -150,6 +180,7 @@ export default function CashflowTab() {
 
   const keptRate = totals.income > 0 ? Math.round((totals.kept / totals.income) * 100) : 0;
 
+
   return (
     <div>
       <div className="flex justify-end mb-4">
@@ -170,6 +201,36 @@ export default function CashflowTab() {
         <Tile icon={<TrendingUp className="w-5 h-5" />} label="Net to family / others" value={money(flows.net)} color="text-[var(--accent-primary)]" sub={`sent ${money(flows.grossOut)} · got back ${money(flows.grossIn)}`} />
         <Tile icon={<Wallet className="w-5 h-5" />} label="Actually kept" value={money(totals.kept)} color={totals.kept >= 0 ? 'text-[var(--money-in)]' : 'text-[var(--money-out)]'} sub={`${keptRate}% of income`} />
       </div>
+
+      {/* MODEL-004 (#45): every dollar in the period, in the six words the engine
+          already thinks in. This is where a huge settlement number becomes
+          visibly harmless — it lands in "Moved", beside Spent rather than inside
+          it. Roles with no data behind them are omitted rather than shown as a
+          confident $0.00. */}
+      {roleRows.rolled.length > 0 && (
+        <div className="glass-card p-4 mb-8">
+          <h3 className="font-semibold text-[var(--foreground)] mb-1">Where every dollar went</h3>
+          <p className="text-sm text-[var(--foreground-secondary)] mb-4">
+            Moving money is not spending it — a card payment settles what you already spent.
+          </p>
+          <dl className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {roleRows.rolled.map(({ role, label, blurb, value }) => (
+              <div key={role}>
+                <dt className="text-sm text-[var(--foreground-secondary)]">{label}</dt>
+                <dd className="text-lg font-semibold tnum text-[var(--foreground)]">{money(value)}</dd>
+                <dd className="text-xs text-[var(--foreground-muted)]">{blurb}</dd>
+              </div>
+            ))}
+          </dl>
+          {roleRows.unconfirmed > 0 && (
+            <p className="text-xs text-[var(--accent-warning)] mt-4">
+              {money(roleRows.unconfirmed)} of deposits aren&apos;t linked to an income source yet, so
+              they don&apos;t count as Earned.{' '}
+              <Link href="/accounts" className="underline underline-offset-2">Link them</Link>
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Monthly income vs spending — tap a month for its days */}
       <div className="glass-card p-5 mb-8">
