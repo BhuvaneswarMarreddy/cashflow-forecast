@@ -63,3 +63,33 @@ describe('deleteAllUserData', () => {
     expect((deleteDoc as jest.Mock).mock.calls).toHaveLength(1); // the users/{uid} doc itself
   });
 });
+
+/**
+ * #72 — "everything is gone" has to include the bank connection.
+ *
+ * Wiping Firestore left the Plaid Item alive: still consuming one of the 10 lifetime
+ * Trial slots, with the owner's consent to their bank still granted, and — once our
+ * copy of the access token was deleted — no way left to revoke it.
+ *
+ * Both halves below are ORDER claims, and order is exactly what a later refactor
+ * reshuffles without noticing, so they are asserted against the source rather than
+ * left to a comment.
+ */
+describe('deleteAccount revokes the bank before wiping anything', () => {
+  const src = readFileSync(join('src', 'context', 'AuthContext.tsx'), 'utf8');
+  const at = (needle: string) => src.indexOf(needle);
+
+  it('calls unlinkAllBanks before deleteAllUserData and before deleteUser', () => {
+    expect(at('unlinkAllBanks()')).toBeGreaterThan(-1);
+    expect(at('unlinkAllBanks()')).toBeLessThan(at('deleteAllUserData'));
+    expect(at('deleteAllUserData')).toBeLessThan(at('deleteUser(current)'));
+  });
+
+  it('aborts the deletion when the revoke fails instead of reporting success', () => {
+    // The failure path must return success:false. Swallowing it would delete the
+    // ledger and leave a live credential — the worst of the three outcomes.
+    const block = src.slice(at('await unlinkAllBanks()'), at('deleteAllUserData'));
+    expect(block).toContain('success: false');
+    expect(block).not.toContain('deleteAllUserData');
+  });
+});

@@ -196,6 +196,55 @@ def plaid_exchange(req: https_fn.CallableRequest) -> dict:
 
 
 @https_fn.on_call(
+    secrets=PLAID_SECRETS,
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=120,
+)
+def plaid_unlink_all(req: https_fn.CallableRequest) -> dict:
+    """Revoke every linked Item at Plaid, then forget the tokens (#72).
+
+    Account deletion is a privacy promise, and it used to keep this promise only on
+    our side: `deleteAllUserData` wiped the ledger while the access tokens in
+    meta/plaid stayed valid and the bank consent stayed granted. Clients cannot fix
+    this themselves — meta/plaid is default-deny to them by design — so it takes a
+    callable, and it has to run BEFORE the Auth user goes away or there is nothing
+    left to authenticate with.
+
+    FAILS CLOSED. If Plaid will not revoke an Item, this raises and the account is
+    NOT deleted. A user can retry a deletion; nobody can un-leak a live bank
+    credential. Deleting our token while the Item survived would be the worst
+    outcome of the three — the connection would live on with no way left to revoke
+    it.
+    """
+    _require_owner(req)
+    db = firestore.client()
+    ref = db.collection("meta").document("plaid")
+    items = (ref.get().to_dict() or {}).get("items") or {}
+    if not items:
+        return {"removed": 0}
+
+    client_id = os.environ.get("PLAID_CLIENT_ID", "")
+    secret = os.environ.get("PLAID_SECRET", "")
+    removed, failed = [], []
+    for item_id, item in items.items():
+        try:
+            plaid_ingest.remove_item(client_id, secret, item["accessToken"])
+            removed.append(item_id)
+        except Exception as e:  # noqa: BLE001 — the message is Plaid's, never the token
+            failed.append(f"{item.get('institution') or item_id}: {e}")
+
+    # Forget only what Plaid confirmed revoked. A token whose Item still exists must
+    # stay stored, or the Item becomes unreachable and unremovable forever.
+    if removed:
+        ref.update({f"items.{i}": firestore.DELETE_FIELD for i in removed})
+    if failed:
+        raise https_fn.HttpsError(
+            https_fn.FunctionsErrorCode.UNAVAILABLE,
+            "Could not disconnect: " + "; ".join(failed))
+    return {"removed": len(removed)}
+
+
+@https_fn.on_call(
     # SIMPLEFIN_ACCESS_URL was bound here and never read — the body calls _run_plaid()
     # only. A retired provider's live credential was mounted into the function the
     # Refresh button runs, for nothing.

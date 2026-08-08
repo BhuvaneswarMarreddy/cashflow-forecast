@@ -19,6 +19,7 @@ import {
   FirebaseUser,
 } from '@/lib/firebase';
 import * as firestoreService from '@/lib/firestore';
+import { unlinkAllBanks } from '@/lib/sync-client';
 
 export interface AuthContextType {
   user: User | null;
@@ -349,12 +350,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   /**
-   * Delete the account: prove it is really the owner (recent login), wipe every
-   * Firestore document, THEN remove the login itself. Order is load-bearing —
-   * the wipe needs an authenticated user for the security rules, so the Auth
-   * user must die last. If that final step fails, data is already gone and the
-   * surviving login simply owns an empty account; pressing the button again
-   * finishes the job.
+   * Delete the account: prove it is really the owner (recent login), revoke the bank
+   * connections, wipe every Firestore document, THEN remove the login itself.
+   *
+   * Order is load-bearing at both ends. The Plaid revoke must come FIRST (#72) — it is
+   * a callable, so it needs a live Auth user, and the tokens it revokes with are among
+   * the things about to be wiped. The Auth user must die LAST, because the wipe needs
+   * an authenticated user to satisfy the security rules.
+   *
+   * The revoke is allowed to abort the whole deletion. Wiping our data while the Item
+   * stayed alive at Plaid is precisely the defect this fixes: the bank consent would
+   * survive with nothing left to revoke it. A deletion can be retried; a live
+   * credential cannot be recalled.
+   *
+   * If the FINAL step fails, data is already gone and the surviving login simply owns
+   * an empty account; pressing the button again finishes the job.
    */
   const deleteAccount = async (password?: string): Promise<{ success: boolean; error?: string }> => {
     const current = auth.currentUser;
@@ -365,6 +375,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await reauthenticateWithCredential(current, EmailAuthProvider.credential(current.email ?? '', password));
       } else {
         await reauthenticateWithPopup(current, googleProvider);
+      }
+      try {
+        await unlinkAllBanks();
+      } catch (e) {
+        // Deliberately NOT swallowed — see the note above. Say which step failed, so
+        // "delete my account" never reports success over a bank still connected.
+        const detail = (e as { message?: string }).message || 'Plaid did not respond.';
+        return { success: false, error: `Could not disconnect your bank, so nothing was deleted. ${detail}` };
       }
       await firestoreService.deleteAllUserData(current.uid);
       await deleteUser(current);

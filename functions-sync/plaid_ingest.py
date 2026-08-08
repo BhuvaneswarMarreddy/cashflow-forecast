@@ -115,6 +115,19 @@ def exchange_public_token(client_id: str, secret: str, public_token: str,
     return out["access_token"], out["item_id"]
 
 
+def remove_item(client_id: str, secret: str, access_token: str, post=_post) -> None:
+    """Revoke an Item at Plaid (#72).
+
+    Deleting our copy of the access_token is NOT disconnecting the bank: the Item
+    keeps living in Plaid, keeps counting against the 10 lifetime Trial slots, and
+    the consent the owner gave their bank stays granted. Only /item/remove ends it.
+
+    Called before account deletion, while the token still exists to be used —
+    afterwards there is nothing left to revoke it with."""
+    post("/item/remove", {"client_id": client_id, "secret": secret,
+                          "access_token": access_token})
+
+
 # ---------------------------------------------------------------------------
 # Mapping
 # ---------------------------------------------------------------------------
