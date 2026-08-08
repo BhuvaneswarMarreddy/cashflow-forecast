@@ -13,7 +13,7 @@ import Link from 'next/link';
 import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import ChartSrTable from '@/components/ChartSrTable';
-import { classifyTransaction, interpretTransaction, isPosted, isPositive, isReward } from '@/lib/classify';
+import { classifyTransaction, interpretTransaction, isPosted, isPositive, isReward, sumExpenseCents, sumIncomeCents } from '@/lib/classify';
 import { matchTransfers } from '@/lib/transfers';
 import { displayCategory } from '@/types';
 import { CAT_COLORS } from '@/lib/palette';
@@ -34,7 +34,7 @@ type Range = '12m' | 'ytd' | 'all';
 
 export default function CashflowTab() {
   const { transactions } = useTransactions();
-  const { profile } = useUserProfile();
+  const { profile, incomeContext } = useUserProfile();
   const [range, setRange] = useState<Range>('12m');
   // Calendar's inheritance: tap a month bar, see that month's days.
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
@@ -78,16 +78,22 @@ export default function CashflowTab() {
     return { grossOut, grossIn, net: grossOut - grossIn, detail: Object.entries(detail).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value) };
   }, [rows, accounts, profile?.name]);
 
+  /**
+   * #76 — ONE income rule.
+   *
+   * This used to count every row the coarse classifier called an inflow, while
+   * Activity used sumIncomeCents() with the approved-source check. Two rules over
+   * one dataset, so the same ledger read $12,900.39 here and $12,900.00 there —
+   * a rounding-sized gap on the fixture, and a large one on a real ledger full of
+   * refunds, rewards and Zelle credits, none of which are pay.
+   *
+   * Both screens now ask the engine the same question.
+   */
   const totals = useMemo(() => {
-    let income = 0, spending = 0;
-    rows.forEach(t => {
-      const c = cls(t);
-      if (c === 'income') income += t.amount;
-      else if (c === 'expense') spending += t.amount;
-    });
+    const income = sumIncomeCents(rows, accounts, incomeContext) / 100;
+    const spending = sumExpenseCents(rows, accounts, incomeContext) / 100;
     return { income, spending, kept: income - spending - flows.net };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, accounts, flows.net]);
+  }, [rows, accounts, incomeContext, flows.net]);
 
   const monthly = useMemo(() => {
     const m: Record<string, { income: number; spending: number }> = {};
@@ -135,7 +141,7 @@ export default function CashflowTab() {
   const roleRows = useMemo(() => {
     const posted = rows
       .filter(isPosted)
-      .map((t) => ({ meaning: interpretTransaction(t, accounts ?? []).financialMeaning, amount: t.amount }));
+      .map((t) => ({ meaning: interpretTransaction(t, accounts ?? [], incomeContext).financialMeaning, amount: t.amount }));
     const totalsByR = totalsByRole(posted);
     const rolled = MONEY_ROLES
       // A role with nothing behind it is left out, not printed as $0.00 — the
@@ -157,7 +163,7 @@ export default function CashflowTab() {
       .reduce((sum, r) => sum + r.amount, 0);
 
     return { rolled, unconfirmed };
-  }, [rows, accounts]);
+  }, [rows, accounts, incomeContext]);
 
   // The drill-down: the selected month's rows, newest first (calendar's day view).
   const monthRows = useMemo(() => {

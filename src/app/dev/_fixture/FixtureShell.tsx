@@ -120,16 +120,31 @@ const REALISTIC_ACCOUNTS = FIXTURE_PROFILE.paymentAccounts.map((a, i) => ({
   openingDate: daysAgo(90),
 }));
 
+const INCOME_SOURCES = [
+  { id: 'fx-inc', name: 'Payroll deposit', amount: 4300, frequency: 'biweekly' as const, payDate: 1, isActive: true },
+];
+
 const profile = withNoops<UserProfileContextType>({
+  /**
+   * The real UserProfileContext DERIVES this from the profile's income sources
+   * (`UserProfileContext.tsx:519`). Without it here, withNoops() hands every
+   * consumer a stub instead of `{ sources, reviews }`, nothing can match an
+   * approved source, and every screen that counts income the strict way reports
+   * $0.00 beside visible paychecks.
+   *
+   * That is not a product bug, and it was reported as one: a persona review
+   * called it "the clearest 'this app cannot count' moment in the whole set".
+   * A fixture that omits a derived value manufactures the exact failure it is
+   * supposed to be testing for.
+   */
+  incomeContext: { sources: INCOME_SOURCES, reviews: {} },
   profile: {
     ...FIXTURE_PROFILE,
     paymentAccounts: REALISTIC_ACCOUNTS,
     // The name has to MATCH the deposits in recentLedger(), or income falls
     // through the approved-source check and every month reports +$0.00 beside a
     // visible paycheck — which is exactly what the review reported as a bug.
-    incomeSources: [
-      { id: 'fx-inc', name: 'Payroll deposit', amount: 4300, frequency: 'biweekly', payDate: 1, isActive: true },
-    ],
+    incomeSources: INCOME_SOURCES,
   },
   isLoading: false,
   isOnboarded: true,
