@@ -36,3 +36,21 @@ export function reconcile(
   if (driftCents === 0) return { driftCents: 0 };
   return { driftCents, reanchor: { openingBalance: enteredCurrent, openingDate: todayISO } };
 }
+
+/**
+ * The account display order the owner dragged into place.
+ *
+ * `getAccounts()` reads with an isActive filter and no ordering, so Firestore
+ * hands back document order. Reordering therefore persisted a sortIndex per
+ * account and then appeared to be ignored — the arrangement was correct until
+ * the next load, which is what "reordering is not accurate" looks like.
+ *
+ * A missing sortIndex sorts LAST, not first: accounts created before the feature
+ * existed have none, and treating that as 0 would jump them ahead of everything
+ * the owner actually placed. Array.prototype.sort is stable, so equal keys keep
+ * their relative order.
+ */
+export function sortByDisplayOrder<T extends { sortIndex?: number }>(accounts: readonly T[]): T[] {
+  const key = (a: T) => a.sortIndex ?? Number.MAX_SAFE_INTEGER;
+  return [...accounts].sort((a, b) => key(a) - key(b));
+}
