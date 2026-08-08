@@ -114,16 +114,22 @@ export function calculateCurrentCash(accounts: PaymentAccount[]): number {
  * which yields pure derivation). Future/projected rows are the forecast, not the
  * balance, so they are excluded here using the same today-boundary the forecast uses.
  */
-export function deriveAccountBalance(account: PaymentAccount, transactions: Transaction[]): number {
+export function deriveAccountBalance(
+  account: PaymentAccount,
+  transactions: Transaction[],
+  includePending = false
+): number {
   const todayKey = format(new Date(), 'yyyy-MM-dd');
   const openingKey = account.openingDate || '0000-00-00';
   const isDebt = account.type === 'credit_card' || account.type === 'personal_loan';
   const net = transactions.reduce((sum, t) => {
     if (t.accountId !== account.id) return sum;
-    // PENDING: excluded. The anchor this is added to is the provider's POSTED
+    // PENDING: excluded by DEFAULT. The anchor this is added to is the provider's POSTED
     // balance (simplefin.py re-anchors from `balance`, not available-balance), so
     // folding holds in here counts the same money twice and moves the hero number.
-    if (!isPosted(t)) return sum;
+    // `includePending` is the owner's explicit "show me the balance once these clear"
+    // view — opt-in only, and never the number any total or forecast reads.
+    if (!isPosted(t) && !includePending) return sum;
     // Compare calendar days, not instants (IST timezone; see git history).
     const day = t.date.split('T')[0];
     if (day > todayKey) return sum;   // future = forecast, not current balance
@@ -143,8 +149,12 @@ export function deriveAccountBalance(account: PaymentAccount, transactions: Tran
  * anchor. Callers showing "current" read currentBalance; callers showing/editing the
  * anchor read openingBalance. This is O(accounts × transactions) — CALLERS MUST MEMOIZE.
  */
-export function withDerivedBalances(accounts: PaymentAccount[], transactions: Transaction[]): PaymentAccount[] {
-  return accounts.map((a) => ({ ...a, currentBalance: deriveAccountBalance(a, transactions) }));
+export function withDerivedBalances(
+  accounts: PaymentAccount[],
+  transactions: Transaction[],
+  includePending = false
+): PaymentAccount[] {
+  return accounts.map((a) => ({ ...a, currentBalance: deriveAccountBalance(a, transactions, includePending) }));
 }
 
 /**

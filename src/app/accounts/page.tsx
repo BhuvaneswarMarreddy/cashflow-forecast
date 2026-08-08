@@ -65,9 +65,14 @@ export default function AccountsPage() {
   // other side is in an account you didn't import (external / a Zelle to a person).
   // Derived accounts (openingBalance + net → currentBalance). MUST stay above any early
   // return — a hook after a conditional return is React error #310.
+  // "What lands once the holds clear" — opt-in, and OFF by default so the page still
+  // opens on posted truth. Only these balances move; totals, forecasts and the income
+  // engine keep reading posted rows only (see deriveAccountBalance).
+  const [includePending, setIncludePending] = useState(false);
+  const pendingCount = useMemo(() => transactions.filter(t => t.pending).length, [transactions]);
   const derivedAccounts = useMemo(
-    () => withDerivedBalances(profile?.paymentAccounts || [], transactions),
-    [profile?.paymentAccounts, transactions]
+    () => withDerivedBalances(profile?.paymentAccounts || [], transactions, includePending),
+    [profile?.paymentAccounts, transactions, includePending]
   );
   // OBS-001: page-view / load lifecycle events, spans, and the sanitized provenance for
   // the summary cards below. Must stay above the early return (React error #310).
@@ -450,6 +455,24 @@ export default function AccountsPage() {
 
         {/* OBS-001: developer-only provenance for the cards below. Renders null in production. */}
         <AccountsDiagnostics traceId={obs.traceId} provenance={obs.provenance} onOpen={obs.trackDiagnosticOpened} />
+
+        {/* Holds are real money about to move, but they are not settled history, so the
+            balances below exclude them until the owner asks. Hidden when there is
+            nothing pending — a toggle that changes no number is just noise. */}
+        {pendingCount > 0 && (
+          <label className="flex items-center gap-2 mb-4 min-h-[44px] text-sm text-[var(--foreground-secondary)] cursor-pointer">
+            <input
+              type="checkbox"
+              checked={includePending}
+              onChange={(e) => setIncludePending(e.target.checked)}
+              className="w-4 h-4 accent-[var(--accent-primary)]"
+            />
+            Include {pendingCount} pending {pendingCount === 1 ? 'hold' : 'holds'} in balances
+            <span className="text-xs text-[var(--foreground-muted)]">
+              {includePending ? '— showing what lands once they clear' : '— showing posted balances'}
+            </span>
+          </label>
+        )}
 
         {/* Summary Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">

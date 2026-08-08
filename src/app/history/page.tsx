@@ -732,6 +732,11 @@ export default function HistoryPage() {
                                   <div className="flex items-center gap-2 flex-wrap">
                                     {/* max-sm: long titles ellipsize instead of wrapping the 360px row */}
                                     <p className="font-medium text-[var(--foreground)] max-sm:min-w-0 max-sm:truncate">{txn.title}</p>
+                                    {/* A hold is excluded from this group's +/- header (classify.ts:
+                                        `held` → income/expense 'excluded'). Without this badge the row
+                                        reads as counted money and the header looks broken — which is
+                                        exactly how a pending payroll credit made In show $0.00. */}
+                                    {txn.pending && <span className="badge badge-projected flex-shrink-0">Pending</span>}
                                     {txn.merchant && (
                                       <span 
                                         className="text-xs px-2 py-1 rounded-pill text-white"
@@ -767,7 +772,7 @@ export default function HistoryPage() {
                                 {(() => {
                                   const positive = isPositive(txn, profile?.paymentAccounts);
                                   return (
-                                    <p className={`font-semibold ${positive ? 'text-emerald-500' : 'text-[var(--foreground)]'}`}>
+                                    <p className={`font-semibold ${txn.pending ? 'text-[var(--foreground-muted)]' : positive ? 'text-emerald-500' : 'text-[var(--foreground)]'}`}>
                                       {positive ? '+' : '-'}{formatMoney(txn.amount, 'USD', 2)}
                                     </p>
                                   );
