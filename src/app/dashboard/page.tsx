@@ -129,6 +129,7 @@ export default function DashboardPage({ initialBills }: { initialBills?: Bill[] 
     derivedAccounts,
     profile?.incomeSources || [],
     transactions,
+    incomeContext,
     profile?.settings?.safetyThreshold || 500,
     90
   ) : null;

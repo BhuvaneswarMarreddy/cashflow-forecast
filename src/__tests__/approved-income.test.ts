@@ -341,7 +341,7 @@ describe('unknown inflows are real money that is not income', () => {
 
   it('creates no future income event in the forecast', () => {
     const future = new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10);
-    const f = generateForecast(1000, accounts, [], [tx({ id: 'u2', title: 'AB-4471 CREDIT', amount: 2500, date: future })], 500, 30, {}, c);
+    const f = generateForecast(1000, accounts, [], [tx({ id: 'u2', title: 'AB-4471 CREDIT', amount: 2500, date: future })], c, 500, 30, {});
     expect(f.events.filter((e) => e.type === 'income')).toHaveLength(0);
     expect(f.totalIncome).toBe(0);
   });

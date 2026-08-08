@@ -178,10 +178,10 @@ export default function ForecastPage() {
       derivedAccounts,
       profile.incomeSources || [],
       transactions,
+      incomeContext,
       threshold,
       forecastDays,
-      overrides,
-      incomeContext
+      overrides
     );
   }, [profile, derivedAccounts, transactions, forecastDays, overrides, incomeContext]);
 

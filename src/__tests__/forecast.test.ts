@@ -68,7 +68,7 @@ describe('Forecast Engine', () => {
       date: future(),
     });
     const run = (transactions: Transaction[]) =>
-      generateForecast(5000, mockAccounts, mockIncomeSources, transactions, 1000, 30);
+      generateForecast(5000, mockAccounts, mockIncomeSources, transactions, POSTED_ONLY, 1000, 30);
 
     test('an outbound transfer to an untracked destination reduces the projection', () => {
       expect(run([transfer('out')]).endingBalance).toBe(run([]).endingBalance - 500);
@@ -145,7 +145,7 @@ describe('Forecast Engine', () => {
       const card = { ...acct('card', 'credit_card'), dueDate: 15 };
       const txns = [row({ accountId: card.id, type: 'expense', amount: 950, title: 'Purchase' })];
       const accounts = withDerivedBalances([card], txns, POSTED_ONLY); // card now derives 950 debt
-      const f = generateForecast(1000, accounts, [], txns, 500, 90);
+      const f = generateForecast(1000, accounts, [], txns, POSTED_ONLY, 500, 90);
       expect(f.events.some(e => e.type === 'bill' || e.type === 'credit_card_payment')).toBe(false);
     });
   });
@@ -156,7 +156,7 @@ describe('Forecast Engine', () => {
         5000, // starting cash
         mockAccounts,
         mockIncomeSources,
-        mockTransactions,
+        mockTransactions, POSTED_ONLY,
         1000, // safety threshold
         30 // days
       );
@@ -172,7 +172,7 @@ describe('Forecast Engine', () => {
         5000,
         mockAccounts,
         mockIncomeSources,
-        mockTransactions,
+        mockTransactions, POSTED_ONLY,
         1000,
         30
       );
@@ -191,7 +191,7 @@ describe('Forecast Engine', () => {
         5000,
         mockAccounts,
         mockIncomeSources,
-        mockTransactions,
+        mockTransactions, POSTED_ONLY,
         1000,
         30
       );
@@ -206,7 +206,7 @@ describe('Forecast Engine', () => {
         500, // Low starting cash - already below safety
         mockAccounts,
         [],
-        mockTransactions,
+        mockTransactions, POSTED_ONLY,
         1000, // Higher safety threshold
         30
       );
@@ -228,7 +228,7 @@ describe('Forecast Engine', () => {
         5000,
         mockAccounts,
         mockIncomeSources,
-        mockTransactions,
+        mockTransactions, POSTED_ONLY,
         1000,
         45 // Enough days to include monthly income
       );
@@ -242,7 +242,7 @@ describe('Forecast Engine', () => {
         5000,
         mockAccounts,
         mockIncomeSources,
-        mockTransactions,
+        mockTransactions, POSTED_ONLY,
         1000,
         30
       );
@@ -258,7 +258,7 @@ describe('Forecast Engine', () => {
         5000,
         mockAccounts,
         mockIncomeSources,
-        mockTransactions,
+        mockTransactions, POSTED_ONLY,
         1000,
         30
       );
@@ -275,7 +275,7 @@ describe('Forecast Engine', () => {
         2000,
         mockAccounts,
         [],
-        mockTransactions,
+        mockTransactions, POSTED_ONLY,
         1500, // Safety threshold
         30
       );
@@ -293,7 +293,7 @@ describe('Forecast Engine', () => {
         10000,
         mockAccounts,
         mockIncomeSources,
-        mockTransactions,
+        mockTransactions, POSTED_ONLY,
         1000,
         30
       );
@@ -316,7 +316,7 @@ describe('Forecast Engine', () => {
         5000,
         mockAccounts,
         [], // No income
-        mockTransactions,
+        mockTransactions, POSTED_ONLY,
         1000,
         30
       );
@@ -330,7 +330,7 @@ describe('Forecast Engine', () => {
         5000,
         [], // No accounts
         mockIncomeSources,
-        mockTransactions,
+        mockTransactions, POSTED_ONLY,
         1000,
         30
       );
@@ -343,7 +343,7 @@ describe('Forecast Engine', () => {
         0,
         mockAccounts,
         mockIncomeSources,
-        mockTransactions,
+        mockTransactions, POSTED_ONLY,
         1000,
         30
       );
@@ -357,7 +357,7 @@ describe('Forecast Engine', () => {
         -500,
         mockAccounts,
         mockIncomeSources,
-        mockTransactions,
+        mockTransactions, POSTED_ONLY,
         1000,
         30
       );
@@ -385,7 +385,7 @@ describe('Forecast Engine', () => {
           date: d.toISOString().slice(0, 10), accountId: 'b',
         } as Transaction);
       }
-      const f = generateForecast(10000, [bank], [], txns, 500, 90);
+      const f = generateForecast(10000, [bank], [], txns, POSTED_ONLY, 500, 90);
       // ~$98.6/day projected out — the curve must come DOWN
       const living = f.events.filter(e => e.description === 'Projected living costs');
       expect(living.length).toBeGreaterThan(0);
@@ -412,7 +412,7 @@ describe('Forecast Engine', () => {
           date: d.toISOString().slice(0, 10), accountId: 'b',
         } as Transaction);
       }
-      const f = generateForecast(10000, [bank, loan], [], txns, 500, 90);
+      const f = generateForecast(10000, [bank, loan], [], txns, POSTED_ONLY, 500, 90);
       // Detection classifies the history as a fixed bill (out of the baselines) and
       // the loan twin wins the event: no living-costs drain, no duplicate $3,000s —
       // every projected $3,000 outflow is the loan's own bill event.
