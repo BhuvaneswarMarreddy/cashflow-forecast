@@ -196,21 +196,25 @@ def plaid_exchange(req: https_fn.CallableRequest) -> dict:
 
 
 @https_fn.on_call(
-    secrets=["SIMPLEFIN_ACCESS_URL"] + PLAID_SECRETS,
+    # SIMPLEFIN_ACCESS_URL was bound here and never read — the body calls _run_plaid()
+    # only. A retired provider's live credential was mounted into the function the
+    # Refresh button runs, for nothing.
+    secrets=PLAID_SECRETS,
     memory=options.MemoryOption.MB_512,
     timeout_sec=300,
 )
 def sync_now(req: https_fn.CallableRequest) -> dict:
-    """On-demand refresh from the app's own Refresh button — BOTH sources.
+    """On-demand refresh from the app's own Refresh button — PLAID ONLY.
 
     A CALLABLE, not the shared-key HTTP endpoint: the browser is already signed
     in, so Firebase verifies the ID token for us and no secret has to live in
     client code. Never raises: the button shows the returned error string
     instead of a console stack the user can't see.
 
-    Plaid runs FIRST (its balance pull is live, its rows are freshest), then
-    SimpleFIN enriches/backfills. Results are summed into the same flat shape
-    the button already renders, so the client needs no change.
+    This docstring used to say "BOTH sources … then SimpleFIN enriches/backfills".
+    The body has called _run_plaid() alone since SimpleFIN was retired on
+    2026-08-06, so the description was inviting someone to debug a second sync
+    that does not run.
     """
     _require_owner(req)
     status = _run_plaid()

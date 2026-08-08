@@ -232,28 +232,28 @@ def cand(doc_id, date_key, sources=(), **doc):
 
 class TwinMatching(unittest.TestCase):
     def test_matches_within_three_days_and_not_beyond(self):
-        self.assertEqual(sf.pick_match([cand("a", "2026-07-27")], "2026-07-24")["id"], "a")
-        self.assertIsNone(sf.pick_match([cand("a", "2026-07-28")], "2026-07-24"))
+        self.assertEqual(sf.pick_match([cand("a", "2026-07-27")], "2026-07-24", source='simplefin')["id"], "a")
+        self.assertIsNone(sf.pick_match([cand("a", "2026-07-28")], "2026-07-24", source='simplefin'))
 
     def test_nearest_date_wins_ties_go_to_the_earlier_row(self):
         far, near = cand("far", "2026-07-27"), cand("near", "2026-07-25")
-        self.assertEqual(sf.pick_match([far, near], "2026-07-24")["id"], "near")
+        self.assertEqual(sf.pick_match([far, near], "2026-07-24", source='simplefin')["id"], "near")
         # Equidistant: deterministic regardless of Firestore's return order.
         before, after = cand("before", "2026-07-23"), cand("after", "2026-07-25")
-        self.assertEqual(sf.pick_match([after, before], "2026-07-24")["id"], "before")
-        self.assertEqual(sf.pick_match([before, after], "2026-07-24")["id"], "before")
+        self.assertEqual(sf.pick_match([after, before], "2026-07-24", source='simplefin')["id"], "before")
+        self.assertEqual(sf.pick_match([before, after], "2026-07-24", source='simplefin')["id"], "before")
 
     def test_never_re_matches_a_row_this_source_already_wrote(self):
         self.assertIsNone(sf.pick_match([cand("a", "2026-07-24", ["simplefin"])],
-                                        "2026-07-24"))
+                                        "2026-07-24", source="simplefin"))
 
     def test_two_identical_charges_never_collapse_onto_one_row(self):
         # The spec's named risk: two $5.00 coffees on one day. Matching is
         # one-to-one, so the second must find nothing and insert.
         bucket = [cand("csv1", "2026-07-24")]
-        first = sf.pick_match(bucket, "2026-07-24")
+        first = sf.pick_match(bucket, "2026-07-24", source='simplefin')
         bucket.remove(first)
-        self.assertIsNone(sf.pick_match(bucket, "2026-07-24"),
+        self.assertIsNone(sf.pick_match(bucket, "2026-07-24", source='simplefin'),
                           "a wrongly merged pair silently understates spending")
 
 

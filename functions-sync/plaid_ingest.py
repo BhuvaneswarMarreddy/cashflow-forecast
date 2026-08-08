@@ -22,7 +22,7 @@ Sign conventions (both flipped here, nowhere else):
   opening_balance_for() expects Monarch's liabilities-negative convention, so
   the adapter negates debt balances to keep ONE definition of that rule.
 
-Mapping/anchoring/dedupe reuse simplefin.py + sync_core so all three sources
+Mapping/anchoring/dedupe reuse sync_core so every source
 agree on "never guess an account", "never trust the wrong balance", and
 "one-to-one fingerprint matching, never a twin".
 """
@@ -33,9 +33,12 @@ import json
 import urllib.request
 from collections import defaultdict
 
-import simplefin
 import sync_core
-from simplefin import (DOC_FIELDS, MATCH_DAYS, date_key_of, fingerprint,
+# These are shared ingest primitives and now live in sync_core, where the other
+# cross-source rules already are. They were imported from `simplefin` until
+# 2026-08-08, which made the LIVE Plaid pipeline read as though it depended on the
+# RETIRED source. It never did — it depends on these.
+from sync_core import (DOC_FIELDS, MATCH_DAYS, date_key_of, fingerprint,
                        merge_fields, pick_match, signed_cents_of, to_cents)
 
 SOURCE = "plaid"
