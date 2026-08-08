@@ -6,7 +6,7 @@
  */
 import { UserProfile, Transaction } from '@/types';
 import { withDerivedBalances, monthlyAverages } from './forecast';
-import { classifyTransaction, IncomeContext } from './classify';
+import { sumExpenseCents, IncomeContext } from './classify';
 
 /**
  * `policy` is required (#102): the AI must be told the same financial state the owner is
@@ -43,9 +43,12 @@ export function financialContext(
   } : undefined;
 
   const month = new Date().toISOString().slice(0, 7);
-  const spentThisMonth = transactions
-    .filter((t) => t.date.slice(0, 7) === month && classifyTransaction(t, accounts) === 'expense')
-    .reduce((s, t) => s + t.amount, 0);
+  // STATE-002 (#104): the app's ONE spending total, not a private reduce. The old
+  // filter used classifyTransaction, which cannot see the owner's confirmed reviews —
+  // so the AI answered "can I afford this?" from a figure that excluded every transfer
+  // the owner had personally marked as real spending.
+  const spentThisMonth =
+    sumExpenseCents(transactions.filter((t) => t.date.slice(0, 7) === month), accounts, policy) / 100;
   const derived = monthlyAverages(transactions, accounts, 6, { ...policy, sources: profile.incomeSources });
   const budget = profile.monthlyBudget > 0 ? profile.monthlyBudget : derived.spending;
   const budgetContext = budget > 0 ? {

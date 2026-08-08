@@ -16,7 +16,7 @@ import React, { useMemo, useState } from 'react';
 import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import ChartSrTable from '@/components/ChartSrTable';
-import { classifyTransaction } from '@/lib/classify';
+import { interpretTransaction } from '@/lib/classify';
 import { monthlyAverages } from '@/lib/forecast';
 import { formatMoney } from '@/lib/money';
 import { Transaction } from '@/types';
@@ -42,7 +42,10 @@ export default function InsightsTab() {
   const [currentDate, setCurrentDate] = useState(new Date());
 
   const money = (n: number) => formatMoney(n, profile?.currency, 2);
-  const isExpense = (t: Transaction) => classifyTransaction(t, profile?.paymentAccounts) === 'expense';
+  // STATE-002: "does this COUNT as spending", which honours confirmed reviews — not
+  // "what KIND of row is this", which cannot see them.
+  const isExpense = (t: Transaction) =>
+    interpretTransaction(t, profile?.paymentAccounts, incomeContext).expense === 'counted';
 
   const derivedMonthly = useMemo(
     () => monthlyAverages(transactions, profile?.paymentAccounts || [], 6, incomeContext),
@@ -76,7 +79,7 @@ export default function InsightsTab() {
       return { date: format(day, viewMode === 'weekly' ? 'EEE' : 'd'), spent: isPast ? spent : null, isPast };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transactions, range, viewMode, profile?.paymentAccounts]);
+  }, [transactions, range, viewMode, profile?.paymentAccounts, incomeContext]);
 
   const spentSoFar = daily.reduce((s, d) => s + (d.spent ?? 0), 0);
   const daysElapsed = daily.filter(d => d.isPast).length;
@@ -99,7 +102,7 @@ export default function InsightsTab() {
     const prevAvg = prevDays > 0 ? prevSpent / prevDays : 0;
     return prevAvg > 0 ? ((avgDailySpend - prevAvg) / prevAvg) * 100 : 0;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transactions, currentDate, viewMode, avgDailySpend, profile?.paymentAccounts]);
+  }, [transactions, currentDate, viewMode, avgDailySpend, profile?.paymentAccounts, incomeContext]);
 
   const topMerchants = useMemo(() => {
     const m: Record<string, number> = {};
@@ -112,7 +115,7 @@ export default function InsightsTab() {
     return Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 6)
       .map(([name, value]) => ({ name, value }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transactions, range, profile?.paymentAccounts]);
+  }, [transactions, range, profile?.paymentAccounts, incomeContext]);
   const maxMerchant = Math.max(...topMerchants.map(m => m.value), 0.01);
 
   const step = (dir: -1 | 1) =>
