@@ -516,9 +516,16 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // The app's financial policy, resolved once. Every screen already reads this, so
+  // FIN-PENDING-001's setting reaches all of them from here — that is the whole
+  // reason it lives on this object rather than in a second context.
   const incomeContext = useMemo<IncomeContext>(
-    () => ({ sources: profile?.incomeSources ?? [], reviews: inflowReviews }),
-    [profile?.incomeSources, inflowReviews]
+    () => ({
+      sources: profile?.incomeSources ?? [],
+      reviews: inflowReviews,
+      includePending: profile?.settings?.includePendingInCalculations ?? false,
+    }),
+    [profile?.incomeSources, inflowReviews, profile?.settings?.includePendingInCalculations]
   );
 
   // Complete onboarding
