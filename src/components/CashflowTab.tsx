@@ -40,7 +40,12 @@ export default function CashflowTab() {
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
 
   const accounts = profile?.paymentAccounts;
+  // STATE-002 (#104): two questions, two helpers, never one blanket replacement.
+  // `cls` = WHAT KIND of row (pairing, labels, the reward arm below). It cannot see the
+  // owner's confirmed reviews, and for those uses it must not.
+  // `counts` = DOES IT COUNT toward a total, which honours them.
   const cls = (t: typeof transactions[number]) => classifyTransaction(t, accounts);
+  const counts = (t: typeof transactions[number]) => interpretTransaction(t, accounts, incomeContext);
 
   const rows = useMemo(() => {
     const now = new Date();
@@ -100,18 +105,18 @@ export default function CashflowTab() {
     rows.forEach(t => {
       const key = format(parseISO(t.date), 'yyyy-MM');
       m[key] ??= { income: 0, spending: 0 };
-      const c = cls(t);
-      if (c === 'income') m[key].income += t.amount;
-      else if (c === 'expense') m[key].spending += t.amount;
+      const i = counts(t);
+      if (i.income === 'counted') m[key].income += t.amount;
+      else if (i.expense === 'counted') m[key].spending += t.amount;
     });
     return Object.entries(m).sort(([a], [b]) => a.localeCompare(b))
       .map(([key, v]) => ({ ym: key, month: format(parseISO(key + '-01'), 'MMM yy'), ...v, net: v.income - v.spending }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, accounts]);
+  }, [rows, accounts, incomeContext]);
 
   const byCategory = useMemo(() => {
     const c: Record<string, number> = {};
-    rows.filter(t => cls(t) === 'expense').forEach(t => {
+    rows.filter(t => counts(t).expense === 'counted').forEach(t => {
       const k = displayCategory(t); c[k] = (c[k] || 0) + t.amount;
     });
     const sorted = Object.entries(c).sort((a, b) => b[1] - a[1]);
@@ -121,11 +126,15 @@ export default function CashflowTab() {
     if (other > 0) out.push({ name: 'Other', value: other });
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, accounts]);
+  }, [rows, accounts, incomeContext]);
 
   const rewardsByCard = useMemo(() => {
     const m: Record<string, number> = {};
     rows.forEach(t => {
+      // STAYS on `cls` deliberately: a reward resolves to `other_non_income_credit`,
+      // never `earned_income`, so `.income === 'counted'` is false for EVERY reward and
+      // this panel would render $0.00. "Is it an inflow" is the question here, not
+      // "does it count as income" — they are different and only one is right.
       if (cls(t) === 'income' && isReward(t)) {
         const acct = accounts?.find(a => a.id === t.accountId);
         if (acct?.type === 'credit_card') m[acct.name] = (m[acct.name] || 0) + t.amount;
@@ -241,7 +250,7 @@ export default function CashflowTab() {
       {/* Monthly income vs spending — tap a month for its days */}
       <div className="glass-card p-5 mb-8">
         <h3 className="font-semibold text-[var(--foreground)] mb-1">Income vs Spending, by month</h3>
-        <p className="text-sm text-[var(--foreground-secondary)] mb-4">The gap between the bars is what you kept. Tap a month to see its days. Transfers and card payments are excluded — they move money, they don&apos;t spend it.</p>
+        <p className="text-sm text-[var(--foreground-secondary)] mb-4">The gap between the bars is what you kept. Tap a month to see its days. Card payments and unconfirmed transfers are excluded — they move money, they don&apos;t spend it. Transfers you have confirmed as spending are counted.</p>
         <div
           className={`h-[240px] sm:h-[320px] ${MOBILE_TICKS}`}
           role="img"
