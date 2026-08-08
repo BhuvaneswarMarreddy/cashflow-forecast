@@ -17,7 +17,7 @@ import { FlowGraph, day, normalizeMerchant, toCents } from '@/lib/flows';
 import { askAbout, askAboutTransaction } from '@/lib/ask';
 import { formatMoneyCents } from '@/lib/money';
 import { classifyTransaction } from '@/lib/classify';
-import { displayPerson, personFrom } from '@/lib/counterparty';
+import { personBranchLabel, personFrom } from '@/lib/counterparty';
 import { PaymentAccount, Transaction } from '@/types';
 import { Sparkles } from 'lucide-react';
 
@@ -72,12 +72,27 @@ export default function SpendingTree(props: {
   if (personRows.length) {
     const seen = new Set<string>();
     const unique = personRows.filter((t) => (seen.has(t.id) ? false : (seen.add(t.id), true)));
+
+    /**
+     * GROUP BY COUNTERPARTY. This used to push one branch per row, so three
+     * payments to the same person rendered as three branches each reading
+     * "1 transaction" — a recurring remittance fragmented into a list of ones
+     * instead of showing its total. Category branches were grouped and summed
+     * all along; only this loop was not.
+     */
+    const byPerson = new Map<string, { label: string; txns: Transaction[] }>();
     for (const t of unique) {
       const who = personFrom(t.description ?? t.title);
+      const key = who ?? '(unnamed)';
+      const existing = byPerson.get(key);
+      if (existing) existing.txns.push(t);
+      else byPerson.set(key, { label: personBranchLabel(who), txns: [t] });
+    }
+    for (const { label, txns } of byPerson.values()) {
       branches.push({
-        label: `Paid to ${who ? displayPerson(who) : 'a person'}`,
-        cents: toCents(t.amount),
-        txns: [t],
+        label,
+        cents: txns.reduce((sum, t) => sum + toCents(t.amount), 0),
+        txns,
       });
     }
   }

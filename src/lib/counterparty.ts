@@ -42,6 +42,21 @@ export const displayPerson = (name: string) =>
     : name.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 
 /**
+ * How a counterparty heads its own branch in the spending tree.
+ *
+ * `displayPerson('REMITLY')` already returns a whole phrase, so prefixing it
+ * produced "Paid to Sent to India (Remitly)". A person's name is just a name and
+ * still needs the preposition. Lives here, beside displayPerson, so a screen
+ * cannot re-derive the distinction and get it wrong again.
+ */
+export const personBranchLabel = (name: string | null): string => {
+  if (!name) return 'Paid to a person';
+  const shown = displayPerson(name);
+  // Already reads as a sentence — do not put a second preposition in front.
+  return /^(sent|paid|transferred)\b/i.test(shown) ? shown : `Paid to ${shown}`;
+};
+
+/**
  * Does this row name a party OUTSIDE the owner's own accounts?
  *
  * The ONE definition, so `signalOf()` (which groups the queue), `interpretTransaction()`

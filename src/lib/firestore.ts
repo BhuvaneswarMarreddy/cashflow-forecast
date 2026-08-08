@@ -54,6 +54,7 @@ import {
   PlannedTransactionStatus,
 } from '@/types';
 import { startSpan } from '@/lib/obs/trace';
+import { sortByDisplayOrder } from '@/lib/accounts';
 
 // ============================================
 // Types for Firestore Documents
@@ -433,7 +434,9 @@ export async function getAccounts(userId: string): Promise<PaymentAccount[]> {
       ...doc.data(),
     })) as PaymentAccount[];
     span.end({ recordCount: accounts.length, metadata: { fromCache: snapshot.metadata.fromCache } });
-    return accounts;
+    // The query carries no orderBy, so this is where the owner's dragged order is
+    // restored. Without it the arrangement persisted and was then ignored on load.
+    return sortByDisplayOrder(accounts);
   } catch (error) {
     if (isOfflineError(error)) {
       console.warn('Firestore offline - using local accounts');
