@@ -1,13 +1,17 @@
 'use client';
 
 import React, { useEffect, useState, useMemo } from 'react';
+import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import Navbar from '@/components/Navbar';
 import AddTransactionModal from '@/components/AddTransactionModal';
-import CSVImportModal from '@/components/CSVImportModal';
+// Lazy (#41): CSVImportModal pulls in `xlsx`, ~836KB, and History rendered it on every
+// visit for a modal that is closed until someone clicks Import. `ssr: false` because
+// there is nothing to prerender behind a closed dialog.
+const CSVImportModal = dynamic(() => import('@/components/CSVImportModal'), { ssr: false });
 import ReceiptScannerModal from '@/components/ReceiptScannerModal';
 import RunwayCalculator from '@/components/RunwayCalculator';
 import InsightsTab from '@/components/InsightsTab';

@@ -3,7 +3,10 @@
 import React, { useState } from 'react';
 import { UserProfile, Transaction, SavingsGoal, DebtPayoffPlan, InflowReview } from '@/types';
 import { Download, FileSpreadsheet, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
-import { buildExportWorkbook, workbookToBlob } from '@/lib/export-xlsx';
+// NOT a static import (#41). `export-xlsx` pulls in `xlsx`, ~836KB of the bundle, and
+// this button ships on Settings whether or not anyone ever clicks it. Loaded on click
+// instead — there is already a spinner for the wait, because building the workbook was
+// never instant anyway.
 
 interface ExportButtonProps {
   profile: UserProfile | null;
@@ -32,6 +35,7 @@ export default function ExportButton({
     setExportStatus('idle');
     
     try {
+      const { buildExportWorkbook, workbookToBlob } = await import('@/lib/export-xlsx');
       // Built entirely in the browser — no server round-trip, works offline.
       const wb = buildExportWorkbook({
         profile: {
