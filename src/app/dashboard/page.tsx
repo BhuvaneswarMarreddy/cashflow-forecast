@@ -420,6 +420,8 @@ export default function DashboardPage({ initialBills }: { initialBills?: Bill[] 
                           {displayName(txn.title)}
                         </p>
                         {isFuture && <span className="badge badge-projected flex-shrink-0">Upcoming</span>}
+                        {/* Same reason as Upcoming: money the totals above do not count yet. */}
+                        {txn.pending && <span className="badge badge-projected flex-shrink-0">Pending</span>}
                       </div>
                       {/* ONE qualifier, never two. "Aug 6 · Other · Bank Account"
                           was three fields where two said nothing: `other` is the
@@ -434,7 +436,7 @@ export default function DashboardPage({ initialBills }: { initialBills?: Bill[] 
                             : ''}
                       </p>
                     </div>
-                    <p className={`font-semibold tnum flex-shrink-0 ${isExpense ? 'text-[var(--money-out)]' : 'text-[var(--money-in)]'}`}>
+                    <p className={`font-semibold tnum flex-shrink-0 ${txn.pending ? 'text-[var(--foreground-muted)]' : isExpense ? 'text-[var(--money-out)]' : 'text-[var(--money-in)]'}`}>
                       {isExpense ? '−' : '+'}{formatMoney(txn.amount, profile?.currency, 2)}
                     </p>
                   </li>

@@ -224,6 +224,8 @@ export default function AccountTransactions({ account, transactions }: AccountTr
                     <div>
                       <div className="flex items-center gap-2">
                         <p className="font-medium text-[var(--foreground)]">{txn.title}</p>
+                        {/* Excluded from every total until it posts — say so on the row. */}
+                        {txn.pending && <span className="badge badge-projected flex-shrink-0">Pending</span>}
                         {txn.merchant && (
                           <span 
                             className="text-xs px-2 py-1 rounded-pill text-white hidden sm:inline"
@@ -245,15 +247,15 @@ export default function AccountTransactions({ account, transactions }: AccountTr
                   <div className="flex items-center gap-2">
                     {isPositive(txn, account ? [account] : undefined) ? (
                       <>
-                        <ArrowUpRight className="w-4 h-4 text-emerald-500" />
-                        <p className="font-semibold text-emerald-500">
+                        <ArrowUpRight className={`w-4 h-4 ${txn.pending ? 'text-[var(--foreground-muted)]' : 'text-emerald-500'}`} />
+                        <p className={`font-semibold ${txn.pending ? 'text-[var(--foreground-muted)]' : 'text-emerald-500'}`}>
                           +${txn.amount.toLocaleString()}
                         </p>
                       </>
                     ) : (
                       <>
-                        <ArrowDownRight className="w-4 h-4 text-red-400" />
-                        <p className="font-semibold text-[var(--foreground)]">
+                        <ArrowDownRight className={`w-4 h-4 ${txn.pending ? 'text-[var(--foreground-muted)]' : 'text-red-400'}`} />
+                        <p className={`font-semibold ${txn.pending ? 'text-[var(--foreground-muted)]' : 'text-[var(--foreground)]'}`}>
                           -${txn.amount.toLocaleString()}
                         </p>
                       </>

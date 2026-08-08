@@ -289,8 +289,14 @@ export default function CashflowTab() {
               {monthRows.map(t => (
                 <div key={t.id} className="flex items-baseline justify-between gap-3 py-2 text-sm">
                   <span className="text-[var(--foreground-muted)] tnum shrink-0">{format(parseISO(t.date), 'MMM d')}</span>
-                  <span className="text-[var(--foreground)] truncate flex-1">{t.title}</span>
-                  <span className={`tnum font-medium shrink-0 ${isPositive(t, accounts) ? 'text-[var(--money-in)]' : 'text-[var(--money-out)]'}`}>
+                  <span className="text-[var(--foreground)] truncate flex-1">
+                    {t.title}
+                    {/* This drill-down lists rows the month's own income/spending bars
+                        exclude (rows is filtered by isPosted upstream for the chart, not
+                        here) — the badge is what stops the list contradicting the bar. */}
+                    {t.pending && <span className="badge badge-projected ml-2">Pending</span>}
+                  </span>
+                  <span className={`tnum font-medium shrink-0 ${t.pending ? 'text-[var(--foreground-muted)]' : isPositive(t, accounts) ? 'text-[var(--money-in)]' : 'text-[var(--money-out)]'}`}>
                     {isPositive(t, accounts) ? '+' : '−'}{money(t.amount)}
                   </span>
                 </div>
