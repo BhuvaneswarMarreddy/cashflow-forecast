@@ -22,8 +22,7 @@ import {
   matchApprovedSources,
   activeApprovedSources,
   selectInflowReviewQueue,
-  IncomeContext,
-} from '@/lib/classify';
+  IncomeContext, POSTED_ONLY } from '@/lib/classify';
 import { deriveAccountBalance, generateForecast, monthlyAverages } from '@/lib/forecast';
 
 const accounts: PaymentAccount[] = [
@@ -317,7 +316,7 @@ describe('unknown inflows are real money that is not income', () => {
   const c = ctxOf([EMPLOYER]);
 
   it('raises the account balance', () => {
-    expect(deriveAccountBalance(accounts[0], [unknown])).toBeCloseTo(1088, 2);
+    expect(deriveAccountBalance(accounts[0], [unknown], POSTED_ONLY)).toBeCloseTo(1088, 2);
   });
 
   it('but contributes nothing to earned-income analytics', () => {

@@ -1,3 +1,4 @@
+import { POSTED_ONLY } from '@/lib/classify';
 import { PaymentAccount, Transaction } from '@/types';
 import { deriveAccountBalance, withDerivedBalances } from '@/lib/forecast';
 
@@ -18,7 +19,7 @@ describe('deriveAccountBalance with opening anchor', () => {
       tx({ id: 'e', amount: 50, type: 'expense', accountId: 'b', date: '2026-02-11' }),
       tx({ id: 'old', amount: 999, type: 'expense', accountId: 'b', date: '2026-01-15' }), // pre-anchor, ignored
     ];
-    expect(deriveAccountBalance(bank, txns)).toBe(1000 + 200 - 50);
+    expect(deriveAccountBalance(bank, txns, POSTED_ONLY)).toBe(1000 + 200 - 50);
   });
   it('debt: opening - net; a payment lowers owed, a purchase raises it', () => {
     const card = acct({ id: 'c', type: 'credit_card', provider: 'amex', openingBalance: 500, openingDate: '2026-02-01' });
@@ -27,12 +28,12 @@ describe('deriveAccountBalance with opening anchor', () => {
       tx({ id: 'pay', amount: 300, type: 'transfer', transferDirection: 'in', accountId: 'c', date: '2026-02-06' }),
     ];
     // owed = 500 - (payment 300 - purchase 100) = 500 - 200 = 300
-    expect(deriveAccountBalance(card, txns)).toBe(300);
+    expect(deriveAccountBalance(card, txns, POSTED_ONLY)).toBe(300);
   });
   it('debt can go negative (credit balance) and is not clamped', () => {
     const card = acct({ id: 'c', type: 'credit_card', provider: 'amex', openingBalance: 100, openingDate: '2026-02-01' });
     const txns = [tx({ id: 'pay', amount: 300, type: 'transfer', transferDirection: 'in', accountId: 'c', date: '2026-02-06' })];
-    expect(deriveAccountBalance(card, txns)).toBe(-200);
+    expect(deriveAccountBalance(card, txns, POSTED_ONLY)).toBe(-200);
   });
 });
 
@@ -50,7 +51,7 @@ describe('deriveAccountBalance includePending', () => {
   ];
 
   it('excludes holds by default', () => {
-    expect(deriveAccountBalance(bank, txns)).toBe(950);
+    expect(deriveAccountBalance(bank, txns, POSTED_ONLY)).toBe(950);
   });
 
   it('folds holds in — both directions — when asked', () => {
@@ -60,12 +61,12 @@ describe('deriveAccountBalance includePending', () => {
   it('a debt account nets holds the other way', () => {
     const card = acct({ id: 'c', type: 'credit_card', provider: 'amex', openingBalance: 500, openingDate: '2026-02-01' });
     const holds = [tx({ id: 'buy', amount: 40, type: 'expense', accountId: 'c', date: '2026-02-05', pending: true })];
-    expect(deriveAccountBalance(card, holds)).toBe(500);       // hold ignored
+    expect(deriveAccountBalance(card, holds, POSTED_ONLY)).toBe(500);       // hold ignored
     expect(deriveAccountBalance(card, holds, ON)).toBe(540); // a pending purchase raises owed
   });
 
   it('withDerivedBalances passes the flag through', () => {
-    expect(withDerivedBalances([bank], txns)[0].currentBalance).toBe(950);
+    expect(withDerivedBalances([bank], txns, POSTED_ONLY)[0].currentBalance).toBe(950);
     expect(withDerivedBalances([bank], txns, ON)[0].currentBalance).toBeCloseTo(5192.20, 2);
   });
 });

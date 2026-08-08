@@ -19,8 +19,7 @@ import {
   isPosted,
   postedOnly,
   sumIncomeCents,
-  sumExpenseCents,
-} from '@/lib/classify';
+  sumExpenseCents, POSTED_ONLY } from '@/lib/classify';
 import { matchTransfers } from '@/lib/transfers';
 import { deriveAccountBalance } from '@/lib/forecast';
 
@@ -62,7 +61,7 @@ describe('card-payment correctness', () => {
     // isPositive drives deriveAccountBalance; a false positive here silently
     // understates debt by twice the amount (missing spend + phantom payment).
     expect(isPositive(purchaseNamedPayment, accounts)).toBe(false);
-    expect(deriveAccountBalance(accounts[1], [purchaseNamedPayment])).toBeCloseTo(463.75, 2);
+    expect(deriveAccountBalance(accounts[1], [purchaseNamedPayment], POSTED_ONLY)).toBeCloseTo(463.75, 2);
   });
 
   it('a genuine credit-card payment on the card account is a transfer that lowers debt', () => {
@@ -117,15 +116,15 @@ describe('card-payment correctness', () => {
     const cardLeg = txn({ id: 'x2', title: 'AUTOPAY PAYMENT - THANK YOU', amount: 40, type: 'income', accountId: 'card', date: '2026-03-20' });
     const bankLeg = txn({ id: 'x3', title: 'AMEX EPAYMENT ACH PMT', amount: 40, type: 'expense', accountId: 'chk', date: '2026-03-20' });
 
-    expect(sumExpenseCents([purchase, cardLeg, bankLeg], accounts)).toBe(4000);
-    expect(sumIncomeCents([purchase, cardLeg, bankLeg], accounts)).toBe(0);
+    expect(sumExpenseCents([purchase, cardLeg, bankLeg], accounts, POSTED_ONLY)).toBe(4000);
+    expect(sumIncomeCents([purchase, cardLeg, bankLeg], accounts, POSTED_ONLY)).toBe(0);
   });
 
   it('does not flip the sign of an ordinary purchase', () => {
     const groceries = txn({ id: 'g1', title: 'Willowbrook Market', amount: 82.4, accountId: 'chk', category: 'food' });
     expect(isPositive(groceries, accounts)).toBe(false);
     expect(interpretTransaction(groceries, accounts).direction).toBe('outflow');
-    expect(sumExpenseCents([groceries], accounts)).toBe(8240);
+    expect(sumExpenseCents([groceries], accounts, POSTED_ONLY)).toBe(8240);
   });
 
   it('leaves loan payments alone (ingest forces them to type expense)', () => {
@@ -158,9 +157,9 @@ describe('pending semantics', () => {
   });
 
   it('a pending row is NOT final posted accounting truth', () => {
-    expect(sumExpenseCents([pendingHold, postedRow], accounts)).toBe(12000);
+    expect(sumExpenseCents([pendingHold, postedRow], accounts, POSTED_ONLY)).toBe(12000);
     // The bank's re-anchored balance is a POSTED balance; adding holds double counts.
-    expect(deriveAccountBalance(accounts[1], [pendingHold, postedRow])).toBeCloseTo(520, 2);
+    expect(deriveAccountBalance(accounts[1], [pendingHold, postedRow], POSTED_ONLY)).toBeCloseTo(520, 2);
   });
 
   it('the interpretation says outright that a pending row is excluded everywhere it matters', () => {
@@ -174,13 +173,13 @@ describe('pending semantics', () => {
   it('once pending becomes posted it counts exactly once', () => {
     // simplefin.py deletes the pending_ doc when the charge posts under its real id.
     const posted = txn({ id: 'sf_777', title: 'Brightleaf Coffee', amount: 58, accountId: 'card', category: 'food' });
-    expect(sumExpenseCents([posted], accounts)).toBe(5800);
+    expect(sumExpenseCents([posted], accounts, POSTED_ONLY)).toBe(5800);
   });
 
   it('a pending hold and its posted twin never both count', () => {
     // The hold ($50) and the settled charge ($58) coexist for one sync window.
     const posted = txn({ id: 'sf_777', title: 'Brightleaf Coffee', amount: 58, accountId: 'card', category: 'food' });
-    expect(sumExpenseCents([pendingHold, posted], accounts)).toBe(5800);
+    expect(sumExpenseCents([pendingHold, posted], accounts, POSTED_ONLY)).toBe(5800);
   });
 
   it('a posted transaction appears exactly once in the posted set', () => {

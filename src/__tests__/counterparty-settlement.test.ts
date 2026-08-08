@@ -14,8 +14,7 @@ import { PaymentAccount, Transaction } from '@/types';
 import {
   interpretTransaction,
   personalCostSign,
-  sumExpenseCents,
-} from '@/lib/classify';
+  sumExpenseCents, POSTED_ONLY } from '@/lib/classify';
 import { buildFlowGraph, counterpartyRowIds, toCents } from '@/lib/flows';
 import { namesExternalCounterparty } from '@/lib/counterparty';
 import { detectCounterpartyLedger } from '@/lib/mapping-evidence';
@@ -361,7 +360,7 @@ describe('nothing auto-applies', () => {
     // The proposal exists...
     expect(forParty(groupsFor(rows), 'AVA TREMBLAY', 'outflow')!.suggestion!.meaning).toBe('personal_expense');
     // ...and has changed nothing.
-    expect(sumExpenseCents(rows, ACCOUNTS)).toBe(0);
+    expect(sumExpenseCents(rows, ACCOUNTS, POSTED_ONLY)).toBe(0);
     expect(interpretTransaction(rows[0], ACCOUNTS).financialMeaning).toBe('internal_transfer');
     expect(interpretTransaction(rows[0], ACCOUNTS).expense).toBe('excluded');
   });
@@ -398,7 +397,7 @@ describe('nothing auto-applies', () => {
 
   it('is undone by clearing the answer — the derived behaviour comes back EXACTLY', () => {
     const rows = mixed();
-    const baseline = sumExpenseCents(rows, ACCOUNTS);
+    const baseline = sumExpenseCents(rows, ACCOUNTS, POSTED_ONLY);
     expect(baseline).toBe(80_000); // the one row the importer already made spending
 
     const group = forParty(groupsFor(rows), 'AVA TREMBLAY', 'outflow')!;
@@ -431,7 +430,7 @@ describe('nothing auto-applies', () => {
       ),
     };
     expect(sumExpenseCents(rows, ACCOUNTS, asTransfer)).toBe(0);
-    expect(sumExpenseCents(rows, ACCOUNTS)).toBe(80_000); // below the derived baseline
+    expect(sumExpenseCents(rows, ACCOUNTS, POSTED_ONLY)).toBe(80_000); // below the derived baseline
     expect(interpretTransaction(rows[0], ACCOUNTS, asTransfer).forecast).toBe('excluded');
   });
 
@@ -512,6 +511,6 @@ describe('a confirmation may override a provider transfer ONLY when it names a c
     // exactly as before. The new branch must not have changed the un-reviewed path.
     const t = zelle('AVA TREMBLAY', 'out', 100, '2025-01-01', { type: 'expense', transferDirection: undefined, sourceCategory: 'Rent' });
     expect(interpretTransaction(t, ACCOUNTS).expense).toBe('counted');
-    expect(sumExpenseCents([t], ACCOUNTS)).toBe(10_000);
+    expect(sumExpenseCents([t], ACCOUNTS, POSTED_ONLY)).toBe(10_000);
   });
 });

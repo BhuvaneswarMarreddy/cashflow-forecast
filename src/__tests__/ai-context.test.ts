@@ -1,3 +1,4 @@
+import { POSTED_ONLY } from '@/lib/classify';
 import { financialContext } from '@/lib/ai-context';
 import { UserProfile, Transaction } from '@/types';
 
@@ -17,7 +18,7 @@ const txns = [
 
 describe('financialContext', () => {
   it('assembles debts with utilization, budget with month-to-date, and omits empty goals', () => {
-    const ctx = financialContext(profile, txns);
+    const ctx = financialContext(profile, txns, POSTED_ONLY);
     expect(ctx.debtContext?.creditCards[0]).toMatchObject({ name: 'Amex', owed: 800, utilizationPct: 40 });
     expect(ctx.debtContext?.loans[0]).toMatchObject({ name: 'Upstart', monthlyPayment: 250, apr: 9.5 });
     expect(ctx.debtContext?.totalDebt).toBe(5800);
@@ -27,6 +28,6 @@ describe('financialContext', () => {
   });
 
   it('returns empty for a null profile', () => {
-    expect(financialContext(null, [])).toEqual({});
+    expect(financialContext(null, [], POSTED_ONLY)).toEqual({});
   });
 });

@@ -14,8 +14,7 @@ import * as XLSX from 'xlsx';
 import { IncomeSource, PaymentAccount, Transaction, UserProfile } from '@/types';
 import {
   sumIncomeCents, sumExpenseCents, postedOnly, interpretTransaction,
-  selectInflowReviewQueue, IncomeContext,
-} from '@/lib/classify';
+  selectInflowReviewQueue, IncomeContext, POSTED_ONLY } from '@/lib/classify';
 import { getAllCategorySpending } from '@/lib/budgets';
 import { generateTransactionReminders } from '@/lib/reminders';
 import { buildExportWorkbook } from '@/lib/export-xlsx';
@@ -90,15 +89,15 @@ const profile = {
 
 describe('cross-surface consistency', () => {
   it('the shared totals are the authoritative answer', () => {
-    expect(sumExpenseCents(LEDGER, accounts)).toBe(EXPECTED_EXPENSE_CENTS);
+    expect(sumExpenseCents(LEDGER, accounts, POSTED_ONLY)).toBe(EXPECTED_EXPENSE_CENTS);
     expect(sumIncomeCents(LEDGER, accounts, INCOME)).toBe(EXPECTED_INCOME_CENTS);
   });
 
   it('Dashboard and Calendar agree with the shared totals', () => {
     // Both pages sum through the same helper; a per-page reduce would drift.
-    const dashboardExpense = sumExpenseCents(LEDGER, accounts);
+    const dashboardExpense = sumExpenseCents(LEDGER, accounts, POSTED_ONLY);
     const calendarIncome = sumIncomeCents(LEDGER, accounts, INCOME);
-    const calendarExpense = sumExpenseCents(LEDGER, accounts);
+    const calendarExpense = sumExpenseCents(LEDGER, accounts, POSTED_ONLY);
     expect(dashboardExpense).toBe(EXPECTED_EXPENSE_CENTS);
     expect(calendarExpense).toBe(EXPECTED_EXPENSE_CENTS);
     expect(calendarIncome).toBe(EXPECTED_INCOME_CENTS);
@@ -135,12 +134,12 @@ describe('cross-surface consistency', () => {
   });
 
   it('card payments are not double-counted as expense', () => {
-    expect(sumExpenseCents([CARD_PAYMENT_BANK_LEG, CARD_PAYMENT_CARD_LEG], accounts)).toBe(0);
+    expect(sumExpenseCents([CARD_PAYMENT_BANK_LEG, CARD_PAYMENT_CARD_LEG], accounts, POSTED_ONLY)).toBe(0);
   });
 
   it('internal transfers net to zero aggregate income and expense', () => {
     expect(sumIncomeCents([TRANSFER_OUT, TRANSFER_IN], accounts, INCOME)).toBe(0);
-    expect(sumExpenseCents([TRANSFER_OUT, TRANSFER_IN], accounts)).toBe(0);
+    expect(sumExpenseCents([TRANSFER_OUT, TRANSFER_IN], accounts, POSTED_ONLY)).toBe(0);
     const m = matchTransfers(LEDGER, accounts);
     // savings move + card payment, both two-sided
     expect(m.pairs).toHaveLength(2);
@@ -151,7 +150,7 @@ describe('cross-surface consistency', () => {
   it('pending rows never silently become final truth', () => {
     expect(postedOnly(LEDGER)).toHaveLength(LEDGER.length - 1);
     // Card: purchase 45 + posted replacement 64.20 - payment 300 + refund -15 = -205.80 owed
-    expect(deriveAccountBalance(accounts[2], LEDGER)).toBeCloseTo(-205.8, 2);
+    expect(deriveAccountBalance(accounts[2], LEDGER, POSTED_ONLY)).toBeCloseTo(-205.8, 2);
     // and the hold is not in the budget either
     const spending = getAllCategorySpending(LEDGER, new Date('2026-03-15'), accounts);
     expect(toCents(spending.shopping)).toBe(6420);
@@ -183,8 +182,8 @@ describe('cross-surface consistency', () => {
   });
 
   it('Forecast starts from the posted balance, not the pending one', () => {
-    const withHold = deriveAccountBalance(accounts[2], LEDGER);
-    const withoutHold = deriveAccountBalance(accounts[2], postedOnly(LEDGER));
+    const withHold = deriveAccountBalance(accounts[2], LEDGER, POSTED_ONLY);
+    const withoutHold = deriveAccountBalance(accounts[2], postedOnly(LEDGER), POSTED_ONLY);
     expect(withHold).toBeCloseTo(withoutHold, 2);
   });
 
@@ -214,8 +213,8 @@ describe('cross-surface consistency', () => {
 
   it('the unknown inflow is on the balance but in no income total, on any surface', () => {
     // It really arrived: the checking balance includes it.
-    const chk = deriveAccountBalance(accounts[0], LEDGER);
-    const withoutIt = deriveAccountBalance(accounts[0], LEDGER.filter((t) => t.id !== 'f11'));
+    const chk = deriveAccountBalance(accounts[0], LEDGER, POSTED_ONLY);
+    const withoutIt = deriveAccountBalance(accounts[0], LEDGER.filter((t) => t.id !== 'f11'), POSTED_ONLY);
     expect(chk - withoutIt).toBeCloseTo(88, 2);
 
     // And it is income nowhere.

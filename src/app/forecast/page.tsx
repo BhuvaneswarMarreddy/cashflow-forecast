@@ -138,7 +138,7 @@ export default function ForecastPage() {
   // Balances derived from linked transactions, so forecasts start from the real
   // current balance rather than the stored opening figure.
   const derivedAccounts = useMemo(
-    () => withDerivedBalances(profile?.paymentAccounts || [], transactions),
+    () => withDerivedBalances(profile?.paymentAccounts || [], transactions, incomeContext),
     [profile?.paymentAccounts, transactions]
   );
 

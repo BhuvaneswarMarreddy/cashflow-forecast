@@ -16,8 +16,7 @@ import path from 'path';
 import * as XLSX from 'xlsx';
 import { IncomeSource, PaymentAccount, Transaction, UserProfile } from '@/types';
 import {
-  IncomeContext, interpretTransaction, selectInflowReviewQueue, sumExpenseCents, sumIncomeCents,
-} from '@/lib/classify';
+  IncomeContext, interpretTransaction, selectInflowReviewQueue, sumExpenseCents, sumIncomeCents, POSTED_ONLY } from '@/lib/classify';
 import { buildChatContext } from '@/lib/chat-actions';
 import { getAllCategorySpending } from '@/lib/budgets';
 import { buildExportWorkbook } from '@/lib/export-xlsx';
@@ -150,7 +149,7 @@ describe('FIN-RECOVERY-UI-001 · cross-surface consistency (X1-X12)', () => {
   });
 
   it('X2 — every surface reports the same GROSS expense total', () => {
-    const shared = sumExpenseCents(LEDGER, accounts);
+    const shared = sumExpenseCents(LEDGER, accounts, POSTED_ONLY);
     expect(shared).toBe(EXPECTED_GROSS_EXPENSE_CENTS);
     expect(exportSummary(LEDGER)('Total Expenses')).toBe(shared);
 
@@ -187,7 +186,7 @@ describe('FIN-RECOVERY-UI-001 · cross-surface consistency (X1-X12)', () => {
 
   it('X4 — a card payment contributes zero to income and zero to expenses everywhere', () => {
     expect(sumIncomeCents([PAY_BANK, PAY_CARD], accounts, INCOME)).toBe(0);
-    expect(sumExpenseCents([PAY_BANK, PAY_CARD], accounts)).toBe(0);
+    expect(sumExpenseCents([PAY_BANK, PAY_CARD], accounts, POSTED_ONLY)).toBe(0);
     expect(classifyCardCredit(PAY_CARD, { accounts, transactions: [...LEDGER] }).kind).toBe('card_payment');
     const summary = exportSummary([PAY_BANK, PAY_CARD]);
     expect(summary('Total Income')).toBe(0);
@@ -199,8 +198,8 @@ describe('FIN-RECOVERY-UI-001 · cross-surface consistency (X1-X12)', () => {
       expect(sumIncomeCents([refund], accounts, INCOME)).toBe(0);
     }
     // Gross is untouched; net falls by exactly the confirmed allocations.
-    expect(sumExpenseCents(LEDGER, accounts)).toBe(EXPECTED_GROSS_EXPENSE_CENTS);
-    expect(sumExpenseCents(LEDGER, accounts) - netExpenseCents(LEDGER, LINKS)).toBe(EXPECTED_CONFIRMED_REFUND_CENTS);
+    expect(sumExpenseCents(LEDGER, accounts, POSTED_ONLY)).toBe(EXPECTED_GROSS_EXPENSE_CENTS);
+    expect(sumExpenseCents(LEDGER, accounts, POSTED_ONLY) - netExpenseCents(LEDGER, LINKS)).toBe(EXPECTED_CONFIRMED_REFUND_CENTS);
     expect(refundEconomics(REFUND_AB, LINKS).unallocatedRefundCents).toBe(0);
   });
 
@@ -233,10 +232,10 @@ describe('FIN-RECOVERY-UI-001 · cross-surface consistency (X1-X12)', () => {
   });
 
   it('X8 — a confirmed duplicate charge changes NO total on any surface', () => {
-    const before = sumExpenseCents(LEDGER, accounts);
+    const before = sumExpenseCents(LEDGER, accounts, POSTED_ONLY);
     const queue = buildReviewQueue({ transactions: LEDGER, accounts, links: LINKS, candidates: [DUP_CHARGE_CONFIRMED] });
     expect(queue).toHaveLength(0); // decided, so it stops asking
-    expect(sumExpenseCents(LEDGER, accounts)).toBe(before);
+    expect(sumExpenseCents(LEDGER, accounts, POSTED_ONLY)).toBe(before);
     expect(netExpenseCents(LEDGER, LINKS)).toBe(EXPECTED_NET_EXPENSE_CENTS);
     // Both rows are still there, both still counted, neither deleted.
     expect(LEDGER.filter((t) => t.id.startsWith('demo-dup-'))).toHaveLength(2);
@@ -248,7 +247,7 @@ describe('FIN-RECOVERY-UI-001 · cross-surface consistency (X1-X12)', () => {
     expect(queue).toHaveLength(0); // it stops alerting…
     // …and both subscription rows stay in every total, at full size.
     expect(toCents(getAllCategorySpending(LEDGER, new Date('2026-07-15'), accounts).subscriptions)).toBe(4000);
-    expect(sumExpenseCents(LEDGER, accounts)).toBe(EXPECTED_GROSS_EXPENSE_CENTS);
+    expect(sumExpenseCents(LEDGER, accounts, POSTED_ONLY)).toBe(EXPECTED_GROSS_EXPENSE_CENTS);
     expect(exportSummary(LEDGER)('Total Expenses')).toBe(EXPECTED_GROSS_EXPENSE_CENTS);
   });
 
@@ -299,8 +298,8 @@ describe('FIN-RECOVERY-UI-001 · cross-surface consistency (X1-X12)', () => {
 
     // Accounts/Forecast: the credit really landed on the card balance — a card balance is
     // debt, so $88.00 arriving moves it $88.00 towards zero.
-    const withIt = deriveAccountBalance(accounts[1], [...LEDGER]);
-    const withoutIt = deriveAccountBalance(accounts[1], LEDGER.filter((t) => t.id !== 'demo-unknown'));
+    const withIt = deriveAccountBalance(accounts[1], [...LEDGER], POSTED_ONLY);
+    const withoutIt = deriveAccountBalance(accounts[1], LEDGER.filter((t) => t.id !== 'demo-unknown'), POSTED_ONLY);
     expect(withIt - withoutIt).toBeCloseTo(-88, 2);
     // …and it is still earnings nowhere.
     const inWindow = [...LEDGER].map((t) => ({ ...t, date: '2026-07-15' }));

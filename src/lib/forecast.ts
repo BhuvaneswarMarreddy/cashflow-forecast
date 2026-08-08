@@ -42,7 +42,7 @@ const FORECAST_DAYS = 90;
  * flattering one.
  */
 export function monthlyAverages(
-  transactions: Transaction[], accounts: PaymentAccount[], months = 6, income?: IncomeContext
+  transactions: Transaction[], accounts: PaymentAccount[], months = 6, income: IncomeContext
 ): { income: number; spending: number } {
   const now = new Date();
   const window = new Set<string>();
@@ -117,7 +117,7 @@ export function calculateCurrentCash(accounts: PaymentAccount[]): number {
 export function deriveAccountBalance(
   account: PaymentAccount,
   transactions: Transaction[],
-  policy?: IncomeContext
+  policy: IncomeContext
 ): number {
   const includePending = policy?.includePending ?? false;
   const todayKey = format(new Date(), 'yyyy-MM-dd');
@@ -153,7 +153,7 @@ export function deriveAccountBalance(
 export function withDerivedBalances(
   accounts: PaymentAccount[],
   transactions: Transaction[],
-  policy?: IncomeContext
+  policy: IncomeContext
 ): PaymentAccount[] {
   return accounts.map((a) => ({ ...a, currentBalance: deriveAccountBalance(a, transactions, policy) }));
 }

@@ -1,3 +1,4 @@
+import { POSTED_ONLY } from '@/lib/classify';
 /**
  * LEDGER AUDIT — the checks that catch a wrong number before a human does.
  *
@@ -246,6 +247,9 @@ async function main() {
   process.env.CASHFLOW_FIRESTORE_UID = process.env.CASHFLOW_FIRESTORE_UID ?? users[0].id;
 
   const { transactions, accounts, income } = await loadFromFirestore();
+  // #102: the audit reads the same policy the app does; `?? POSTED_ONLY` is the honest
+  // default for a profile that has never set one, not a silent undefined.
+  const policy = income ?? POSTED_ONLY;
   const { sumIncomeCents, sumExpenseCents } = await import('../src/lib/classify');
   const todayISO = new Date().toISOString().slice(0, 10);
 
@@ -256,8 +260,8 @@ async function main() {
     accountsReconcile(transactions, accounts),
     feedsAreFresh(transactions, accounts, todayISO),
     spendingIsPlausible(
-      sumIncomeCents(transactions, accounts, income) / 100,
-      sumExpenseCents(transactions, accounts, income) / 100,
+      sumIncomeCents(transactions, accounts, policy) / 100,
+      sumExpenseCents(transactions, accounts, policy) / 100,
       Boolean(income?.sources?.some((s) => s.isActive !== false))
     ),
     unknownInflowBacklog(transactions, income),

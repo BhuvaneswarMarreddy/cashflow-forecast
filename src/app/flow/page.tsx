@@ -278,8 +278,11 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
     [transactions, accounts, links, incomeContext]
   );
   const detailedGraph: FlowGraph = useMemo(
+    // "Show gross" drops the NETTING, not the policy. `{}` dropped both, so the gross
+    // view silently reverted to posted-only and disagreed with every other screen
+    // whenever the owner had pending inclusion on (#102).
     () => buildFlowGraph(transactions, accounts, periodFor(range, month, effectiveYear),
-      showGross ? {} : { netting, income: incomeContext }),
+      showGross ? { income: incomeContext } : { netting, income: incomeContext }),
     [transactions, accounts, range, month, effectiveYear, showGross, netting, incomeContext]
   );
   // FIN-FLOW-002: what the charts DRAW. Same graph, fewer names — anything that

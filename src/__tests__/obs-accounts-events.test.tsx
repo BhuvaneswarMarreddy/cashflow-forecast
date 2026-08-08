@@ -1,3 +1,4 @@
+import { POSTED_ONLY } from '@/lib/classify';
 /**
  * The Accounts user-activity events, driven through the real hook.
  */
@@ -10,7 +11,7 @@ import { clearTrace } from '@/lib/obs/trace';
 import { FIXTURE_ACCOUNTS, FIXTURE_TRANSACTIONS } from '@/lib/obs/fixtures';
 import { withDerivedBalances } from '@/lib/forecast';
 
-const derived = withDerivedBalances(FIXTURE_ACCOUNTS, FIXTURE_TRANSACTIONS);
+const derived = withDerivedBalances(FIXTURE_ACCOUNTS, FIXTURE_TRANSACTIONS, POSTED_ONLY);
 
 let api: ReturnType<typeof useAccountsObservability> | null = null;
 
