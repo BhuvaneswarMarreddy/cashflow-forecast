@@ -165,14 +165,41 @@ function collectFindings({ ALLOWED_RADII, TOUCH_MIN, SPACING_EXTRA }) {
   for (const el of document.querySelectorAll('button, a[href], input, select, [role="button"], [role="tab"]')) {
     if (!visible(el)) continue;
     if (el.closest('nextjs-portal, [data-nextjs-toast]')) continue; // dev overlay
-    // A link inside a sentence is a text run, not a tap target — holding it to
-    // 44px would mean padding out every inline link in the app.
-    const inlineInProse = el.tagName === 'A' && getComputedStyle(el).display.startsWith('inline')
-      && el.parentElement && (el.parentElement.textContent || '').trim().length > (el.textContent || '').trim().length + 8;
-    if (inlineInProse) continue;
+    // A TEXT link is a reading target, not a control, and WCAG 2.5.8 exempts it
+    // for that reason. Holding one to 44px means padding out every link in the
+    // app — which is exactly what the blanket `a { min-height: 44px }` rule did
+    // before it was removed for stretching inline links as flex children.
+    //
+    // The exemption is deliberately narrow, and matches the CSS rule that ships:
+    // navigation links and anchors styled as buttons ARE controls and still
+    // have to earn 44px. Icon-only anchors are never exempt.
+    const isTextLink =
+      el.tagName === 'A' &&
+      (el.textContent || '').trim().length > 0 &&
+      el.getAttribute('role') !== 'button' &&
+      !el.closest('nav') &&
+      !el.className.toString().includes('btn-');
+    if (isTextLink) continue;
     const r = el.getBoundingClientRect();
-    if (r.height < TOUCH_MIN || r.width < TOUCH_MIN) {
-      add('small-target', `${Math.round(r.width)}×${Math.round(r.height)} (min ${TOUCH_MIN})`, el);
+
+    // An absolutely-positioned ::before/::after is a real, clickable hit area
+    // that getBoundingClientRect does not report. Ignoring it would flag the
+    // .tap-target pattern — a 24px icon carrying a 44px pseudo-element — as a
+    // failure, and push the fix back toward padding, which is what broke the
+    // layouts in the first place.
+    let w = r.width;
+    let h = r.height;
+    for (const pseudo of ['::before', '::after']) {
+      const ps = getComputedStyle(el, pseudo);
+      if (ps.content === 'none' || ps.position !== 'absolute') continue;
+      const pw = parseFloat(ps.width);
+      const ph = parseFloat(ps.height);
+      if (Number.isFinite(pw)) w = Math.max(w, pw);
+      if (Number.isFinite(ph)) h = Math.max(h, ph);
+    }
+
+    if (h < TOUCH_MIN || w < TOUCH_MIN) {
+      add('small-target', `${Math.round(w)}×${Math.round(h)} (min ${TOUCH_MIN})`, el);
     }
   }
 

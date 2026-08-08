@@ -534,13 +534,13 @@ export default function AccountsPage() {
           {/* Accounts Tab */}
           {activeTab === 'accounts' && (
             <div>
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-xl font-semibold text-[var(--foreground)]">
+              <div className="flex justify-between items-start gap-4 mt-8 mb-4">
+                <h2 className="text-xl font-semibold text-[var(--foreground)] min-w-0">
                   Payment Accounts ({profile?.paymentAccounts?.length || 0})
                 </h2>
                 <button
                   onClick={() => setShowAccountModal(true)}
-                  className="btn-primary flex items-center gap-2"
+                  className="btn-primary flex items-center gap-2 shrink-0 whitespace-nowrap"
                 >
                   <Plus className="w-4 h-4" />
                   Add Account
@@ -666,7 +666,7 @@ export default function AccountsPage() {
           {activeTab === 'subscriptions' && (
             <div>
               <div className="mb-6">
-                <h2 className="text-xl font-semibold text-[var(--foreground)]">Subscriptions & autopay</h2>
+                <h2 className="text-xl font-semibold text-[var(--foreground)] min-w-0">Subscriptions & autopay</h2>
                 <p className="text-sm text-[var(--foreground-secondary)] mt-1">
                   Recurring charges detected across all your accounts and cards — what&apos;s paid this month and what&apos;s coming up.
                 </p>
@@ -682,13 +682,13 @@ export default function AccountsPage() {
           {/* Transfers Tab — paired internal movements + unmatched review */}
           {activeTab === 'accounts' && (
             <div>
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-xl font-semibold text-[var(--foreground)]">
+              <div className="flex justify-between items-start gap-4 mt-8 mb-4">
+                <h2 className="text-xl font-semibold text-[var(--foreground)] min-w-0">
                   Income Sources ({profile?.incomeSources?.length || 0})
                 </h2>
                 <button
                   onClick={() => setShowIncomeModal(true)}
-                  className="btn-primary flex items-center gap-2"
+                  className="btn-primary flex items-center gap-2 shrink-0 whitespace-nowrap"
                 >
                   <Plus className="w-4 h-4" />
                   Add Income
@@ -799,7 +799,7 @@ export default function AccountsPage() {
             <div>
               <div className="flex justify-between items-start mb-6">
                 <div>
-                  <h2 className="text-xl font-semibold text-[var(--foreground)]">
+                  <h2 className="text-xl font-semibold text-[var(--foreground)] min-w-0">
                     Category Budgets
                   </h2>
                   <p className="text-sm text-[var(--foreground-muted)] mt-1">
@@ -849,7 +849,7 @@ export default function AccountsPage() {
             <div>
               <div className="flex justify-between items-start mb-6">
                 <div>
-                  <h2 className="text-xl font-semibold text-[var(--foreground)]">
+                  <h2 className="text-xl font-semibold text-[var(--foreground)] min-w-0">
                     Debt Payoff Planner
                   </h2>
                   <p className="text-sm text-[var(--foreground-muted)] mt-1">
@@ -879,7 +879,7 @@ export default function AccountsPage() {
       {showAccountModal && (
         <div className="modal-overlay" onClick={resetAccountForm}>
           <div className="modal-content max-w-lg" onClick={(e) => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-6">
+            <div className="flex justify-between items-start gap-4 mt-8 mb-4">
               <h2 className="text-xl font-bold text-[var(--foreground)]">
                 {editingAccount ? 'Edit Account' : 'Add Account'}
               </h2>
@@ -1062,7 +1062,7 @@ export default function AccountsPage() {
       {showIncomeModal && (
         <div className="modal-overlay" onClick={resetIncomeForm}>
           <div className="modal-content max-w-lg" onClick={(e) => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-6">
+            <div className="flex justify-between items-start gap-4 mt-8 mb-4">
               <h2 className="text-xl font-bold text-[var(--foreground)]">
                 {editingIncome ? 'Edit Income' : 'Add Income'}
               </h2>
