@@ -205,6 +205,13 @@ def map_pl_txn(t: dict, account_id: str, provider: str):
         "date_key": date_key,
         "pending": bool(t.get("pending")),
     }
+    # PEND-004: Plaid's own hold->posted linkage. Present on the POSTED row that
+    # replaces a hold, and the only non-fragile way to know the two are the same
+    # charge — amount+date matching cannot tell a re-run coffee from its own twin,
+    # and a hold routinely posts at a different amount (tips, fuel pre-auth).
+    pending_twin = t.get("pending_transaction_id")
+    if pending_twin:
+        row["pendingTransactionId"] = "pending_pl_" + str(pending_twin)
     source_category = prettify_pfc(t.get("personal_finance_category"))
     if source_category:
         row["sourceCategory"] = source_category
@@ -232,7 +239,29 @@ def adapt_pl_account(acct: dict, institution: str) -> dict:
 
 # PLAID_DOC_FIELDS: DOC_FIELDS plus sourceCategory (SimpleFIN deliberately never
 # writes it; Plaid's personal_finance_category is real evidence and may).
-PLAID_DOC_FIELDS = DOC_FIELDS + ("sourceCategory", "transferDirection")
+PLAID_DOC_FIELDS = DOC_FIELDS + ("sourceCategory", "transferDirection",
+                                 "pendingTransactionId")
+
+
+def pending_deletes_for(existing_ids, pending_seen, removed_ids, full_walk: bool):
+    """Which `pending_pl_*` docs this run should delete.
+
+    `removed_ids` is Plaid's OWN signal — a hold that posted or was declined — and is
+    always honoured.
+
+    The set-based sweep (delete every hold absent from this fetch) exists because Plaid
+    reports a removal ONCE, so a cursor reset or a missed run would orphan a hold beside
+    its posted twin forever. But it is only SOUND on a full walk. /transactions/sync is a
+    cursor delta: a hold that is still pending and unchanged is simply not re-reported,
+    so on an incremental run "absent from this fetch" means nothing. Sweeping there
+    deletes live holds — invisible while holds are excluded from every total, and a
+    silently moving headline balance once FIN-PENDING-001 lets them count.
+    """
+    deletes = {"pending_pl_" + str(rid) for rid in removed_ids}
+    if full_walk:
+        deletes |= {i for i in existing_ids
+                    if i.startswith("pending_pl_") and i not in pending_seen}
+    return sorted(deletes)
 
 
 # ---------------------------------------------------------------------------
@@ -354,6 +383,11 @@ async def run_plaid_sync(db, uid: str, client_id: str, secret: str,
     adapted_accounts, rows_by_account = [], defaultdict(list)
     removed_ids: list[str] = []
     next_cursors: dict[str, str] = {}
+    # PEND-004: did EVERY item walk its whole history this run (no stored cursor)?
+    # Only then does "absent from this fetch" mean "no longer pending" — see
+    # pending_deletes_for(). One item on a delta makes the sweep unsafe for all of
+    # them, because existing_ids/pending_seen are global, not per-item.
+    walked_whole_history: list[bool] = []
     item_errors: list[str] = []
     raw_by_id: dict[str, dict] = {}
     institution_by_account: dict[str, str] = {}
@@ -367,12 +401,14 @@ async def run_plaid_sync(db, uid: str, client_id: str, secret: str,
                 adapted_accounts.append(adapt_pl_account(a, label))
                 raw_by_id[str(a.get("account_id"))] = a
                 institution_by_account[str(a.get("account_id"))] = label
+            stored_cursor = str(item.get("cursor") or "")
             added, removed, next_cursor = _sync_item_transactions(
-                client_id, secret, item["accessToken"], str(item.get("cursor") or ""), post)
+                client_id, secret, item["accessToken"], stored_cursor, post)
             for t in added:
                 rows_by_account[str(t.get("account_id"))].append(t)
             removed_ids.extend(removed)
             next_cursors[item_id] = next_cursor
+            walked_whole_history.append(not stored_cursor)
         except Exception as e:  # one dead bank must not kill the others
             item_errors.append(f"{label}: {e}")
             log(f"item {label} failed: {e}")
@@ -497,19 +533,13 @@ async def run_plaid_sync(db, uid: str, client_id: str, secret: str,
                     f"{row['signed_cents'] / 100:>10.2f} {row['type']:<8} "
                     f"{row['title'][:32]!r} -> {app.get('name')}")
 
-    # Pending reconciliation. `removed` alone is not enough: Plaid reports a
-    # removal ONCE, so any cursor reset (or a missed run) orphans the pending row
-    # forever and it sits beside its posted twin. The audit caught exactly that.
-    # So the rule is set-based — delete every pending_ doc we previously wrote
-    # that is absent from THIS fetch — with the removed list still honoured for
-    # rows that vanish without ever being re-reported.
+    # Pending reconciliation — see pending_deletes_for() for the rule and why the
+    # set-based sweep is gated on a full walk.
     #
     # A removed POSTED row is a bank-side reversal: logged, never auto-deleted,
     # because history is the owner's to edit.
-    stale_pending = [i for i in existing_ids
-                     if i.startswith("pending_pl_") and i not in pending_seen]
-    pending_deletes = sorted(set(stale_pending)
-                             | {"pending_pl_" + rid for rid in removed_ids})
+    full_walk = bool(walked_whole_history) and all(walked_whole_history)
+    pending_deletes = pending_deletes_for(existing_ids, pending_seen, removed_ids, full_walk)
 
     if not dry_run:
         for i in range(0, len(writes) + len(pending_writes), 450):
