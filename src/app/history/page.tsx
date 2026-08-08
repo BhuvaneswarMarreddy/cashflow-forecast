@@ -276,9 +276,8 @@ export default function HistoryPage() {
     // runway on real data.
     if (avg.spending === 0 && avg.income === 0) {
       const months = new Set(past.map(t => format(parseISO(t.date), 'yyyy-MM'))).size || 1;
-      const spent = past
-        .filter(t => classifyTransaction(t, profile?.paymentAccounts) === 'expense')
-        .reduce((s, t) => s + t.amount, 0);
+      // STATE-002: counts what the owner confirmed as spending, like every other total.
+      const spent = sumExpenseCents(past, profile?.paymentAccounts, incomeContext) / 100;
       return { avgExpenses: spent / months, avgIncome: 0 };
     }
     return { avgExpenses: avg.spending, avgIncome: avg.income };

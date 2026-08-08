@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { Transaction, PaymentAccount, IncomeSource } from '@/types';
-import { classifyTransaction } from '@/lib/classify';
+import { interpretTransaction, IncomeContext } from '@/lib/classify';
 import { aiDecision } from '@/lib/callables';
 import { 
   TrendingUp, 
@@ -26,6 +26,9 @@ interface AIInsightsPanelProps {
   incomeSources: IncomeSource[];
   currentCash: number;
   safetyThreshold: number;
+  /** STATE-002 (#104): required, so this panel cannot summarise a different six months
+   *  than the screen it sits on. */
+  income: IncomeContext;
 }
 
 interface MonthlyData {
@@ -44,7 +47,8 @@ export default function AIInsightsPanel({
   accounts, 
   incomeSources,
   currentCash,
-  safetyThreshold 
+  safetyThreshold,
+  income: policy,
 }: AIInsightsPanelProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [aiInsight, setAiInsight] = useState<string | null>(null);
@@ -70,11 +74,12 @@ export default function AIInsightsPanel({
       const merchantTotals: { [key: string]: number } = {};
       
       monthTxns.forEach(t => {
-        const classification = classifyTransaction(t, accounts);
-        
-        if (classification === 'income') {
+        // STATE-002: honours the owner's confirmed reviews, like every other total.
+        const i = interpretTransaction(t, accounts, policy);
+
+        if (i.income === 'counted') {
           income += t.amount;
-        } else if (classification === 'expense') {
+        } else if (i.expense === 'counted') {
           expenses += t.amount;
           
           // Track categories
@@ -110,7 +115,10 @@ export default function AIInsightsPanel({
     }
     
     return months;
-  }, [transactions, accounts]);
+    // `policy` is load-bearing here, not decoration: without it this memo serves a
+    // six-month summary computed under the PREVIOUS policy after the owner confirms a
+    // review. Same stale-derived-value class as #105's History forecast.
+  }, [transactions, accounts, policy]);
 
   // Calculate trends
   const trends = useMemo(() => {

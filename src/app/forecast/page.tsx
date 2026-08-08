@@ -413,6 +413,7 @@ export default function ForecastPage() {
                 incomeSources={profile?.incomeSources || []}
                 currentCash={currentCash}
                 safetyThreshold={profile?.settings?.safetyThreshold || 500}
+                income={incomeContext}
               />
               {profile?.settings?.categoryBudgets && profile.settings.categoryBudgets.length > 0 && (
                 <BudgetStatusPanel
