@@ -6,6 +6,7 @@ import type { IncomeContext } from '@/lib/classify';
 import { useAuth } from './AuthContext';
 import * as firestoreService from '@/lib/firestore';
 import { sortAccounts, reindex, reconcile } from '@/lib/accounts';
+import { fromFirestoreSettings, toFirestoreSettings } from '@/lib/profile-settings';
 import { startSpan, getTrace, errorType } from '@/lib/obs/trace';
 import { emit } from '@/lib/obs/events';
 
@@ -131,15 +132,10 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
           currency: firestoreUser.settings?.currency || 'USD',
           paymentAccounts: sortAccounts(accounts),
           incomeSources: incomeSources,
-          settings: {
-            timezone: firestoreUser.settings?.timezone,
-            notifications: firestoreUser.settings?.notifications,
-            safetyThreshold: firestoreUser.settings?.safetyThreshold,
-            emergencyFundGoal: firestoreUser.settings?.emergencyFundGoal,
-            emergencyFundAmount: firestoreUser.settings?.emergencyFundAmount,
-            categoryBudgets: firestoreUser.settings?.categoryBudgets,
-            notificationPreferences: firestoreUser.settings?.notificationPreferences,
-          },
+          // #100: whatever was stored comes back. The allowlist that used to be here
+          // rebuilt this object field by field, so a setting it did not name was dropped
+          // on every reload — the bug looked like "it forgets when I log in".
+          settings: fromFirestoreSettings(firestoreUser.settings),
         };
 
         setProfile(fullProfile);
@@ -232,31 +228,14 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
 
     {
       try {
-        // Flatten settings for Firestore update
-        const firestoreSettings: Record<string, any> = {
+        // #100: every settings key goes, not a hand-listed subset. The old allowlist
+        // here silently dropped anything not named in it — `includePendingInCalculations`
+        // was never written at all, and `timezone`/`notifications` never had been either.
+        const firestoreSettings = toFirestoreSettings(mergedSettings, {
           monthlyBudget: updates.monthlyBudget ?? profile.monthlyBudget,
           currency: updates.currency ?? profile.currency,
-        };
-        
-        // Add any settings updates
-        if (mergedSettings) {
-          if (mergedSettings.safetyThreshold !== undefined) {
-            firestoreSettings.safetyThreshold = mergedSettings.safetyThreshold;
-          }
-          if (mergedSettings.emergencyFundGoal !== undefined) {
-            firestoreSettings.emergencyFundGoal = mergedSettings.emergencyFundGoal;
-          }
-          if (mergedSettings.emergencyFundAmount !== undefined) {
-            firestoreSettings.emergencyFundAmount = mergedSettings.emergencyFundAmount;
-          }
-          if (mergedSettings.categoryBudgets !== undefined) {
-            firestoreSettings.categoryBudgets = mergedSettings.categoryBudgets;
-          }
-          if (mergedSettings.notificationPreferences !== undefined) {
-            firestoreSettings.notificationPreferences = mergedSettings.notificationPreferences;
-          }
-        }
-        
+        });
+
         await firestoreService.updateUserSettings(user.id, firestoreSettings);
         setIsFirestoreOnline(true);
       } catch (err) {

@@ -55,6 +55,7 @@ import {
 } from '@/types';
 import { startSpan } from '@/lib/obs/trace';
 import { sortByDisplayOrder } from '@/lib/accounts';
+import type { ProfileSettings } from '@/lib/profile-settings';
 
 // ============================================
 // Types for Firestore Documents
@@ -67,16 +68,16 @@ export interface FirestoreUser {
   photoURL?: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
-  settings: {
+  /**
+   * #100: derived from the app's own settings type, never re-listed. This block used to
+   * be a third hand-maintained copy, so a field added to `UserProfile['settings']` type-
+   * checked everywhere and still vanished on reload. Add settings in `@/types` only.
+   */
+  settings: ProfileSettings & {
     currency: string;
     timezone: string;
     monthlyBudget: number;
     notifications: boolean;
-    safetyThreshold?: number;
-    emergencyFundGoal?: number; // Target in months
-    emergencyFundAmount?: number; // Target in dollars
-    categoryBudgets?: CategoryBudget[]; // Per-category spending limits
-    notificationPreferences?: NotificationPreferences; // Reminder settings
   };
   metadata: {
     isOnboarded: boolean;
