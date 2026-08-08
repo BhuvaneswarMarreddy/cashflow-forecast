@@ -295,10 +295,14 @@ export default function HistoryPage() {
       derivedAccounts,
       profile?.incomeSources || [],
       transactions,
+      incomeContext,
       profile?.settings?.safetyThreshold || 500,
       90
     );
-  }, [profile, transactions]);
+    // STATE-001 (#105): `incomeContext` MUST be in this list. It was not, so this memo
+    // held a forecast computed under the previous policy — flip the pending setting and
+    // History's runway silently kept the old answer until something else invalidated it.
+  }, [profile, transactions, incomeContext]);
 
   const handleDelete = async (id: string) => {
     // A card payment / internal move is TWO paired halves. Deleting only one desyncs

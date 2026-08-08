@@ -529,15 +529,21 @@ function transactionsToEvents(
  * bills on their real due dates, and a per-day "Projected living costs" drain built
  * from category baselines — replacing the old flat typical-daily-spending average.
  */
+/**
+ * STATE-001 (#105): `income` was the OPTIONAL 8th argument, so History called this with
+ * six and got a policy-blind forecast. TypeScript forbids a required parameter after an
+ * optional one, so the policy moves to slot 5 — positional and required, deliberately
+ * NOT a key in an options bag: a bag key is exactly what Flow's `{}` silently omitted.
+ */
 export function generateForecast(
   startingCash: number,
   accounts: PaymentAccount[],
   incomeSources: IncomeSource[],
   transactions: Transaction[],
+  income: IncomeContext,
   safetyThreshold: number = DEFAULT_SAFETY_THRESHOLD,
   days: number = FORECAST_DAYS,
-  overrides?: AssumptionOverrides,
-  income?: IncomeContext
+  overrides?: AssumptionOverrides
 ): ForecastSummary {
   const today = startOfDay(new Date());
   const endDate = addDays(today, days);
@@ -904,6 +910,13 @@ export function prepareFullContextForAI(context: AIUserContext): string {
  * Generate account-specific forecast
  * Shows how a specific account balance will change over time,
  * including credit card payments from checking accounts
+ */
+/**
+ * STATE-001 (#105) deliberately does NOT take a policy, and the reason is worth stating
+ * so nobody "fixes" it later: the opening balance is `currentOf(account)` — the account
+ * the CALLER already derived, policy included — and the only rows classified here are
+ * FUTURE-dated, where a pending hold cannot exist. Its remaining policy blindness is the
+ * `classifyTransaction` calls below, which is #104's question, not this one.
  */
 export function generateAccountForecast(
   account: PaymentAccount,

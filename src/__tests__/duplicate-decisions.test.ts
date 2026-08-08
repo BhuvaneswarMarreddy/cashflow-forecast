@@ -127,7 +127,7 @@ describe('A4 the estimate is labelled "potential annual duplicate cost"', () => 
 describe('A5 the estimate never enters the forecast', () => {
   it('produces no ForecastEvent and adjusts no balance', () => {
     const rows = pair(20, 20);
-    const forecast = () => generateForecast(100000, ACCOUNTS, [], rows, 0, 30);
+    const forecast = () => generateForecast(100000, ACCOUNTS, [], rows, POSTED_ONLY, 0, 30);
     const before = JSON.stringify(forecast());
 
     const { estimates } = run(rows);
