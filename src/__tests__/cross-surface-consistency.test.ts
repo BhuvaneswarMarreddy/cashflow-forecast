@@ -257,8 +257,15 @@ describe('unanchored disclosure is not one screen only (#83)', () => {
     }
   );
 
-  it('UnanchoredNote is where the isUnanchored check actually lives', () => {
-    expect(fs.readFileSync('src/components/UnanchoredNote.tsx', 'utf8')).toContain('isUnanchored');
+  it('UnanchoredNote defers to the shared accounts.ts helper, not a reinvented check', () => {
+    const src = fs.readFileSync('src/components/UnanchoredNote.tsx', 'utf8');
+    // Round 4b: the count-and-pluralize logic moved into accounts.ts's
+    // `unanchoredPhrase` (shared with export-xlsx.ts, see its own test) so the two
+    // sentences can't independently drift — but that call still bottoms out in
+    // `isUnanchored`, so this guard's real intent (no private `!a.openingDate`
+    // copy hiding here) still holds.
+    expect(src).toContain('unanchoredPhrase');
+    expect(src).not.toMatch(/openingDate/); // would be a reinvented check, not a shared one
   });
 });
 

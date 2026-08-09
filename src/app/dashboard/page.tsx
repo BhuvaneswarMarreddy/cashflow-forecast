@@ -292,9 +292,19 @@ export default function DashboardPage({ initialBills }: { initialBills?: Bill[] 
                     </span>
                   )}
                   {home.cardsOwed > 0 && (
-                    <span className="px-3 py-2 rounded-pill text-sm font-medium tnum bg-[var(--background-tertiary)] text-[var(--money-out)]">
-                      Cards owed {formatMoney(-home.cardsOwed, profile?.currency, 2)}
-                    </span>
+                    // Round 4b Fix 1: totalCreditUsed (credit_card accounts only) feeds
+                    // THIS chip, not the cash figure above — production's one unanchored
+                    // account (Amazon Store Card) is a credit card, so it is IN this
+                    // number. The earlier fix disclosed the cash total and left this one
+                    // silent: false confidence on the only figure the account is actually
+                    // in. Wrapped so the note reads under Cards owed specifically, not
+                    // stacked ambiguously against the cash note below the chip row.
+                    <div className="flex flex-col">
+                      <span className="px-3 py-2 rounded-pill text-sm font-medium tnum bg-[var(--background-tertiary)] text-[var(--money-out)]">
+                        Cards owed {formatMoney(-home.cardsOwed, profile?.currency, 2)}
+                      </span>
+                      <UnanchoredNote accounts={accountsBehindFigure('all', derivedAccounts, 'debt')} />
+                    </div>
                   )}
                   {home.lockedMonthly > 0 && (
                     <span className="px-3 py-2 rounded-pill text-sm font-medium tnum bg-[var(--background-tertiary)] text-[var(--accent-primary)]">

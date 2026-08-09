@@ -166,16 +166,26 @@ export function earliestRowDate(
  * a correctly-anchored single account show "includes 1 unanchored account"
  * borrowed from an account that isn't even part of the number on screen.
  *
- * When selectedId is 'all', the figure is a CASH TOTAL only (see calculateCurrentCash),
- * excluding credit cards and loans. This function must match that filter, so
- * `UnanchoredNote` never claims an unanchored debt account affects a cash figure
- * that excludes it.
+ * When selectedId is 'all', `scope` picks which total:
+ *  - 'cash' (the DEFAULT, for every caller that existed before round 4b) is the
+ *    CASH TOTAL — see calculateCurrentCash — excluding credit cards and loans.
+ *  - 'debt' is credit_card accounts ONLY, matching how Dashboard's "Cards owed"
+ *    and Accounts' "Credit Used" actually compute `totalCreditUsed`. This is
+ *    deliberately narrower than `isDebtAccount` (which also matches
+ *    personal_loan): those two figures never sum personal loans, so a loan
+ *    scope here would name an account a figure excludes — the exact inverse
+ *    error this function exists to prevent, one layer up.
+ * A single selectedId ignores scope entirely: one named account IS the figure,
+ * regardless of type.
  */
 export function accountsBehindFigure(
   selectedId: string,
-  accounts: readonly PaymentAccount[]
+  accounts: readonly PaymentAccount[],
+  scope: 'cash' | 'debt' = 'cash'
 ): readonly PaymentAccount[] {
-  if (selectedId === 'all') return accounts.filter(isCashAccount);
+  if (selectedId === 'all') {
+    return accounts.filter(scope === 'cash' ? isCashAccount : (a) => a.type === 'credit_card');
+  }
   const one = accounts.find((a) => a.id === selectedId);
   return one ? [one] : [];
 }
@@ -195,6 +205,20 @@ export function balanceCaption(
   if (account.openingDate) return `as of ${account.openingDate.slice(0, 10)}`;
   const since = earliestRowDate(account.id, transactions);
   return since ? `net since ${since} · no starting balance set` : 'no starting balance set';
+}
+
+/**
+ * "N unanchored account" / "N unanchored accounts", or null when the group has none.
+ *
+ * The count-and-pluralize logic both `UnanchoredNote` (JSX, on-screen) and
+ * export-xlsx's summary note (plain .ts — a spreadsheet leaves the app, so it can't
+ * import JSX) build their sentence around. Extracted for the same reason as
+ * `balanceCaption`: two independently hand-rolled copies of this arithmetic is
+ * exactly how they drift out of sync with each other over time.
+ */
+export function unanchoredPhrase(accounts: readonly PaymentAccount[]): string | null {
+  const n = accounts.filter(isUnanchored).length;
+  return n === 0 ? null : `${n} unanchored account${n === 1 ? '' : 's'}`;
 }
 
 /** Every account whose balance IS cash the owner can spend. */

@@ -102,6 +102,36 @@ describe('accountsBehindFigure', () => {
     expect(out).not.toContain(unanchoredCard);
     expect(out).not.toContain(unanchoredLoan);
   });
+
+  // Round 4b: Dashboard's "Cards owed" chip and Accounts' "Credit Used" card are both
+  // fed by totalCreditUsed — credit_card accounts ONLY, never personal_loan. A caller
+  // must be able to ask for that scope explicitly; 'cash' stays the DEFAULT so every
+  // pre-existing caller (untouched call sites) keeps agreeing with calculateCurrentCash
+  // exactly as before this fix.
+  it("'all' with scope 'debt' means credit_card accounts only — matching totalCreditUsed, never isDebtAccount's broader personal_loan", () => {
+    const cashAcct = a({ id: 'checking', type: 'bank_account', openingDate: '2026-01-01' });
+    const anchoredCard = a({ id: 'card', type: 'credit_card', openingDate: '2026-01-01' });
+    const unanchoredCard = a({ id: 'unanchored_cc', type: 'credit_card', openingDate: undefined });
+    const unanchoredLoan = a({ id: 'unanchored_loan', type: 'personal_loan', openingDate: undefined });
+    const roster = [cashAcct, anchoredCard, unanchoredCard, unanchoredLoan];
+
+    const debtScope = accountsBehindFigure('all', roster, 'debt');
+    expect(debtScope).toEqual([anchoredCard, unanchoredCard]);
+    // An unanchored personal LOAN must never be named as the reason a credit-CARD
+    // total looks off — totalCreditUsed never sums personal loans in the first place.
+    expect(debtScope).not.toContain(unanchoredLoan);
+    expect(debtScope).not.toContain(cashAcct);
+
+    // Omitting the scope (or passing 'cash') is unchanged.
+    const cashScope = accountsBehindFigure('all', roster, 'cash');
+    expect(cashScope).toEqual([cashAcct]);
+    expect(accountsBehindFigure('all', roster)).toEqual(cashScope);
+  });
+
+  it("a single selection ignores scope — one account named by id is the whole answer regardless of 'cash'/'debt'", () => {
+    const unanchoredCard = a({ id: 'unanchored_cc', type: 'credit_card', openingDate: undefined });
+    expect(accountsBehindFigure('unanchored_cc', [unanchoredCard], 'cash')).toEqual([unanchoredCard]);
+  });
 });
 
 // #83 Finding 2/3: the single-account caption AccountDetailModal, History's per-account
@@ -143,6 +173,14 @@ describe('dashboard scopes UnanchoredNote to the figure it actually shows (#83 F
 
   it('never passes the unfiltered account list to UnanchoredNote', () => {
     expect(src).not.toMatch(/<UnanchoredNote accounts=\{derivedAccounts\}/);
+  });
+
+  // Round 4b Fix 1: "Cards owed" (totalCreditUsed, credit_card accounts only — see
+  // dashboard/page.tsx's own definition) had NO disclosure at all. Production's one
+  // unanchored account (Amazon Store Card, a credit card) is IN this figure, not the
+  // cash one above — the prior fix covered the figure it isn't even in.
+  it("also discloses \"Cards owed\" via accountsBehindFigure('all', derivedAccounts, 'debt'), matching totalCreditUsed's filter", () => {
+    expect(src).toContain("<UnanchoredNote accounts={accountsBehindFigure('all', derivedAccounts, 'debt')} />");
   });
 });
 
