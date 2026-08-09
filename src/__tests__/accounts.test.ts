@@ -1,5 +1,5 @@
 import { PaymentAccount } from '@/types';
-import { sortAccounts, reindex, isUnanchored } from '@/lib/accounts';
+import { sortAccounts, reindex, isUnanchored, accountsBehindFigure } from '@/lib/accounts';
 
 const a = (o: Partial<PaymentAccount> & { id: string }): PaymentAccount => ({
   name: o.id, type: 'bank_account', provider: 'chase', openingBalance: 0,
@@ -54,5 +54,27 @@ describe('isUnanchored', () => {
 
   it('is true for an empty-string date, which asserts nothing', () => {
     expect(isUnanchored({ ...base, openingDate: '' })).toBe(true);
+  });
+});
+
+// #83 Finding 1: Forecast's headline card is either the combined total or one
+// account's balance; UnanchoredNote must count only the account(s) that figure
+// actually contains, never the whole roster regardless of selection.
+describe('accountsBehindFigure', () => {
+  const anchored = a({ id: 'anchored', openingDate: '2026-01-01' });
+  const unanchored = a({ id: 'unanchored', openingDate: undefined });
+
+  it("'all' behind the combined total means every account", () => {
+    expect(accountsBehindFigure('all', [anchored, unanchored])).toEqual([anchored, unanchored]);
+  });
+
+  it('a single selection means just that account — an anchored pick must not drag in an unrelated unanchored one', () => {
+    const out = accountsBehindFigure('anchored', [anchored, unanchored]);
+    expect(out).toEqual([anchored]);
+    expect(out.some(isUnanchored)).toBe(false);
+  });
+
+  it('a selection that matches nothing yields no accounts, not a false positive', () => {
+    expect(accountsBehindFigure('ghost', [anchored, unanchored])).toEqual([]);
   });
 });

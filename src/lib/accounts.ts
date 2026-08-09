@@ -143,6 +143,24 @@ export function earliestRowDate(
   return earliest;
 }
 
+/**
+ * The account(s) a displayed figure actually represents (#83 Finding 1).
+ *
+ * Forecast's headline card switches between a combined total ('all') and one
+ * account's balance depending on the dropdown. `UnanchoredNote` must count only
+ * what that figure includes — passing every account regardless of selection let
+ * a correctly-anchored single account show "includes 1 unanchored account"
+ * borrowed from an account that isn't even part of the number on screen.
+ */
+export function accountsBehindFigure(
+  selectedId: string,
+  accounts: readonly PaymentAccount[]
+): readonly PaymentAccount[] {
+  if (selectedId === 'all') return accounts;
+  const one = accounts.find((a) => a.id === selectedId);
+  return one ? [one] : [];
+}
+
 /** Every account whose balance IS cash the owner can spend. */
 export const isCashAccount = (a: PaymentAccount) =>
   a.type === 'bank_account' || a.type === 'debit_card' || a.type === 'cash';

@@ -245,11 +245,15 @@ describe('cross-surface consistency', () => {
 // screens are expected to REUSE the shared component, not re-inline the check —
 // a page that hand-rolls its own `isUnanchored` call would pass a naive grep for
 // that symbol while still duplicating markup Task 6 extracted specifically to share.
+// Finding 2: the substring 'UnanchoredNote' also matches a dead import or a comment
+// mentioning the name, neither of which renders anything — asserting the JSX open
+// tag `<UnanchoredNote` is the smallest change that forces the component to
+// actually be mounted on the page, not merely referenced.
 describe('unanchored disclosure is not one screen only (#83)', () => {
   it.each(['src/app/accounts/page.tsx', 'src/app/dashboard/page.tsx', 'src/app/forecast/page.tsx'])(
     '%s discloses unanchored accounts via the shared UnanchoredNote component',
     (path) => {
-      expect(fs.readFileSync(path, 'utf8')).toContain('UnanchoredNote');
+      expect(fs.readFileSync(path, 'utf8')).toContain('<UnanchoredNote');
     }
   );
 
