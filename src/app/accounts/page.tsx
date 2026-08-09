@@ -267,16 +267,28 @@ export default function AccountsPage() {
       // openingDate: today. That manufactures the exact assertion #83 exists to
       // prevent, just with a number instead of $0.
       //
-      // The actual fix lives in openEditAccount(): an unanchored account's balance
-      // field prefills EMPTY, not with currentOf(). A blank field parses to 0 here,
-      // which still diverges from currentOf(editingAccount) by more than the delta
-      // threshold — so this branch still fires — but openingAnchor('') returns
-      // { openingBalance: 0 } with no openingDate, so the write leaves the account
-      // unanchored unless the owner actually typed a number. No isUnanchored special
-      // case needed: the ordinary delta guard does the right thing on its own once
-      // the prefill stops asserting a figure nobody entered. An untouched ANCHORED
-      // account still takes the `else` branch below and keeps its own anchor (UI-106).
-      ...(!editingAccount || Math.abs((parseFloat(accountForm.balance) || 0) - currentOf(editingAccount)) > 0.004
+      // The other half of the fix lives in openEditAccount(): an unanchored account's
+      // balance field prefills EMPTY, not with currentOf(). A blank field parses to 0
+      // here, which diverges from currentOf(editingAccount) by more than the delta
+      // threshold, so the branch below still fires on an untouched APR-only edit —
+      // but openingAnchor('') returns { openingBalance: 0 } with no openingDate, so
+      // that write leaves the account unanchored unless the owner actually typed a
+      // number. That covers the blank-field path on its own.
+      //
+      // It does NOT cover the owner reading the derived figure off the row caption,
+      // opening Edit, and typing it back verbatim (e.g. $10,458.03 for the one real
+      // unanchored account in production, Amazon Store Card): parseFloat(that string)
+      // then EQUALS currentOf(editingAccount) exactly, delta 0, the plain guard takes
+      // the `else` branch, and the save silently preserves "unanchored" with no
+      // feedback — the confirmation from #83 round 4a Defect 1 (accounts.ts:111)
+      // never happens because handleSaveAccount never even calls reconcile(). The
+      // isUnanchored(editingAccount) disjunct restores that path: for an unanchored
+      // account ANY save always re-derives openingAnchor from whatever is in the
+      // field (blank => still unanchored, any typed number including the derived
+      // figure or 0 => a real claim). An untouched ANCHORED account still takes the
+      // `else` branch below and keeps its own anchor (UI-106) — isUnanchored is false
+      // for it, so this disjunct never fires there.
+      ...(!editingAccount || isUnanchored(editingAccount) || Math.abs((parseFloat(accountForm.balance) || 0) - currentOf(editingAccount)) > 0.004
         ? openingAnchor(accountForm.balance, new Date().toISOString().slice(0, 10))
         : {
             openingBalance: editingAccount.openingBalance,
@@ -989,6 +1001,7 @@ export default function AccountsPage() {
           inputLabel={isDebtAccount(reconcileForAccount) ? 'amount you currently owe' : 'real balance right now'}
           derivedCurrent={currentOf(reconcileForAccount)}
           currency={profile?.currency}
+          unanchored={isUnanchored(reconcileForAccount)}
           onConfirm={(entered) => reconcileAccount(reconcileForAccount.id, entered, currentOf(reconcileForAccount))}
           onClose={() => setReconcileForAccount(null)}
         />

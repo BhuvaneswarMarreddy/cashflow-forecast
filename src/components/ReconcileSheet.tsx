@@ -75,12 +75,22 @@ function resultTone(r: ReconcileResult): string {
  * After Confirm, shows what reconcile() actually found (INV-1 Fix 3) instead of
  * closing straight away — the observation is the only reason this screen exists.
  */
-export default function ReconcileSheet({ accountName, inputLabel, derivedCurrent, currency = 'USD', onConfirm, onClose }: {
+export default function ReconcileSheet({ accountName, inputLabel, derivedCurrent, currency = 'USD', unanchored = false, onConfirm, onClose }: {
   accountName: string;
   /** e.g. "real balance right now" | "amount you currently owe" */
   inputLabel: string;
   derivedCurrent: number;
   currency?: string;
+  /**
+   * True when this account has never been anchored (`isUnanchored`). reconcile()
+   * now WRITES an anchor even at driftCents===0 for these accounts (accounts.ts:111)
+   * — for an unanchored account there's no prior claim to preserve, so the
+   * confirmation IS the owner's first assertion. Before that fix, zero drift meant
+   * "nothing to do" everywhere; now it also means "this write is about to happen"
+   * on this one path, and the copy has to tell those two zero-drift cases apart or
+   * it describes an effect that isn't the one about to occur (FIN-SETTLEMENT-003).
+   */
+  unanchored?: boolean;
   onConfirm: (entered: number) => Promise<ReconcileResult>;
   onClose: () => void;
 }) {
@@ -90,6 +100,9 @@ export default function ReconcileSheet({ accountName, inputLabel, derivedCurrent
   const entered = parseFloat(value);
   const valid = !Number.isNaN(entered);
   const driftCents = valid ? Math.round((entered - derivedCurrent) * 100) : 0;
+  // Zero drift on an unanchored account is not "nothing changes" — it's the exact
+  // case reconcile() writes a fresh anchor for (accounts.ts:111).
+  const setsAnchor = driftCents === 0 && unanchored;
 
   const confirm = async () => {
     if (!valid || busy) return;
@@ -138,6 +151,10 @@ export default function ReconcileSheet({ accountName, inputLabel, derivedCurrent
           <p aria-live="polite" className="text-sm mb-5 min-h-[2.5rem]">
             {!valid ? (
               <span className="text-[var(--accent-danger)]">Enter a number.</span>
+            ) : setsAnchor ? (
+              <span className="text-[var(--accent-success)]">
+                No starting balance is set yet — confirming SETS it to {fmt(derivedCurrent)}.
+              </span>
             ) : driftCents === 0 ? (
               <span className="text-[var(--accent-success)]">Matches the app — nothing will change.</span>
             ) : (
@@ -154,7 +171,7 @@ export default function ReconcileSheet({ accountName, inputLabel, derivedCurrent
           <div className="flex gap-3 justify-end">
             <button onClick={onClose} className="btn-secondary" disabled={busy}>Cancel</button>
             <button onClick={confirm} className="btn-primary disabled:opacity-50" disabled={!valid || busy}>
-              {busy ? 'Saving…' : driftCents === 0 ? 'Confirm — no change' : 'Re-anchor balance'}
+              {busy ? 'Saving…' : setsAnchor ? 'Set starting balance' : driftCents === 0 ? 'Confirm — no change' : 'Re-anchor balance'}
             </button>
           </div>
         </>

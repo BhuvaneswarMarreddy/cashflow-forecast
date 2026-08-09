@@ -97,3 +97,43 @@ describe('ReconcileSheet surfaces the reconcile result (INV-1)', () => {
     expect(panel.textContent?.toLowerCase()).toMatch(/couldn.?t|try again/);
   });
 });
+
+/**
+ * #83 round 5 Fix 1: reconcile() (accounts.ts:111) now WRITES an anchor at
+ * driftCents===0 for an unanchored account — the confirm itself is the owner's
+ * first assertion. Before this fix ReconcileSheet had no way to know that: it
+ * always showed "Matches the app — nothing will change." / "Confirm — no
+ * change" at zero drift, which is exactly backwards on the one path that DOES
+ * write (production's real case: Amazon Store Card, prefilled $10,458.03,
+ * confirmed as-is). These assert the PRE-confirm preview/button, not the
+ * post-confirm result panel the tests above cover.
+ */
+describe('pre-confirm zero-drift copy must describe what confirming actually does (FIN-SETTLEMENT-003)', () => {
+  function renderPreConfirm(unanchored: boolean) {
+    render(
+      <ReconcileSheet
+        accountName="Amazon Store Card"
+        inputLabel="amount you currently owe"
+        derivedCurrent={100}
+        currency="USD"
+        unanchored={unanchored}
+        onConfirm={jest.fn().mockResolvedValue({ driftCents: 0, status: unanchored ? 'NOT_APPLICABLE' : 'PASS' })}
+        onClose={jest.fn()}
+      />
+    );
+  }
+
+  it('anchored account, zero drift: still says nothing will change (unchanged behavior)', () => {
+    renderPreConfirm(false);
+    expect(screen.getByText(/matches the app.*nothing will change/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Confirm — no change' })).toBeInTheDocument();
+  });
+
+  it('unanchored account, zero drift: says confirming SETS the starting balance, never "nothing will change"', () => {
+    renderPreConfirm(true);
+    expect(screen.queryByText(/nothing will change/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Confirm — no change' })).not.toBeInTheDocument();
+    expect(screen.getByText(/confirming sets/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /set starting balance/i })).toBeInTheDocument();
+  });
+});

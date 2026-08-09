@@ -138,6 +138,30 @@ describe('FIX A — the Edit-account trap', () => {
     expect(updates.openingBalance).toBe(700);
   });
 
+  it('typing the EXACT derived figure back into Edit still anchors it (#83 round 5 Fix 2)', async () => {
+    render(<AccountsPage />);
+    fireEvent.click(screen.getByRole('button', { name: `Edit ${UNANCHORED.name}` }));
+
+    const balanceInput = screen.getByPlaceholderText('0.00') as HTMLInputElement;
+    expect(balanceInput.value).toBe('');
+
+    // Exactly the number the owner would read off the row caption before opening
+    // Edit — unlike the `700` above (chosen precisely to differ), this is the
+    // owner's most likely real move: read the balance, retype it, save. Delta from
+    // currentOf(editingAccount) is 0, which the plain delta guard alone (no
+    // isUnanchored disjunct) treats identically to an untouched field — the
+    // account would silently stay unanchored with no feedback, even though the
+    // owner just typed a real number.
+    fireEvent.change(balanceInput, { target: { value: String(DERIVED_CARD_BALANCE) } });
+    fireEvent.click(screen.getByRole('button', { name: 'Update Account' }));
+
+    await waitFor(() => expect(mockUpdatePaymentAccount).toHaveBeenCalled());
+    const [id, updates] = mockUpdatePaymentAccount.mock.calls[0];
+    expect(id).toBe(UNANCHORED.id);
+    expect(updates.openingDate).toBe(todayISO());
+    expect(updates.openingBalance).toBe(DERIVED_CARD_BALANCE);
+  });
+
   it('editing only a non-balance field on an UNANCHORED account (balance left blank) leaves it unanchored', async () => {
     render(<AccountsPage />);
     fireEvent.click(screen.getByRole('button', { name: `Edit ${UNANCHORED.name}` }));
@@ -196,7 +220,10 @@ describe('FIX B — Set balance control on the unanchored disclosure', () => {
     const balanceField = screen.getByLabelText('Balance') as HTMLInputElement;
     expect(balanceField.value).toBe(String(Math.round(DERIVED_CARD_BALANCE * 100) / 100));
 
-    fireEvent.click(screen.getByRole('button', { name: /Confirm|Re-anchor/ }));
+    // "Set starting balance", not "Confirm — no change": this IS the production
+    // zero-drift-on-unanchored path (#83 round 5 Fix 1) — the button must name its
+    // own effect rather than claim nothing will change (FIN-SETTLEMENT-003).
+    fireEvent.click(screen.getByRole('button', { name: /Confirm|Re-anchor|Set starting balance/ }));
 
     await waitFor(() => expect(mockReconcileAccount).toHaveBeenCalledWith(
       UNANCHORED.id, DERIVED_CARD_BALANCE, DERIVED_CARD_BALANCE
@@ -210,6 +237,13 @@ describe('FIX B — Set balance control on the unanchored disclosure', () => {
     await waitFor(() => expect(mockUpdatePaymentAccount).toHaveBeenCalledWith(
       UNANCHORED.id, { openingBalance: DERIVED_CARD_BALANCE, openingDate: todayISO() }
     ));
+    // toHaveBeenCalledWith alone passes whether this write came ONLY from inside
+    // mockReconcileAccount or from that PLUS a second, direct call the page made on
+    // its own — mockReconcileAccount calling mockUpdatePaymentAccount already
+    // satisfies the assertion above regardless. Pinning the count to exactly 1 is
+    // what actually enforces "the page never writes directly" (the comment's claim);
+    // without it this test could not fail even if AccountsPage grew a bypass.
+    expect(mockUpdatePaymentAccount).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -20,6 +20,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import { buildFlowGraph, counterpartyRowIds, detectRecurring, projectNetWorth, day, FlowGraph } from '@/lib/flows';
+import { isUnanchored } from '@/lib/accounts';
 import { UnanchoredNote } from '@/components/UnanchoredNote';
 import { simplifyFlowGraph } from '@/lib/flow-simple';
 import SpendingTree from '@/components/SpendingTree';
@@ -1835,6 +1836,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
             inputLabel="real balance right now"
             derivedCurrent={reconcileFor.derived}
             currency={profile?.currency}
+            unanchored={accounts.some((a) => a.id === reconcileFor.accountId && isUnanchored(a))}
             onConfirm={(entered) => reconcileAccount(reconcileFor.accountId, entered, reconcileFor.derived)}
             onClose={() => setReconcileFor(null)}
           />
