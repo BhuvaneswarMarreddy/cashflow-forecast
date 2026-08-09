@@ -121,6 +121,23 @@ export async function connectBankWithPlaid(itemId?: string): Promise<string | nu
   });
 }
 
+/**
+ * Revoke every linked bank at Plaid (#72).
+ *
+ * Wiping our data is not disconnecting the bank — the Item goes on living at Plaid,
+ * still consuming one of the 10 lifetime Trial slots, with the consent the owner gave
+ * their bank still granted. Only the server can end it, because the access tokens are
+ * default-deny to this client by design.
+ *
+ * Throws if Plaid refuses. Callers must NOT swallow that: deleting the account anyway
+ * would strand a live credential with nothing left to revoke it.
+ */
+export async function unlinkAllBanks(): Promise<number> {
+  const fns = getFunctions(app, 'us-central1');
+  const res = await httpsCallable(fns, 'plaid_unlink_all')({});
+  return ((res.data ?? {}) as { removed?: number }).removed ?? 0;
+}
+
 /** Plain-English summary of what a refresh actually did. */
 export function describeSync(r: SyncResult): string {
   if (r.error) return r.error;

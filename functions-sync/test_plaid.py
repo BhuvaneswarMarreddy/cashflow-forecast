@@ -296,3 +296,29 @@ class PendingLinkage(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RemoveItem(unittest.TestCase):
+    """#72 — deleting our copy of a token is not disconnecting the bank."""
+
+    def test_remove_item_calls_plaid_with_the_token(self):
+        seen = {}
+
+        def fake_post(path, payload, timeout=60):
+            seen["path"], seen["payload"] = path, payload
+            return {"removed": True}
+
+        plaid_ingest.remove_item("cid", "sec", "access-abc", post=fake_post)
+        self.assertEqual(seen["path"], "/item/remove")
+        self.assertEqual(seen["payload"]["access_token"], "access-abc")
+        self.assertEqual(seen["payload"]["client_id"], "cid")
+        self.assertEqual(seen["payload"]["secret"], "sec")
+
+    def test_remove_item_propagates_failure(self):
+        def failing_post(path, payload, timeout=60):
+            raise RuntimeError("ITEM_NOT_FOUND")
+
+        # Must NOT be swallowed: the caller decides whether to abort the deletion,
+        # and it can only decide that if it hears about the failure.
+        with self.assertRaises(RuntimeError):
+            plaid_ingest.remove_item("cid", "sec", "access-abc", post=failing_post)
