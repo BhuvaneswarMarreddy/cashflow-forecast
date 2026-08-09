@@ -16,9 +16,10 @@ import SubscriptionsPanel from '@/components/SubscriptionsPanel';
 import BudgetSettingsPanel from '@/components/BudgetSettingsPanel';
 import BudgetStatusPanel from '@/components/BudgetStatusPanel';
 import DebtPlannerPanel from '@/components/DebtPlannerPanel';
+import { UnanchoredNote } from '@/components/UnanchoredNote';
 import { PAYMENT_METHODS, ACCOUNT_TYPES, PaymentAccount, IncomeSource, AccountType, PaymentMethod, CategoryBudget } from '@/types';
 import { withDerivedBalances, monthlyAverages, calculateCurrentCash } from '@/lib/forecast';
-import { currentOf, isDebtAccount, netWorthOf, openingAnchor } from '@/lib/accounts';
+import { currentOf, isDebtAccount, netWorthOf, openingAnchor, earliestRowDate } from '@/lib/accounts';
 import { syncNow, describeSync, connectBankWithPlaid } from '@/lib/sync-client';
 import { useAccountsObservability } from '@/lib/obs/useAccountsObservability';
 import { safeSyncResult } from '@/lib/obs/sync-metadata';
@@ -537,6 +538,10 @@ export default function AccountsPage() {
             <p className="text-xs text-[var(--foreground-muted)]">{budgetIsDerived ? 'typical monthly spend' : 'your set budget'}</p>
           </div>
         </div>
+        {/* #83: Net Worth / Bank Balance / Credit Used above can each contain an
+            unanchored account's net-movement figure — disclose it once for the group
+            rather than re-deriving per card. */}
+        <UnanchoredNote accounts={derivedAccounts} />
 
         {/* Tabs */}
         <div className="flex flex-nowrap sm:flex-wrap whitespace-nowrap sm:whitespace-normal gap-2 mb-6 scroll-x-mobile">
@@ -647,9 +652,18 @@ export default function AccountsPage() {
                           <p className={`text-lg font-semibold ${account.type === 'credit_card' || account.type === 'personal_loan' ? 'text-[var(--accent-danger)]' : 'text-[var(--accent-success)]'}`}>
                             {account.type === 'credit_card' || account.type === 'personal_loan' ? '-' : ''}{formatMoney(Math.abs(currentOf(account)), profile?.currency, 2)}
                           </p>
-                          {account.openingDate && (
+                          {account.openingDate ? (
                             <p className="text-xs text-[var(--foreground-muted)]" title="Balances derive from transactions since this date">
                               as of {account.openingDate.slice(0, 10)}
+                            </p>
+                          ) : (
+                            // #83: no opening anchor means this figure is net movement across
+                            // the rows we hold, not a bank balance — say so, don't just show it.
+                            <p className="text-xs text-[var(--foreground-muted)]" title="No starting balance was ever set; this is net movement across imported transactions">
+                              {(() => {
+                                const since = earliestRowDate(account.id, transactions);
+                                return since ? `net since ${since} · no starting balance set` : 'no starting balance set';
+                              })()}
                             </p>
                           )}
                           {account.creditLimit && (

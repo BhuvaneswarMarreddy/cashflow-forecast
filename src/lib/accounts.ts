@@ -129,6 +129,20 @@ export function sortByDisplayOrder<T extends { sortIndex?: number }>(accounts: r
   return [...accounts].sort((a, b) => key(a) - key(b));
 }
 
+/** The earliest transaction date on an account, for the "net since …" caption. */
+export function earliestRowDate(
+  accountId: string,
+  transactions: readonly { accountId?: string; date: string }[]
+): string | undefined {
+  let earliest: string | undefined;
+  for (const t of transactions) {
+    if (t.accountId !== accountId) continue;
+    const day = t.date.slice(0, 10);
+    if (!earliest || day < earliest) earliest = day;
+  }
+  return earliest;
+}
+
 /** Every account whose balance IS cash the owner can spend. */
 export const isCashAccount = (a: PaymentAccount) =>
   a.type === 'bank_account' || a.type === 'debit_card' || a.type === 'cash';
