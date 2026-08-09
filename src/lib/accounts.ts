@@ -151,12 +151,17 @@ export function earliestRowDate(
  * what that figure includes — passing every account regardless of selection let
  * a correctly-anchored single account show "includes 1 unanchored account"
  * borrowed from an account that isn't even part of the number on screen.
+ *
+ * When selectedId is 'all', the figure is a CASH TOTAL only (see calculateCurrentCash),
+ * excluding credit cards and loans. This function must match that filter, so
+ * `UnanchoredNote` never claims an unanchored debt account affects a cash figure
+ * that excludes it.
  */
 export function accountsBehindFigure(
   selectedId: string,
   accounts: readonly PaymentAccount[]
 ): readonly PaymentAccount[] {
-  if (selectedId === 'all') return accounts;
+  if (selectedId === 'all') return accounts.filter(isCashAccount);
   const one = accounts.find((a) => a.id === selectedId);
   return one ? [one] : [];
 }

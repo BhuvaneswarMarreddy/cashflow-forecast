@@ -64,7 +64,7 @@ describe('accountsBehindFigure', () => {
   const anchored = a({ id: 'anchored', openingDate: '2026-01-01' });
   const unanchored = a({ id: 'unanchored', openingDate: undefined });
 
-  it("'all' behind the combined total means every account", () => {
+  it("'all' behind the cash total means all cash accounts (both anchored and unanchored)", () => {
     expect(accountsBehindFigure('all', [anchored, unanchored])).toEqual([anchored, unanchored]);
   });
 
@@ -76,5 +76,15 @@ describe('accountsBehindFigure', () => {
 
   it('a selection that matches nothing yields no accounts, not a false positive', () => {
     expect(accountsBehindFigure('ghost', [anchored, unanchored])).toEqual([]);
+  });
+
+  it("'all' when cash-only total excludes unanchored debt accounts: unanchored credit card and personal loan must not appear", () => {
+    const anchoredCash = a({ id: 'checking', type: 'bank_account', openingDate: '2026-01-01' });
+    const unanchoredCard = a({ id: 'unanchored_cc', type: 'credit_card', openingDate: undefined });
+    const unanchoredLoan = a({ id: 'unanchored_loan', type: 'personal_loan', openingDate: undefined });
+    const out = accountsBehindFigure('all', [anchoredCash, unanchoredCard, unanchoredLoan]);
+    expect(out).toEqual([anchoredCash]);
+    expect(out).not.toContain(unanchoredCard);
+    expect(out).not.toContain(unanchoredLoan);
   });
 });
