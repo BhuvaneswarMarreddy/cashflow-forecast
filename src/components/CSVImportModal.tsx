@@ -38,7 +38,9 @@ export function inferAccountFromCsv(csvName: string): Omit<PaymentAccount, 'id'>
     /apple/.test(lower) ? 'apple' :
     /chase/.test(lower) ? 'chase' :
     type === 'credit_card' ? 'other' : 'bank-transfer';
-  return { name, type, provider, openingBalance: 0, openingDate: new Date().toISOString().slice(0, 10), lastFourDigits, color: getMerchantColor(csvName), isActive: true };
+  // #83: NO openingDate. Nobody told us this account's balance, so there is no anchor —
+  // stamping today's date would exclude every row in the file being imported.
+  return { name, type, provider, openingBalance: 0, lastFourDigits, color: getMerchantColor(csvName), isActive: true };
 }
 
 export function inferAccountType(csvName: string): AccountType {

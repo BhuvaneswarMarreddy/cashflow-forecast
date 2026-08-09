@@ -18,7 +18,7 @@ import BudgetStatusPanel from '@/components/BudgetStatusPanel';
 import DebtPlannerPanel from '@/components/DebtPlannerPanel';
 import { PAYMENT_METHODS, ACCOUNT_TYPES, PaymentAccount, IncomeSource, AccountType, PaymentMethod, CategoryBudget } from '@/types';
 import { withDerivedBalances, monthlyAverages, calculateCurrentCash } from '@/lib/forecast';
-import { currentOf, isDebtAccount, netWorthOf } from '@/lib/accounts';
+import { currentOf, isDebtAccount, netWorthOf, openingAnchor } from '@/lib/accounts';
 import { syncNow, describeSync, connectBankWithPlaid } from '@/lib/sync-client';
 import { useAccountsObservability } from '@/lib/obs/useAccountsObservability';
 import { safeSyncResult } from '@/lib/obs/sync-metadata';
@@ -248,10 +248,7 @@ export default function AccountsPage() {
       // edited. Renaming an account must not move its numbers — the old code
       // set openingDate to today on every save, silently shifting balances.
       ...(!editingAccount || Math.abs((parseFloat(accountForm.balance) || 0) - currentOf(editingAccount)) > 0.004
-        ? {
-            openingBalance: parseFloat(accountForm.balance) || 0,
-            openingDate: new Date().toISOString().slice(0, 10),
-          }
+        ? openingAnchor(accountForm.balance, new Date().toISOString().slice(0, 10))
         : {
             openingBalance: editingAccount.openingBalance,
             openingDate: editingAccount.openingDate,
