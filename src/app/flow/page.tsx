@@ -20,6 +20,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import { buildFlowGraph, counterpartyRowIds, detectRecurring, projectNetWorth, day, FlowGraph } from '@/lib/flows';
+import { UnanchoredNote } from '@/components/UnanchoredNote';
 import { simplifyFlowGraph } from '@/lib/flow-simple';
 import SpendingTree from '@/components/SpendingTree';
 import {
@@ -1734,6 +1735,11 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
               </tbody>
             </table>
           </div>
+          {/* Round 4b Fix 3: `accounts` (the array buildFlowGraph iterated to build
+              every row above, including the Net worth total) is not a subset here —
+              it's the whole table, so passing it whole is correct, unlike Dashboard's
+              or Accounts' single figures that only cover part of the roster. */}
+          <UnanchoredNote accounts={accounts} />
         </section>
 
         {/* Between your accounts — gross both directions */}
