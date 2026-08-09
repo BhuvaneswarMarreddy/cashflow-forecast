@@ -184,4 +184,29 @@ describe('reconcileAccount persists the drift observation', () => {
 
     expect(status).toBe('NOT_APPLICABLE');
   });
+
+  // #83 round 4a Defect 4: an unknown account id means reconcile() never runs at all —
+  // no observation, nothing written. The old code answered with the SAME shape as a
+  // real "no prior claim" NOT_APPLICABLE measurement, so a caller (ReconcileSheet)
+  // could not tell "nothing happened" from "reconciled, no anchor to violate" and
+  // claimed a write in both cases. `failed: true` is the one bit that distinguishes
+  // "could not proceed" from an actual — possibly zero-drift — measurement.
+  it('marks failed: true when the account no longer exists — reconcile() never ran', async () => {
+    let ctx: UserProfileContextType | undefined;
+    render(
+      React.createElement(UserProfileProvider, null,
+        React.createElement(Harness, { onReady: (c) => { ctx = c; } }))
+    );
+
+    await waitFor(() => expect(ctx?.profile?.paymentAccounts.length).toBe(1));
+
+    let result: { driftCents: number; status: string; failed?: true } | undefined;
+    await act(async () => {
+      result = await ctx!.reconcileAccount('does-not-exist', 100, 100);
+    });
+
+    expect(result?.failed).toBe(true);
+    expect(recordAudit).not.toHaveBeenCalled();
+    expect(firestoreMock.updateAccount).not.toHaveBeenCalled();
+  });
 });

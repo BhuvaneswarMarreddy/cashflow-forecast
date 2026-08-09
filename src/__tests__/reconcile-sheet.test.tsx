@@ -18,7 +18,7 @@ beforeAll(() => {
   HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) { this.removeAttribute('open'); };
 });
 
-function renderSheet(resolved: { driftCents: number; status: 'PASS' | 'VIOLATION' | 'STALE_INPUT' | 'NOT_APPLICABLE' }) {
+function renderSheet(resolved: { driftCents: number; status: 'PASS' | 'VIOLATION' | 'STALE_INPUT' | 'NOT_APPLICABLE'; failed?: true }) {
   const onConfirm = jest.fn().mockResolvedValue(resolved);
   const onClose = jest.fn();
   render(
@@ -82,5 +82,18 @@ describe('ReconcileSheet surfaces the reconcile result (INV-1)', () => {
     expect(onClose).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: /Done/i }));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  // #83 round 4a Defect 4: reconcileAccount's two guard clauses (no profile / account
+  // not found) reuse NOT_APPLICABLE's shape for a call that never even ran — no
+  // observation, nothing written. Before `failed` existed, this rendered the
+  // NOT_APPLICABLE copy below verbatim: "it's now anchored to $X" for a write that
+  // never happened. `failed: true` must override that regardless of `status`.
+  it('failed: true means the call never ran — must not claim an anchor that was never written', async () => {
+    renderSheet({ driftCents: 0, status: 'NOT_APPLICABLE', failed: true });
+    await confirm();
+    const panel = screen.getByRole('status');
+    expect(panel.textContent?.toLowerCase()).not.toMatch(/anchored/);
+    expect(panel.textContent?.toLowerCase()).toMatch(/couldn.?t|try again/);
   });
 });

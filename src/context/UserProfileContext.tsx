@@ -27,7 +27,13 @@ export interface UserProfileContextType {
   updatePaymentAccount: (id: string, updates: Partial<PaymentAccount>) => Promise<void>;
   // INV-1 Fix 3: the interpretation of the drift reconcile() just measured, not only
   // its magnitude — driftStatus()'s one production caller lives inside this function.
-  reconcileAccount: (id: string, enteredCurrent: number, derivedCurrent: number) => Promise<{ driftCents: number; status: DriftStatus }>;
+  //
+  // `failed` (#83 round 4a Defect 4): true only on the two guard clauses below, where
+  // reconcile() never even ran (no profile / account not found) — there is no
+  // observation and nothing was written. Absent on every real call, including a
+  // legitimate NOT_APPLICABLE, so it stays a marker of "could not proceed", not a
+  // second status enum a caller has to cross-reference against DriftStatus.
+  reconcileAccount: (id: string, enteredCurrent: number, derivedCurrent: number) => Promise<{ driftCents: number; status: DriftStatus; failed?: true }>;
   reorderPaymentAccounts: (orderedIds: string[]) => Promise<void>;
   deletePaymentAccount: (id: string) => Promise<void>;
   addIncomeSource: (income: Omit<IncomeSource, 'id'>) => Promise<void>;
@@ -343,10 +349,14 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
   // drift re-anchors (openingBalance = entered, openingDate = today). Returns drift cents
   // AND the interpreted status (INV-1 Fix 3), so a caller can surface what the
   // measurement actually found instead of a bare number.
-  const reconcileAccount = async (id: string, enteredCurrent: number, derivedCurrent: number): Promise<{ driftCents: number; status: DriftStatus }> => {
-    if (!profile) return { driftCents: 0, status: 'NOT_APPLICABLE' };
+  const reconcileAccount = async (id: string, enteredCurrent: number, derivedCurrent: number): Promise<{ driftCents: number; status: DriftStatus; failed?: true }> => {
+    // `failed: true` (Defect 4): these two returns are NOT a measurement — reconcile()
+    // never runs, so there is no observation and nothing gets written. The old code
+    // reused NOT_APPLICABLE's shape for this, and ReconcileSheet's NOT_APPLICABLE
+    // copy ("it's now anchored to $X") then claimed a write that never happened.
+    if (!profile) return { driftCents: 0, status: 'NOT_APPLICABLE', failed: true };
     const acc = profile.paymentAccounts.find((x) => x.id === id);
-    if (!acc) return { driftCents: 0, status: 'NOT_APPLICABLE' };
+    if (!acc) return { driftCents: 0, status: 'NOT_APPLICABLE', failed: true };
     const today = new Date().toISOString().slice(0, 10);
     // includePending was a Task-4 placeholder (`false` always); this is the one real
     // policy value every other screen already reads, so a reconcile computed under a

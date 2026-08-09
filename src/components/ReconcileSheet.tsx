@@ -10,6 +10,11 @@ const fmt = (n: number) => `$${Math.abs(n).toLocaleString('en-US', { maximumFrac
 interface ReconcileResult {
   driftCents: number;
   status: DriftStatus;
+  /** True only when reconcileAccount could not even attempt a measurement (no
+   *  profile loaded, or the account no longer exists) — #83 round 4a Defect 4.
+   *  Absent on every real call, including a legitimate NOT_APPLICABLE, which (after
+   *  Defect 1) DOES write a reanchor — so "absent" correctly still means "happened". */
+  failed?: true;
 }
 
 /**
@@ -26,8 +31,15 @@ interface ReconcileResult {
  * `enteredCents` is what the OWNER just typed (already in scope in the caller), not
  * part of the reconcile result — PASS and NOT_APPLICABLE want to show it directly
  * rather than a $0.00 "drift" that would read as a measurement nobody made.
+ *
+ * `failed` is checked FIRST, ahead of the status switch: the two guard clauses in
+ * reconcileAccount hard-code status: 'NOT_APPLICABLE' when there's no profile or the
+ * account vanished, and that branch's copy below claims "it's now anchored" — true
+ * for a real NOT_APPLICABLE (which does write), false when nothing ran at all
+ * (#83 round 4a Defect 4).
  */
 function resultMessage(r: ReconcileResult, enteredCents: number, currency: string): string {
+  if (r.failed) return "That couldn't be checked — nothing was saved. Please try again.";
   const off = formatMoneyCents(Math.abs(r.driftCents), currency);
   const entered = formatMoneyCents(enteredCents, currency);
   switch (r.status) {
@@ -47,9 +59,12 @@ function resultMessage(r: ReconcileResult, enteredCents: number, currency: strin
 }
 
 /** PASS is reassurance (success green); nothing else is styled as good/bad — a real
- *  drift is an expected outcome of reconciling, not a pass/fail result. */
-function resultTone(status: DriftStatus): string {
-  return status === 'PASS' ? 'text-[var(--accent-success)]' : 'text-[var(--foreground-secondary)]';
+ *  drift is an expected outcome of reconciling, not a pass/fail result. `failed` IS
+ *  a real failure (the call never ran), unlike every DriftStatus, so it alone gets
+ *  the danger tone. */
+function resultTone(r: ReconcileResult): string {
+  if (r.failed) return 'text-[var(--accent-danger)]';
+  return r.status === 'PASS' ? 'text-[var(--accent-success)]' : 'text-[var(--foreground-secondary)]';
 }
 
 /**
@@ -92,7 +107,7 @@ export default function ReconcileSheet({ accountName, inputLabel, derivedCurrent
 
       {result ? (
         <>
-          <p role="status" aria-live="polite" className={`text-sm mb-5 ${resultTone(result.status)}`}>
+          <p role="status" aria-live="polite" className={`text-sm mb-5 ${resultTone(result)}`}>
             {resultMessage(result, Math.round(entered * 100), currency)}
           </p>
           <div className="flex justify-end">
