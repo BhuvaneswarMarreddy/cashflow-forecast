@@ -4,7 +4,7 @@ import { POSTED_ONLY } from '@/lib/classify';
  * Tests the core cash flow forecast calculations
  */
 
-import { generateForecast, simulateSpending, deriveAccountBalance, withDerivedBalances } from '@/lib/forecast';
+import { generateForecast, simulateSpending, deriveAccountBalance, withDerivedBalances, prepareFullContextForAI } from '@/lib/forecast';
 import { PaymentAccount, IncomeSource, Transaction } from '@/types';
 
 describe('Forecast Engine', () => {
@@ -420,6 +420,28 @@ describe('Forecast Engine', () => {
       const threeK = f.events.filter(e => e.amount === -3000);
       expect(threeK.length).toBeGreaterThan(0);
       expect(threeK.every(e => e.type === 'bill')).toBe(true);
+    });
+  });
+
+  describe('prepareFullContextForAI names unanchored accounts (#83)', () => {
+    // Reuses mockAccounts/mockIncomeSources so a real ForecastSummary backs the
+    // context, instead of a hand-stubbed one that could drift from the real shape.
+    const forecast = generateForecast(5000, mockAccounts, mockIncomeSources, [], POSTED_ONLY, 1000, 30);
+    const unanchoredAccount: PaymentAccount = {
+      id: 'savings-1', name: 'Ally Savings', type: 'bank_account', provider: 'other',
+      openingBalance: 1200, color: '#000', isActive: true,
+      // no openingDate: nobody ever anchored this one (#83) — the case under test.
+    };
+
+    it('names the unanchored account so the model cannot claim an exact spendable figure', () => {
+      const ctx = prepareFullContextForAI({ forecast, accounts: [...mockAccounts, unanchoredAccount] });
+      expect(ctx).toContain('Ally Savings');
+      expect(ctx.toLowerCase()).toContain('no starting balance');
+    });
+
+    it('stays silent when every account is anchored', () => {
+      const ctx = prepareFullContextForAI({ forecast, accounts: mockAccounts });
+      expect(ctx.toLowerCase()).not.toContain('no starting balance');
     });
   });
 });

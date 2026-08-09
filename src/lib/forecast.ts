@@ -17,7 +17,7 @@ import {
 } from '@/types';
 import { addDays, format, parseISO, startOfDay, isBefore, isAfter, isSameDay } from 'date-fns';
 import { isPositive, classifyTransaction, interpretTransaction, isPosted, IncomeContext } from '@/lib/classify';
-import { currentOf } from '@/lib/accounts';
+import { currentOf, isUnanchored } from '@/lib/accounts';
 import { monthlyIncomeOf } from '@/lib/money';
 import { buildAssumptions, behaviorEvents, AssumptionOverrides } from '@/lib/behavior';
 import { normalizeMerchant } from '@/lib/flows';
@@ -796,11 +796,10 @@ export interface AIUserContext {
     apr: number;
     minimumPayment: number;
   }[];
-  accounts?: {
-    name: string;
-    type: string;
-    balance: number;
-  }[];
+  // #83: the raw PaymentAccount, not a {name,type,balance} summary — isUnanchored()
+  // needs `openingDate`, and `currentOf()` (not a bare `.balance`) is the only way to
+  // derive a number that isn't silently NaN for an account that never carried one.
+  accounts?: PaymentAccount[];
   incomeSources?: {
     name: string;
     amount: number;
@@ -819,8 +818,8 @@ export function prepareFullContextForAI(context: AIUserContext): string {
   const criticalEvents = forecast.events.filter(e => e.isCritical);
   const upcomingBills = forecast.events.filter(e => e.type === 'bill').slice(0, 5);
   const upcomingIncome = forecast.events.filter(e => e.type === 'income').slice(0, 3);
-  
-  return JSON.stringify({
+
+  const json = JSON.stringify({
     // Core Forecast
     forecast: {
       currentBalance: forecast.startingBalance,
@@ -887,8 +886,8 @@ export function prepareFullContextForAI(context: AIUserContext): string {
       cashAccounts: accounts.filter(a => a.type === 'bank_account' || a.type === 'debit_card' || a.type === 'cash').length,
       creditAccounts: accounts.filter(a => a.type === 'credit_card').length,
       loanAccounts: accounts.filter(a => a.type === 'personal_loan').length,
-      totalCash: accounts.filter(a => a.type === 'bank_account' || a.type === 'debit_card' || a.type === 'cash').reduce((sum, a) => sum + a.balance, 0),
-      totalCreditUsed: accounts.filter(a => a.type === 'credit_card').reduce((sum, a) => sum + a.balance, 0),
+      totalCash: accounts.filter(a => a.type === 'bank_account' || a.type === 'debit_card' || a.type === 'cash').reduce((sum, a) => sum + currentOf(a), 0),
+      totalCreditUsed: accounts.filter(a => a.type === 'credit_card').reduce((sum, a) => sum + currentOf(a), 0),
     } : null,
     
     // Income Summary
@@ -902,8 +901,24 @@ export function prepareFullContextForAI(context: AIUserContext): string {
     
     // Emergency Fund Status
     emergencyFund: emergencyFund || null,
-    
+
   }, null, 2);
+
+  // #83: an unanchored account's number above is net movement over the rows we hold,
+  // not a bank balance — it's already baked into totalCash/details with no flag. Accounts,
+  // Dashboard, and Forecast all disclose this on screen; without this, the AI was the one
+  // surface left that could still say "you have $X available" with false confidence.
+  // Named accounts, not just a count, so the model can be concrete instead of hedging
+  // everything.
+  const unanchored = (accounts ?? []).filter(isUnanchored);
+  const caveat = unanchored.length > 0
+    ? `\n\nDATA CAVEAT: ${unanchored.length} account(s) have no starting balance set — ` +
+      `${unanchored.map(a => a.name).join(', ')}. Their balances are net movement over ` +
+      `the imported history, NOT bank balances. Do not state an exact spendable figure ` +
+      `without naming this caveat.`
+    : '';
+
+  return json + caveat;
 }
 
 /**
