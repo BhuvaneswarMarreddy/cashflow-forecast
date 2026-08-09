@@ -56,6 +56,7 @@ import {
 import { startSpan } from '@/lib/obs/trace';
 import { sortByDisplayOrder } from '@/lib/accounts';
 import type { ProfileSettings } from '@/lib/profile-settings';
+import { recordAudit, auditEntry, type AuditActor } from '@/lib/audit';
 
 // ============================================
 // Types for Firestore Documents
@@ -624,11 +625,25 @@ export async function getInflowReviews(userId: string): Promise<Record<string, I
   }
 }
 
-/** The doc id IS the transaction id, so there is at most one review per transaction. */
-export async function setInflowReview(userId: string, review: InflowReview): Promise<void> {
+/**
+ * The doc id IS the transaction id, so there is at most one review per transaction —
+ * this document is CURRENT STATE, last-write-wins, and deliberately not a history.
+ * The history lives in the audit log (AUD-1), which keeps this read path cheap: it is
+ * read on every interpret() call, and an event-sourced decision would have to be
+ * folded before any number could be shown.
+ */
+export async function setInflowReview(
+  userId: string,
+  review: InflowReview,
+  audit: { actor?: AuditActor; batchId?: string } = {}
+): Promise<void> {
   try {
     const ref = doc(db, 'users', userId, 'reviews', review.transactionId);
-    await setDoc(ref, removeUndefined({ ...review, updatedAt: new Date().toISOString() }), { merge: true });
+    const written = removeUndefined({ ...review, updatedAt: new Date().toISOString() });
+    await setDoc(ref, written, { merge: true });
+    await recordAudit(userId, auditEntry('review.set', `reviews/${review.transactionId}`, {
+      ...audit, after: written,
+    }));
   } catch (error) {
     if (isOfflineError(error)) {
       console.warn('Firestore offline - review will sync when online');
@@ -639,9 +654,15 @@ export async function setInflowReview(userId: string, review: InflowReview): Pro
 }
 
 /** Reopening a decision: the row returns to the queue on the next recompute. */
-export async function deleteInflowReview(userId: string, transactionId: string): Promise<void> {
+export async function deleteInflowReview(
+  userId: string,
+  transactionId: string,
+  audit: { actor?: AuditActor; batchId?: string } = {}
+): Promise<void> {
   try {
     await deleteDoc(doc(db, 'users', userId, 'reviews', transactionId));
+    // No `after`: the action and target ARE the record of a deletion.
+    await recordAudit(userId, auditEntry('review.delete', `reviews/${transactionId}`, audit));
   } catch (error) {
     if (isOfflineError(error)) return;
     throw error;
@@ -1079,9 +1100,14 @@ export async function hasUserData(userId: string): Promise<boolean> {
  * any new collection() call.
  */
 export const USER_SUBCOLLECTIONS = [
-  'accounts', 'bills', 'goals', 'income', 'links', 'plannedTransactions',
+  'accounts', 'audit', 'bills', 'goals', 'income', 'links', 'plannedTransactions',
   'reminders', 'reviewCandidates', 'reviews', 'rules', 'transactions',
 ] as const;
+// `audit` IS wiped here, deliberately. The log holds the owner's financial data, so
+// "everything is gone" has to include it — privacy beats forensics on the owner's own
+// data. What that costs: the deletion event is the one thing the log cannot record
+// about itself. `firestore.rules` still denies UPDATE on audit entries, so the log can
+// be erased wholesale but never quietly rewritten, which is the threat that matters.
 
 /** Firestore rejects a batch of more than 500 writes; same ceiling the CSV importer chunks for. */
 export const DELETE_CHUNK = 450;

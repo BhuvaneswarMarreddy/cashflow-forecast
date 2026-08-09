@@ -19,7 +19,7 @@ Usage:
       --set type transfer --set transferDirection out            # preview
   # add --apply to actually write (backs up first)
 """
-import argparse, json, os, time, urllib.request, urllib.error
+import argparse, json, os, subprocess, time, urllib.request, urllib.error
 from collections import Counter
 
 PROJECT = "marreddy-cashflow"
@@ -27,8 +27,21 @@ BASE = f"https://firestore.googleapis.com/v1/projects/{PROJECT}/databases/(defau
 
 
 def token():
+    # The stored access_token lasts an hour; past that every call here 401s. A firebase
+    # CLI command that actually REACHES the API refreshes it in place from the
+    # refresh_token in the same file, so borrow that instead of re-implementing the
+    # OAuth exchange (and embedding a client secret).
+    #
+    # `projects:list`, not `login:list`: login:list only prints the locally cached
+    # identity and touches no endpoint, so it leaves the expired token exactly as it
+    # found it. Measured — expires_at was unchanged after login:list and moved an hour
+    # forward after projects:list.
     p = os.path.expanduser("~/.config/configstore/firebase-tools.json")
-    return json.load(open(p))["tokens"]["access_token"]
+    t = json.load(open(p))["tokens"]
+    if t.get("expires_at", 0) < time.time() * 1000 + 60_000:
+        subprocess.run(["firebase", "projects:list"], capture_output=True, timeout=120)
+        t = json.load(open(p))["tokens"]
+    return t["access_token"]
 
 
 def api(method, url, body=None):

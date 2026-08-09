@@ -73,8 +73,6 @@ functions-sync/venv/
 firebase-debug.log
 firestore-debug.log
 
-# batch reanalysis artifacts — live data, never committed
-reanalysis-*.local.json
-
-# every script that plans a write before making it drops its plan here
+# Every script that plans a write before making it drops its plan here, and those
+# plans hold live data. Supersedes the old reanalysis-*.local.json line.
 *.local.json
