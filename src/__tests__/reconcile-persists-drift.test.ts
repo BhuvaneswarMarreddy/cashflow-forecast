@@ -76,7 +76,7 @@ describe('reconcileAccount persists the drift observation', () => {
       uid: TEST_USER.id, email: TEST_USER.email, displayName: TEST_USER.name,
       createdAt: { toDate: () => new Date('2026-01-01') },
       metadata: { isOnboarded: true },
-      settings: {},
+      settings: { includePendingInCalculations: true },
     });
     firestoreMock.getAccounts.mockResolvedValue([SEED_ACCOUNT]);
   });
@@ -100,7 +100,7 @@ describe('reconcileAccount persists the drift observation', () => {
     expect(recordAudit).toHaveBeenCalledWith('u1', expect.objectContaining({
       action: 'account.reconcile',
       target: 'accounts/acc1',
-      after: expect.objectContaining({ driftCents: 46500, derivedCents: 877000 }),
+      after: expect.objectContaining({ driftCents: 46500, derivedCents: 877000, includePending: true }),
     }));
 
     // Order is the whole point of this task: the audit write must be observed to
@@ -111,8 +111,7 @@ describe('reconcileAccount persists the drift observation', () => {
     expect(auditOrder).toBeLessThan(reanchorOrder);
   });
 
-  it('does not touch the audit log when there is no drift', async () => {
-    firestoreMock.getAccounts.mockResolvedValue([SEED_ACCOUNT]);
+  it('records audit on zero drift without re-anchoring', async () => {
     let ctx: UserProfileContextType | undefined;
     render(
       React.createElement(UserProfileProvider, null,
