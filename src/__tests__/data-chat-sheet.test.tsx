@@ -290,7 +290,12 @@ describe('the balance proposal card', () => {
     render(<DataChatSheet open onClose={() => {}} />);
     send('legacy cash is 900');
 
-    await screen.findByText(/^Set Legacy Cash/);
+    // #83 round 4a Defect 3: the OLD assertion (`findByText(/^Set Legacy Cash/)`)
+    // stopped before the number, so it kept passing even while the card displayed
+    // currentOf(account)'s $0.00 fallback instead of the derived $850 the write
+    // actually measures against. Assert the full string so a re-introduced
+    // currentOf() here — a fabricated "$0.00 → $900.00" — turns this red.
+    await screen.findByText('Set Legacy Cash — balance $850.00 → $900.00');
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     await screen.findByText(/Saved — Legacy Cash reads \$900\.00 as of today/);
 

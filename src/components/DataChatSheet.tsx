@@ -10,8 +10,8 @@ import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import { formatMoney } from '@/lib/money';
 import { matchIncomeDeposits } from '@/lib/ask';
-import { currentOf } from '@/lib/accounts';
 import { deriveAccountBalance } from '@/lib/forecast';
+import type { IncomeContext } from '@/lib/classify';
 import { PaymentAccount, Transaction, displayCategory } from '@/types';
 
 /**
@@ -360,6 +360,8 @@ export default function DataChatSheet({ open, onClose, seed }: {
                   proposal={m.balance}
                   currency={profile?.currency}
                   accounts={profile?.paymentAccounts ?? []}
+                  transactions={transactions}
+                  incomeContext={incomeContext}
                   pending={m.status === 'pending'}
                   busy={busy}
                   money={money}
@@ -523,9 +525,11 @@ function IncomeProposalCard({ proposal, transactions, currency, pending, busy, o
   );
 }
 
-function BalanceProposalCard({ proposal, currency, accounts, pending, busy, money, onApply, onCancel }: {
+function BalanceProposalCard({ proposal, currency, accounts, transactions, incomeContext, pending, busy, money, onApply, onCancel }: {
   proposal: { accountName: string; balance: number };
   accounts: readonly PaymentAccount[];
+  transactions: Transaction[];
+  incomeContext: IncomeContext;
   pending: boolean;
   busy: boolean;
   currency?: string;
@@ -547,10 +551,19 @@ function BalanceProposalCard({ proposal, currency, accounts, pending, busy, mone
   // ONE template string (not JSX interpolation), and always 2 decimals: a balance
   // is the cents-exact number the owner just read off their bank.
   const m2 = (n: number) => formatMoney(n, currency, 2);
+  // #83 round 4a Defect 3: `account` is the RAW profile record, so currentOf(account)
+  // falls back to openingBalance — 0 for an unanchored account, regardless of real
+  // transaction history. applyBalance() (below) already measures the write against
+  // deriveAccountBalance(); showing currentOf() here instead let the card read
+  // "balance $0.00 → $900.00" for an account the write actually reconciles against
+  // $850 — the confirmation and the write disagreeing about the number being moved,
+  // which is exactly what FIN-SETTLEMENT-003 (the confirmation must show the figure
+  // actually being moved) rules out.
+  const derived = deriveAccountBalance(account, transactions, incomeContext);
   return (
     <div className="mt-3 rounded-card border border-[var(--border-color)] bg-[var(--background)] p-3">
       <p className="font-medium text-[var(--foreground)]">
-        {`Set ${account.name} — ${label} ${m2(Math.abs(currentOf(account)))} → ${m2(proposal.balance)}`}
+        {`Set ${account.name} — ${label} ${m2(Math.abs(derived))} → ${m2(proposal.balance)}`}
       </p>
       <p className="text-xs text-[var(--foreground-muted)] mt-1">
         Re-anchors as of today. Every screen derives from it. No transaction is changed.
