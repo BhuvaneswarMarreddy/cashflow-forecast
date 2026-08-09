@@ -19,7 +19,8 @@ import DebtPlannerPanel from '@/components/DebtPlannerPanel';
 import { UnanchoredNote } from '@/components/UnanchoredNote';
 import { PAYMENT_METHODS, ACCOUNT_TYPES, PaymentAccount, IncomeSource, AccountType, PaymentMethod, CategoryBudget } from '@/types';
 import { withDerivedBalances, monthlyAverages, calculateCurrentCash } from '@/lib/forecast';
-import { currentOf, isDebtAccount, netWorthOf, openingAnchor, earliestRowDate } from '@/lib/accounts';
+import { currentOf, isDebtAccount, isUnanchored, netWorthOf, openingAnchor, balanceCaption } from '@/lib/accounts';
+import ReconcileSheet from '@/components/ReconcileSheet';
 import { syncNow, describeSync, connectBankWithPlaid } from '@/lib/sync-client';
 import { useAccountsObservability } from '@/lib/obs/useAccountsObservability';
 import { safeSyncResult } from '@/lib/obs/sync-metadata';
@@ -56,6 +57,7 @@ export default function AccountsPage() {
     updateProfile,
     incomeContext,
     refreshProfile,
+    reconcileAccount,
   } = useUserProfile();
   const { transactions, isLoading: transactionsLoading, error: transactionsError, refreshTransactions } = useTransactions();
   const router = useRouter();
@@ -88,6 +90,9 @@ export default function AccountsPage() {
   const [showIncomeModal, setShowIncomeModal] = useState(false);
   const [editingAccount, setEditingAccount] = useState<PaymentAccount | null>(null);
   const [graphAccount, setGraphAccount] = useState<PaymentAccount | null>(null);
+  // Round 3a: the account the "Set balance" control on an unanchored row was
+  // clicked for. Opens ReconcileSheet — nothing anchors until its own Confirm.
+  const [reconcileForAccount, setReconcileForAccount] = useState<PaymentAccount | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [syncErr, setSyncErr] = useState(false);
@@ -248,7 +253,21 @@ export default function AccountsPage() {
       // UI-106 (audit accuracy): re-anchor ONLY when the balance was actually
       // edited. Renaming an account must not move its numbers — the old code
       // set openingDate to today on every save, silently shifting balances.
-      ...(!editingAccount || Math.abs((parseFloat(accountForm.balance) || 0) - currentOf(editingAccount)) > 0.004
+      //
+      // #83 round 3a (the Edit-account trap): an UNANCHORED account always takes
+      // this branch too, delta or not. openEditAccount() prefills `balance` with
+      // currentOf(editingAccount) — the same derived figure the delta below is
+      // compared against — so an owner who opens Edit on an unanchored account,
+      // sees the number, agrees it's right, and saves WITHOUT changing it gets a
+      // delta of 0 and would otherwise hit the `else` branch, which writes back
+      // `openingDate: editingAccount.openingDate` — i.e. still undefined.
+      // Confirming a correct number would silently leave the account unanchored
+      // forever, the exact opposite of what a Save button means. An unanchored
+      // account has no anchor to preserve, so there is nothing UI-106 protects
+      // here: isUnanchored() forces the anchor branch whenever editingAccount has
+      // no openingDate, while an untouched ANCHORED account still takes the
+      // `else` branch below and keeps its own openingBalance/openingDate.
+      ...(!editingAccount || isUnanchored(editingAccount) || Math.abs((parseFloat(accountForm.balance) || 0) - currentOf(editingAccount)) > 0.004
         ? openingAnchor(accountForm.balance, new Date().toISOString().slice(0, 10))
         : {
             openingBalance: editingAccount.openingBalance,
@@ -652,19 +671,36 @@ export default function AccountsPage() {
                           <p className={`text-lg font-semibold ${account.type === 'credit_card' || account.type === 'personal_loan' ? 'text-[var(--accent-danger)]' : 'text-[var(--accent-success)]'}`}>
                             {account.type === 'credit_card' || account.type === 'personal_loan' ? '-' : ''}{formatMoney(Math.abs(currentOf(account)), profile?.currency, 2)}
                           </p>
-                          {account.openingDate ? (
-                            <p className="text-xs text-[var(--foreground-muted)]" title="Balances derive from transactions since this date">
-                              as of {account.openingDate.slice(0, 10)}
-                            </p>
-                          ) : (
-                            // #83: no opening anchor means this figure is net movement across
-                            // the rows we hold, not a bank balance — say so, don't just show it.
-                            <p className="text-xs text-[var(--foreground-muted)]" title="No starting balance was ever set; this is net movement across imported transactions">
-                              {(() => {
-                                const since = earliestRowDate(account.id, transactions);
-                                return since ? `net since ${since} · no starting balance set` : 'no starting balance set';
-                              })()}
-                            </p>
+                          {/* #83: no opening anchor means this figure is net movement across the
+                              rows we hold, not a bank balance — say so, don't just show it.
+                              balanceCaption() is the SAME three-way text AccountDetailModal and
+                              History already render for one account; this row used to hand-roll
+                              its own copy, which is exactly how two screens describing the same
+                              account drift into disagreeing captions. */}
+                          <p
+                            className="text-xs text-[var(--foreground-muted)]"
+                            title={account.openingDate ? 'Balances derive from transactions since this date' : 'No starting balance was ever set; this is net movement across imported transactions'}
+                          >
+                            {balanceCaption(account, transactions)}
+                          </p>
+                          {/* Round 3a: the disclosure above used to be a dead end. The obvious
+                              fix — open Edit, confirm the number — was a TRAP (see the comment
+                              on handleSaveAccount above): the form prefills the derived figure,
+                              so confirming it looked like a no-op and left the account unanchored
+                              forever. This is the one real exit, and it goes through
+                              ReconcileSheet -> reconcileAccount so the DriftObservation (INV-1)
+                              still gets recorded — never a second path that writes openingDate
+                              directly (FIN-SETTLEMENT-003: nothing here anchors on its own, the
+                              sheet's own confirm step does). */}
+                          {isUnanchored(account) && (
+                            <button
+                              type="button"
+                              onClick={() => setReconcileForAccount(account)}
+                              aria-label={`Set balance for ${account.name}`}
+                              className="tap-target relative text-xs text-[var(--accent-primary)] underline decoration-dotted underline-offset-2 hover:text-[var(--foreground)] transition-colors"
+                            >
+                              Set balance
+                            </button>
                           )}
                           {account.creditLimit && (
                             <p className="text-xs text-[var(--foreground-muted)]">
@@ -922,6 +958,22 @@ export default function AccountsPage() {
           account={graphAccount}
           transactions={transactions}
           onClose={() => setGraphAccount(null)}
+        />
+      )}
+
+      {/* Round 3a Fix B: routed through reconcileAccount (not a direct
+          updatePaymentAccount call) so the drift gets recorded as a
+          DriftObservation — the entire premise of INV-1 — same as the reconcile
+          entry point on /flow. No second math path. */}
+      {reconcileForAccount && (
+        <ReconcileSheet
+          accountName={reconcileForAccount.name}
+          inputLabel={isDebtAccount(reconcileForAccount) ? 'amount you currently owe' : 'real balance right now'}
+          derivedCurrent={currentOf(reconcileForAccount)}
+          onConfirm={async (entered) => {
+            await reconcileAccount(reconcileForAccount.id, entered, currentOf(reconcileForAccount));
+          }}
+          onClose={() => setReconcileForAccount(null)}
         />
       )}
 
