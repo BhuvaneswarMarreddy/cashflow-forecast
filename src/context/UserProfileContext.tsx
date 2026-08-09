@@ -10,6 +10,7 @@ import { fromFirestoreSettings, toFirestoreSettings } from '@/lib/profile-settin
 import { startSpan, getTrace, errorType } from '@/lib/obs/trace';
 import { isUnsyncedId } from '@/lib/offline-queue';
 import { emit } from '@/lib/obs/events';
+import { recordAudit, auditEntry } from '@/lib/audit';
 
 export interface UserProfileContextType {
   profile: UserProfile | null;
@@ -342,8 +343,21 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
     const acc = profile.paymentAccounts.find((x) => x.id === id);
     if (!acc) return 0;
     const today = new Date().toISOString().slice(0, 10);
-    const { driftCents, reanchor } = reconcile(acc, enteredCurrent, derivedCurrent, today,
-      { includePending: false, source: 'user' });
+    // includePending was a Task-4 placeholder (`false` always); this is the one real
+    // policy value every other screen already reads, so a reconcile computed under a
+    // different pending-inclusion rule than the balance it's checking is not possible.
+    const { driftCents, reanchor, observation } = reconcile(acc, enteredCurrent, derivedCurrent, today,
+      { includePending: incomeContext.includePending ?? false, source: 'user' });
+    // INV-1: write the observation BEFORE the reanchor lands. Once `updatePaymentAccount`
+    // below moves openingBalance/openingDate, entered and derived agree by construction —
+    // the drift this observation records is the only trace it was ever off. recordAudit
+    // never throws (src/lib/audit.ts), so a dropped log entry can't cost us the reanchor.
+    if (user?.id) {
+      await recordAudit(user.id, auditEntry('account.reconcile', `accounts/${acc.id}`, {
+        actor: 'user',
+        after: observation,
+      }));
+    }
     if (reanchor) await updatePaymentAccount(id, reanchor);
     return driftCents;
   };
