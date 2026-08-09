@@ -27,6 +27,16 @@ const TRANSACTIONS = [
   txn('1', 'INSTACART*ORDER', 'Instacart'),
   txn('2', 'INSTACART SF', 'Instacart'),
   txn('3', 'SHELL OIL', 'Shell'),
+  // Real history on the UNANCHORED account below. deriveAccountBalance() must sum
+  // this ($1,000 - $150 = $850); currentOf()'s openingBalance fallback would say $0.
+  {
+    id: '4', title: 'PAYROLL DEPOSIT', merchant: 'Employer', amount: 1000, type: 'income',
+    category: 'other', paymentMethod: 'other', date: '2026-07-01', accountId: 'acct-legacy',
+  } as Transaction,
+  {
+    id: '5', title: 'GROCERY RUN', merchant: 'Market', amount: 150, type: 'expense',
+    category: 'food', paymentMethod: 'other', date: '2026-07-05', accountId: 'acct-legacy',
+  } as Transaction,
 ];
 
 jest.mock('@/context/TransactionContext', () => ({
@@ -38,9 +48,22 @@ const MOCK_ACCOUNTS = [
   { id: 'acct-chase', name: 'CHASE SAVINGS', type: 'bank_account', provider: 'chase', openingBalance: 2600.97, openingDate: '2026-08-02', color: '#111', isActive: true },
   { id: 'acct-adv', name: 'Advantage Savings', type: 'bank_account', provider: 'other', openingBalance: 45.52, openingDate: '2026-08-02', color: '#222', isActive: true },
   { id: 'acct-apple', name: 'Apple Card', type: 'credit_card', provider: 'apple', openingBalance: 2068.93, openingDate: '2026-08-02', color: '#333', isActive: true },
+  // No openingDate -> UNANCHORED (src/lib/accounts.ts isUnanchored). openingBalance
+  // sits at 0 exactly like a real unanchored account (openingAnchor() in accounts.ts
+  // never sets a nonzero balance without also setting a date), so currentOf()'s
+  // openingBalance fallback and the true derived balance diverge whenever the account
+  // has transaction history — which is exactly the case Defect 2 got wrong.
+  { id: 'acct-legacy', name: 'Legacy Cash', type: 'bank_account', provider: 'other', openingBalance: 0, color: '#444', isActive: true },
 ];
+// incomeContext is a required, real argument to deriveAccountBalance (src/lib/forecast.ts)
+// — the fix must thread a real policy through, never a literal `{}` stand-in.
+const MOCK_INCOME_CONTEXT = { sources: [], reviews: {} };
 jest.mock('@/context/UserProfileContext', () => ({
-  useUserProfile: () => ({ profile: { currency: 'USD', paymentAccounts: MOCK_ACCOUNTS }, reconcileAccount }),
+  useUserProfile: () => ({
+    profile: { currency: 'USD', paymentAccounts: MOCK_ACCOUNTS },
+    reconcileAccount,
+    incomeContext: MOCK_INCOME_CONTEXT,
+  }),
 }));
 
 beforeAll(() => {
@@ -257,5 +280,25 @@ describe('the balance proposal card', () => {
     render(<DataChatSheet open onClose={() => {}} />);
     send('i owe 2405 on the apple card');
     expect(await screen.findByText('Set Apple Card — you owe $2,068.93 → $2,405.00')).toBeInTheDocument();
+  });
+
+  it('reconciles an unanchored account against its DERIVED balance, not the $0 opening anchor (Defect 2)', async () => {
+    // acct-legacy has no openingDate (unanchored) and openingBalance: 0.
+    // currentOf(account) — the raw-list fallback the bug used — would report $0 here.
+    // The real derived balance is $1,000 payroll - $150 grocery = $850.00.
+    aiChat.mockResolvedValue(proposal('Legacy Cash', 900));
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('legacy cash is 900');
+
+    // #83 round 4a Defect 3: the OLD assertion (`findByText(/^Set Legacy Cash/)`)
+    // stopped before the number, so it kept passing even while the card displayed
+    // currentOf(account)'s $0.00 fallback instead of the derived $850 the write
+    // actually measures against. Assert the full string so a re-introduced
+    // currentOf() here — a fabricated "$0.00 → $900.00" — turns this red.
+    await screen.findByText('Set Legacy Cash — balance $850.00 → $900.00');
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    await screen.findByText(/Saved — Legacy Cash reads \$900\.00 as of today/);
+
+    expect(reconcileAccount).toHaveBeenCalledWith('acct-legacy', 900, 850);
   });
 });

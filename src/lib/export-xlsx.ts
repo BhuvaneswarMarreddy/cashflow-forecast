@@ -9,7 +9,7 @@
 import * as XLSX from 'xlsx';
 import { withDerivedBalances } from '@/lib/forecast';
 import { PaymentAccount, Transaction, IncomeSource, InflowReview, SavingsGoal, DebtPayoffPlan, UserProfile } from '@/types';
-import { currentOf } from '@/lib/accounts';
+import { currentOf, balanceCaption, unanchoredPhrase } from '@/lib/accounts';
 import { interpretTransaction, isPositive, sumIncomeCents, sumExpenseCents, IncomeContext } from '@/lib/classify';
 
 export interface ExportData {
@@ -33,6 +33,13 @@ export function buildExportWorkbook(data: ExportData): XLSX.WorkBook {
 
   const wb = XLSX.utils.book_new();
 
+  // #83 Fix 4: the totals below are grouped once, by the same type filters they always
+  // used, so unanchoredNote() can be asked "does THIS group (the one behind THIS total)
+  // contain an unanchored account" — never the whole roster, which is Fix 1's bug.
+  const bankAccounts = accounts.filter(a => a.type === 'bank_account' || a.type === 'debit_card');
+  const creditAccounts = accounts.filter(a => a.type === 'credit_card');
+  const loanAccounts = accounts.filter(a => a.type === 'personal_loan');
+
   // 1. Summary Sheet
   const summaryData = [
     ['CashFlow Forecast - Data Export'],
@@ -48,9 +55,12 @@ export function buildExportWorkbook(data: ExportData): XLSX.WorkBook {
     [''],
     ['Account Totals'],
     ['Total Accounts', data.accounts.length],
-    ['Total Bank Balance', accounts.filter(a => a.type === 'bank_account' || a.type === 'debit_card').reduce((sum, a) => sum + currentOf(a), 0)],
-    ['Total Credit Card Debt', accounts.filter(a => a.type === 'credit_card').reduce((sum, a) => sum + currentOf(a), 0)],
-    ['Total Loan Balance', accounts.filter(a => a.type === 'personal_loan').reduce((sum, a) => sum + currentOf(a), 0)],
+    ['Total Bank Balance', bankAccounts.reduce((sum, a) => sum + currentOf(a), 0)],
+    ...(unanchoredNote(bankAccounts) ? [[unanchoredNote(bankAccounts)!]] : []),
+    ['Total Credit Card Debt', creditAccounts.reduce((sum, a) => sum + currentOf(a), 0)],
+    ...(unanchoredNote(creditAccounts) ? [[unanchoredNote(creditAccounts)!]] : []),
+    ['Total Loan Balance', loanAccounts.reduce((sum, a) => sum + currentOf(a), 0)],
+    ...(unanchoredNote(loanAccounts) ? [[unanchoredNote(loanAccounts)!]] : []),
     [''],
     ['Income Summary'],
     ['Total Income Sources', data.incomeSources.filter(i => i.isActive).length],
@@ -77,9 +87,14 @@ export function buildExportWorkbook(data: ExportData): XLSX.WorkBook {
 
   // 2. Accounts Sheet
   if (data.accounts.length > 0) {
-    const accountHeaders = ['Name', 'Type', 'Provider', 'Balance', 'Credit Limit', 'APR (%)', 'Due Date', 'Last 4 Digits', 'Active'];
+    const accountHeaders = ['Name', 'Type', 'Provider', 'Balance', 'Balance As Of', 'Credit Limit', 'APR (%)', 'Due Date', 'Last 4 Digits', 'Active'];
     const accountRows = accounts.map(a => [
       a.name, a.type, a.provider, currentOf(a),
+      // #83 Fix 4: the same claim this account gets everywhere else it's shown (Accounts,
+      // the detail modal, History) — an anchored balance is "as of" a stated date, an
+      // unanchored one is net movement since the earliest row. Never left silent next
+      // to a number that otherwise looks just as final as every anchored one beside it.
+      balanceCaption(a, data.transactions),
       a.creditLimit || '', a.apr || '', a.dueDate || '', a.lastFourDigits || '',
       a.isActive ? 'Yes' : 'No',
     ]);
@@ -179,11 +194,19 @@ export function buildExportWorkbook(data: ExportData): XLSX.WorkBook {
       ['Interest Saved vs Minimums', data.debtPlan.interestSaved],
       [''],
       ['Payoff Order'],
-      ['#', 'Account', 'Balance', 'APR %', 'Months', 'Payoff Date', 'Interest'],
-      ...data.debtPlan.debts.map(d => [
-        d.payoffOrder, d.accountName, d.originalBalance, d.apr,
-        d.monthsToPayoff, formatDate(d.payoffDate), d.totalInterestPaid,
-      ]),
+      ['#', 'Account', 'Balance', 'Balance As Of', 'APR %', 'Months', 'Payoff Date', 'Interest'],
+      // Round 4b Fix 4: originalBalance used to carry no caption at all — the Accounts
+      // sheet a few tabs over already never leaves this same number unexplained.
+      // `accounts` here is the derived roster from the top of this function, so a
+      // lookup miss is only possible if the plan itself references a deleted account.
+      ...data.debtPlan.debts.map(d => {
+        const account = accounts.find(a => a.id === d.accountId);
+        return [
+          d.payoffOrder, d.accountName, d.originalBalance,
+          account ? balanceCaption(account, data.transactions) : '',
+          d.apr, d.monthsToPayoff, formatDate(d.payoffDate), d.totalInterestPaid,
+        ];
+      }),
     ];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(debtPlanData), 'DebtPlan');
   }
@@ -203,6 +226,20 @@ export function workbookToBlob(wb: XLSX.WorkBook): Blob {
 // the app can never disagree about which way a row moved.
 function signedAmount(t: Transaction, accounts?: PaymentAccount[]): number {
   return isPositive(t, accounts) ? t.amount : -t.amount;
+}
+
+// #83 Fix 4: a spreadsheet is the most authoritative-looking thing this app produces
+// and it leaves the app entirely — a disclosure that only lives in the UI never
+// reaches whoever opens this file. `group` must already be the accounts a given total
+// is summed FROM (never the whole roster), or this would name an account a figure
+// excludes — the exact bug Fix 1 exists to correct, one layer up in the app.
+//
+// Round 4b: the count-and-pluralize arithmetic now comes from `unanchoredPhrase` (same
+// source `UnanchoredNote` uses) so the two sentences can only ever drift in the wording
+// AROUND the count — never in the count itself.
+function unanchoredNote(group: PaymentAccount[]): string | null {
+  const phrase = unanchoredPhrase(group);
+  return phrase ? `Note: includes ${phrase} — balance is net movement since import, not a bank-confirmed starting balance` : null;
 }
 
 function getMonthlyAmount(amount: number, frequency: string): number {

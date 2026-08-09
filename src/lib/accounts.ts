@@ -1,4 +1,4 @@
-import { PaymentAccount } from '@/types';
+import { PaymentAccount, DriftObservation, DriftStatus } from '@/types';
 
 const BIG = Number.MAX_SAFE_INTEGER;
 
@@ -9,6 +9,14 @@ const BIG = Number.MAX_SAFE_INTEGER;
  * when you specifically mean the anchor.
  */
 export const currentOf = (a: PaymentAccount): number => a.currentBalance ?? a.openingBalance;
+
+/**
+ * True when nobody has ever asserted a starting balance for this account.
+ *
+ * Its derived balance is then NET MOVEMENT across the rows we hold, not a bank
+ * balance. Real, defensible, and it must never be presented as the latter.
+ */
+export const isUnanchored = (a: PaymentAccount): boolean => !a.openingDate;
 
 /** Stable order: sortIndex asc; undefined sorts to the end; ties broken by name. */
 export function sortAccounts(accounts: PaymentAccount[]): PaymentAccount[] {
@@ -51,17 +59,70 @@ export function reindex(orderedIds: string[], accounts: PaymentAccount[]): Array
   return orderedIds.filter((id) => known.has(id)).map((id, i) => ({ id, sortIndex: i }));
 }
 
+export interface DriftContext {
+  includePending: boolean;
+  providerCheckedAt?: string;
+  source: 'user' | 'sync';
+}
+
 /**
- * Reconcile an account against the user's real balance. Anchor-only: any drift
- * re-anchors (openingBalance = the entered balance, openingDate = today), which
- * resets net-since-anchor to zero and makes later pre-today imports harmless.
+ * Reconcile an account against a real balance. Anchor-only: any drift re-anchors
+ * (openingBalance = the entered balance, openingDate = today), which resets
+ * net-since-anchor to zero and makes later pre-today imports harmless.
+ *
+ * The observation is returned ALWAYS, including at zero drift — a clean check is
+ * evidence too, and callers persist it before applying `reanchor`.
  */
 export function reconcile(
-  account: PaymentAccount, enteredCurrent: number, derivedCurrent: number, todayISO: string
-): { driftCents: number; reanchor?: { openingBalance: number; openingDate: string } } {
-  const driftCents = Math.round((enteredCurrent - derivedCurrent) * 100);
-  if (driftCents === 0) return { driftCents: 0 };
-  return { driftCents, reanchor: { openingBalance: enteredCurrent, openingDate: todayISO } };
+  account: PaymentAccount,
+  enteredCurrent: number,
+  derivedCurrent: number,
+  todayISO: string,
+  ctx: DriftContext
+): { driftCents: number; reanchor?: { openingBalance: number; openingDate: string }; observation: DriftObservation } {
+  const enteredCents = Math.round(enteredCurrent * 100);
+  const derivedCents = Math.round(derivedCurrent * 100);
+  const driftCents = enteredCents - derivedCents;
+  const observation: DriftObservation = {
+    accountId: account.id,
+    at: new Date().toISOString(),
+    enteredCents,
+    derivedCents,
+    driftCents,
+    includePending: ctx.includePending,
+    // Omit the key entirely rather than write `undefined`: Firestore's addDoc rejects
+    // undefined at ANY depth (not just top-level), and stripUndefined() in audit.ts
+    // only strips the entry's OWN keys, never descending into `after`. The only
+    // production caller (UserProfileContext.reconcileAccount) never passes
+    // providerCheckedAt, so every write hit this and threw inside addDoc — silently,
+    // because recordAudit's catch (by design) must never fail the write it observes.
+    // Every drift observation was being recorded and then discarded, 100% of the time.
+    ...(ctx.providerCheckedAt ? { providerCheckedAt: ctx.providerCheckedAt } : {}),
+    anchored: !isUnanchored(account),
+    source: ctx.source,
+  };
+  // Zero drift on an ANCHORED account must not move openingDate — UI-106's guarantee
+  // that an unchanged balance can't silently re-date the anchor. An UNANCHORED account
+  // has no anchor for that guarantee to protect: there is no earlier claim a write here
+  // could disturb, and the save IS the owner's first assertion. Short-circuiting for
+  // BOTH left the owner's most likely path — open ReconcileSheet, see the prefilled
+  // derived figure, agree it's right, confirm — writing nothing: the account stayed
+  // unanchored forever while the sheet reported success (#83 round 4a Defect 1).
+  if (driftCents === 0 && !isUnanchored(account)) return { driftCents: 0, observation };
+  return { driftCents, reanchor: { openingBalance: enteredCurrent, openingDate: todayISO }, observation };
+}
+
+/**
+ * An unanchored account has no claim to violate, so it is never PASS.
+ * Staleness is DERIVED from the sync schedule rather than a fixed hour count:
+ * the overnight gap between the 19:00 and 07:00 runs is itself 12 hours, so any
+ * fixed 6h/12h threshold would mark every account stale every morning.
+ */
+export function driftStatus(o: DriftObservation, lastScheduledSlotISO: string): DriftStatus {
+  if (!o.anchored) return 'NOT_APPLICABLE';
+  if (o.driftCents === 0) return 'PASS';
+  if (o.providerCheckedAt && o.providerCheckedAt < lastScheduledSlotISO) return 'STALE_INPUT';
+  return 'VIOLATION';
 }
 
 /**
@@ -80,6 +141,84 @@ export function reconcile(
 export function sortByDisplayOrder<T extends { sortIndex?: number }>(accounts: readonly T[]): T[] {
   const key = (a: T) => a.sortIndex ?? Number.MAX_SAFE_INTEGER;
   return [...accounts].sort((a, b) => key(a) - key(b));
+}
+
+/** The earliest transaction date on an account, for the "net since …" caption. */
+export function earliestRowDate(
+  accountId: string,
+  transactions: readonly { accountId?: string; date: string }[]
+): string | undefined {
+  let earliest: string | undefined;
+  for (const t of transactions) {
+    if (t.accountId !== accountId) continue;
+    const day = t.date.slice(0, 10);
+    if (!earliest || day < earliest) earliest = day;
+  }
+  return earliest;
+}
+
+/**
+ * The account(s) a displayed figure actually represents (#83 Finding 1).
+ *
+ * Forecast's headline card switches between a combined total ('all') and one
+ * account's balance depending on the dropdown. `UnanchoredNote` must count only
+ * what that figure includes — passing every account regardless of selection let
+ * a correctly-anchored single account show "includes 1 unanchored account"
+ * borrowed from an account that isn't even part of the number on screen.
+ *
+ * When selectedId is 'all', `scope` picks which total:
+ *  - 'cash' (the DEFAULT, for every caller that existed before round 4b) is the
+ *    CASH TOTAL — see calculateCurrentCash — excluding credit cards and loans.
+ *  - 'debt' is credit_card accounts ONLY, matching how Dashboard's "Cards owed"
+ *    and Accounts' "Credit Used" actually compute `totalCreditUsed`. This is
+ *    deliberately narrower than `isDebtAccount` (which also matches
+ *    personal_loan): those two figures never sum personal loans, so a loan
+ *    scope here would name an account a figure excludes — the exact inverse
+ *    error this function exists to prevent, one layer up.
+ * A single selectedId ignores scope entirely: one named account IS the figure,
+ * regardless of type.
+ */
+export function accountsBehindFigure(
+  selectedId: string,
+  accounts: readonly PaymentAccount[],
+  scope: 'cash' | 'debt' = 'cash'
+): readonly PaymentAccount[] {
+  if (selectedId === 'all') {
+    return accounts.filter(scope === 'cash' ? isCashAccount : (a) => a.type === 'credit_card');
+  }
+  const one = accounts.find((a) => a.id === selectedId);
+  return one ? [one] : [];
+}
+
+/**
+ * The single-account balance caption every screen showing ONE account's balance uses:
+ * "as of {date}" when anchored, else "net since {earliest row} · no starting balance
+ * set" (or just the latter when there are no rows at all). Written once (#83 Finding
+ * 2/3) so AccountDetailModal and History's per-account tile — both new call sites —
+ * can't drift into different wording for the same account the way two separately
+ * hand-rolled copies eventually would.
+ */
+export function balanceCaption(
+  account: Pick<PaymentAccount, 'id' | 'openingDate'>,
+  transactions: readonly { accountId?: string; date: string }[]
+): string {
+  if (account.openingDate) return `as of ${account.openingDate.slice(0, 10)}`;
+  const since = earliestRowDate(account.id, transactions);
+  return since ? `net since ${since} · no starting balance set` : 'no starting balance set';
+}
+
+/**
+ * "N unanchored account" / "N unanchored accounts", or null when the group has none.
+ *
+ * The count-and-pluralize logic both `UnanchoredNote` (JSX, on-screen) and
+ * export-xlsx's summary note (plain .ts — a spreadsheet leaves the app, so it can't
+ * import JSX) build their sentence around. Extracted for the same reason as
+ * `balanceCaption`: two independently hand-rolled copies of this arithmetic is
+ * exactly how they drift out of sync with each other over time.
+ */
+export function unanchoredPhrase(accounts: readonly PaymentAccount[]): string | null {
+  const n = accounts.filter(isUnanchored).length;
+  return n === 0 ? null : `${n} unanchored account${n === 1 ? '' : 's'}`;
 }
 
 /** Every account whose balance IS cash the owner can spend. */

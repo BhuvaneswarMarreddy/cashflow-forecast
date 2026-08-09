@@ -27,8 +27,36 @@ export interface AiDecisionRequest {
   budgetContext?: unknown;
   goalsContext?: unknown;
   debtContext?: unknown;
+  /** #83: which accounts (if any) have no confirmed bank balance, and why — see buildPrompt. */
+  dataCaveats?: unknown;
   /** emergency_fund only: pre-computed forecast context from the panel */
   forecast?: Record<string, unknown>;
+}
+
+/**
+ * #83: `parsed.dataCaveats` above puts the JSON key next to budgets/debts, but a key the
+ * model was never told the meaning of is not a constraint — it is noise a capable model can
+ * rationalize past. This turns it into a hard rule, scoped to exactly the accounts named in
+ * `unanchoredAccounts` (never a blanket hedge), and returns '' when dataCaveats is absent so
+ * the two anchored-data types (decision_check without it, and every call before an account
+ * goes unanchored) never see hedge language they'd learn to tune out.
+ *
+ * Only wired into decision_check/question/comprehensive: those are the only types that
+ * interpolate {forecastData} (see enhancedForecastData above), so they're the only ones
+ * dataCaveats can ever reach. 'insights' and 'emergency_fund' build their prompts from a
+ * different, narrower payload (`data` / `forecast`) that never carries dataCaveats — adding
+ * this instruction there would reference a key the model's context never actually contains.
+ */
+function dataCaveatsInstruction(dataCaveats: unknown): string {
+  const accounts = (dataCaveats as { unanchoredAccounts?: unknown } | undefined)?.unanchoredAccounts;
+  const names = Array.isArray(accounts) ? accounts.filter((a): a is string => typeof a === 'string' && a.length > 0) : [];
+  if (!names.length) return '';
+
+  const plural = names.length > 1;
+  return `\n\nDATA CAVEAT — BINDING:
+${names.join(', ')} ${plural ? 'have' : 'has'} no confirmed bank balance in this data: the figure is net movement over the transactions on record, not a verified starting balance.
+You MUST name ${plural ? 'these accounts' : 'this account'} by name (${names.join(', ')}) in any sentence that states a total, balance, or affordability figure that includes ${plural ? 'them' : 'it'}. A vague hedge ("some accounts may be off") is not acceptable — say which account.
+Do NOT refuse to answer and do NOT withhold the figure. Give the number, then name the caveat. An answer that omits the number over-corrects just as badly as one that states it with false confidence.`;
 }
 
 /**
@@ -52,17 +80,23 @@ export function buildPrompt(
     budgetContext,
     goalsContext,
     debtContext,
+    dataCaveats,
   } = body;
 
   // Build enhanced context if additional data is provided (verbatim from route)
   let enhancedForecastData = forecastData || '';
 
-  if (budgetContext || goalsContext || debtContext) {
+  // #83: dataCaveats must join budget/goals/debt here, not just live on AiDecisionRequest —
+  // financialContext() names which accounts are unanchored, but a field that is accepted
+  // and never assembled into the prompt never reaches the model. That gap is what made
+  // the previous disclosure attempt decorative: the UI told the owner, the AI stayed blind.
+  if (budgetContext || goalsContext || debtContext || dataCaveats) {
     try {
       const parsed = forecastData ? JSON.parse(forecastData) : {};
       if (budgetContext) parsed.budgets = budgetContext;
       if (goalsContext) parsed.savingsGoals = goalsContext;
       if (debtContext) parsed.debts = debtContext;
+      if (dataCaveats) parsed.dataCaveats = dataCaveats;
       enhancedForecastData = JSON.stringify(parsed, null, 2);
     } catch {
       // Keep original if parsing fails
@@ -77,17 +111,20 @@ export function buildPrompt(
       .replace('{newLowestBalance}', newLowestBalance?.toString() || '0')
       .replace('{lowestDate}', lowestDate || 'unknown')
       .replace('{safetyThreshold}', safetyThreshold?.toString() || '500')
-      .replace('{affectedBills}', affectedBills?.join(', ') || 'none');
+      .replace('{affectedBills}', affectedBills?.join(', ') || 'none')
+      + dataCaveatsInstruction(dataCaveats);
   }
 
   if (type === 'question') {
     return QUESTION_PROMPT
       .replace('{forecastData}', enhancedForecastData)
-      .replace('{question}', question || '');
+      .replace('{question}', question || '')
+      + dataCaveatsInstruction(dataCaveats);
   }
 
   if (type === 'comprehensive') {
-    return COMPREHENSIVE_ANALYSIS_PROMPT.replace('{forecastData}', enhancedForecastData);
+    return COMPREHENSIVE_ANALYSIS_PROMPT.replace('{forecastData}', enhancedForecastData)
+      + dataCaveatsInstruction(dataCaveats);
   }
 
   if (type === 'insights') {

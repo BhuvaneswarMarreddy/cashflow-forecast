@@ -422,5 +422,6 @@ describe('Forecast Engine', () => {
       expect(threeK.every(e => e.type === 'bill')).toBe(true);
     });
   });
+
 });
 

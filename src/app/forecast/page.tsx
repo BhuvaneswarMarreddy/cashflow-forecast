@@ -18,9 +18,11 @@ import SavingsGoalsPanel from '@/components/SavingsGoalsPanel';
 import PlannedPaymentsPanel from '@/components/PlannedPaymentsPanel';
 import AssumptionsPanel from '@/components/AssumptionsPanel';
 import BillsTab from '@/components/BillsTab';
+import { UnanchoredNote } from '@/components/UnanchoredNote';
 import { generateForecast, calculateCurrentCash, getAllAccountForecasts, withDerivedBalances, monthlyAverages } from '@/lib/forecast';
 import CashflowTab from '@/components/CashflowTab';
 import { buildAssumptions, AssumptionOverrides } from '@/lib/behavior';
+import { accountsBehindFigure } from '@/lib/accounts';
 import { homeSummary, RESERVE_TARGET_MONTHS } from '@/lib/home';
 import { formatMoney } from '@/lib/money';
 import { loadOverrides, saveOverrides } from '@/lib/assumption-overrides';
@@ -356,6 +358,12 @@ export default function ForecastPage() {
             {selectedAccountForecast?.accountType === 'credit_card' && (
               <p className="text-xs text-[var(--foreground-muted)] mt-1">Balance owed</p>
             )}
+            {/* #83 Finding 1: this card shows the combined total OR one selected
+                account's balance — the note must count only the account(s) behind
+                THAT figure, not every account, or a correctly-anchored single
+                account would show a stale "unanchored" claim borrowed from an
+                account not even in the number above it. */}
+            <UnanchoredNote accounts={accountsBehindFigure(selectedAccountId, derivedAccounts)} />
           </div>
 
           <div className="p-5 bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-card">

@@ -130,8 +130,13 @@ function metric(
     includedAccounts: included.map((a) => ({ id: a.id, type: a.type, label: safeLabel(a) })),
     excludedAccountCount: excluded.length,
     exclusionReasons,
+    // #83 Fix 5: this used to assert "rows before openingDate are already inside the
+    // anchor" unconditionally. An account with no openingDate has no anchor and no
+    // such rows to be inside one — deriveAccountBalance's openingKey falls back to
+    // '0000-00-00' (src/lib/forecast.ts) and every row on record counts. Wording now
+    // true in both cases, not a claim that only held for the anchored ones.
     pendingDataTreatment:
-      'Balances are openingBalance ± POSTED transactions dated openingDate..today; provider-pending rows (pending: true) are excluded because the anchor is the provider posted balance, rows dated after today are excluded as forecast, and rows before openingDate are already inside the anchor.',
+      'Balances are openingBalance ± POSTED transactions dated openingDate..today (an account with no openingDate has no anchor, so this is net movement across every row on record); provider-pending rows (pending: true) are excluded because the anchor is the provider posted balance, rows dated after today are excluded as forecast, and — only for an account that has an anchor — rows before openingDate are already inside it.',
     dataSource: shared.dataSource,
     cacheStatus: shared.cacheStatus,
     staleness: shared.staleness,

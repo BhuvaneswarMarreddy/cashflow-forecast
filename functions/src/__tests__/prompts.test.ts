@@ -125,6 +125,76 @@ describe('buildPrompt', () => {
     expect(prompt).toContain('not-json');
   });
 
+  // #83: financialContext() (src/lib/ai-context.ts) now names WHICH accounts are
+  // unanchored so the model can say which figure is soft instead of hedging every
+  // number. If dataCaveats is dropped here like the previous attempt, the disclosure
+  // chain is decorative — the UI shows it, the model never sees it.
+  it('merges dataCaveats into forecastData, naming the unanchored account', () => {
+    const prompt = buildPrompt('question', {
+      forecastData: '{"startingBalance":100}',
+      question: 'Can I afford this?',
+      dataCaveats: {
+        unanchoredAccounts: ['Venmo'],
+        reason: 'balance is net movement over imported history, not a confirmed bank balance',
+      },
+    })!;
+    expect(prompt).toContain('"dataCaveats"');
+    expect(prompt).toContain('Venmo');
+  });
+
+  it('omits dataCaveats from forecastData when not provided', () => {
+    const prompt = buildPrompt('question', {
+      forecastData: '{"startingBalance":100}',
+      question: 'Can I afford this?',
+    })!;
+    expect(prompt).not.toContain('dataCaveats');
+    expect(prompt).not.toContain('Venmo');
+  });
+
+  // #83: the JSON key alone doesn't bind the model to anything — a prompt author reading
+  // `parsed.dataCaveats = dataCaveats` sees plumbing, not an instruction. Without prose
+  // telling the model what the key means and what it must do, the model is free to ignore
+  // it or hedge everything instead of naming what's actually soft. Covers every type that
+  // receives enhancedForecastData (decision_check, question, comprehensive) since those are
+  // the only ones dataCaveats reaches; 'insights' and 'emergency_fund' never see the field.
+  describe('dataCaveats instruction (must bind, must name accounts, must not refuse, must be conditional)', () => {
+    const caveats = {
+      unanchoredAccounts: ['Venmo'],
+      reason: 'balance is net movement over imported history, not a confirmed bank balance',
+    };
+
+    it.each(['decision_check', 'question', 'comprehensive'])(
+      '%s: instructs the model to name the unanchored account when dataCaveats is present',
+      (type) => {
+        const prompt = buildPrompt(type, {
+          forecastData: '{"startingBalance":100}',
+          question: 'Can I afford this?',
+          dataCaveats: caveats,
+        })!;
+        // Names the specific account — not a vague hedge.
+        expect(prompt).toMatch(/Venmo/);
+        // Binding language, not a suggestion.
+        expect(prompt).toMatch(/\bMUST\b/);
+        // Must not tell the model to withhold the figure.
+        expect(prompt).not.toMatch(/do not (state|give|provide|share) (a|the) (figure|number|balance)/i);
+        expect(prompt).not.toMatch(/cannot (tell|answer|provide)/i);
+      }
+    );
+
+    it.each(['decision_check', 'question', 'comprehensive'])(
+      '%s: adds no caveat instruction when dataCaveats is absent',
+      (type) => {
+        const prompt = buildPrompt(type, {
+          forecastData: '{"startingBalance":100}',
+          question: 'Can I afford this?',
+        })!;
+        expect(prompt).not.toMatch(/Venmo/);
+        expect(prompt).not.toMatch(/unanchored/i);
+        expect(prompt).not.toMatch(/DATA CAVEAT/);
+      }
+    );
+  });
+
   it('returns null for unknown types (route returned 400)', () => {
     expect(buildPrompt('tight_period', {})).toBeNull();
     expect(buildPrompt(undefined, {})).toBeNull();

@@ -16,9 +16,11 @@ import SubscriptionsPanel from '@/components/SubscriptionsPanel';
 import BudgetSettingsPanel from '@/components/BudgetSettingsPanel';
 import BudgetStatusPanel from '@/components/BudgetStatusPanel';
 import DebtPlannerPanel from '@/components/DebtPlannerPanel';
+import { UnanchoredNote } from '@/components/UnanchoredNote';
 import { PAYMENT_METHODS, ACCOUNT_TYPES, PaymentAccount, IncomeSource, AccountType, PaymentMethod, CategoryBudget } from '@/types';
 import { withDerivedBalances, monthlyAverages, calculateCurrentCash } from '@/lib/forecast';
-import { currentOf, isDebtAccount, netWorthOf, openingAnchor } from '@/lib/accounts';
+import { currentOf, isCashAccount, isDebtAccount, isUnanchored, netWorthOf, openingAnchor, balanceCaption, accountsBehindFigure } from '@/lib/accounts';
+import ReconcileSheet from '@/components/ReconcileSheet';
 import { syncNow, describeSync, connectBankWithPlaid } from '@/lib/sync-client';
 import { useAccountsObservability } from '@/lib/obs/useAccountsObservability';
 import { safeSyncResult } from '@/lib/obs/sync-metadata';
@@ -55,6 +57,7 @@ export default function AccountsPage() {
     updateProfile,
     incomeContext,
     refreshProfile,
+    reconcileAccount,
   } = useUserProfile();
   const { transactions, isLoading: transactionsLoading, error: transactionsError, refreshTransactions } = useTransactions();
   const router = useRouter();
@@ -87,6 +90,9 @@ export default function AccountsPage() {
   const [showIncomeModal, setShowIncomeModal] = useState(false);
   const [editingAccount, setEditingAccount] = useState<PaymentAccount | null>(null);
   const [graphAccount, setGraphAccount] = useState<PaymentAccount | null>(null);
+  // Round 3a: the account the "Set balance" control on an unanchored row was
+  // clicked for. Opens ReconcileSheet — nothing anchors until its own Confirm.
+  const [reconcileForAccount, setReconcileForAccount] = useState<PaymentAccount | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [syncErr, setSyncErr] = useState(false);
@@ -208,7 +214,12 @@ export default function AccountsPage() {
       name: account.name,
       type: account.type,
       provider: account.provider,
-      balance: currentOf(account).toString(),
+      // #83 round 4a Defect 2: an unanchored account's balance field prefills EMPTY,
+      // never currentOf() — that derived figure is NET MOVEMENT, not a bank balance,
+      // and prefilling it made every save (even one that only touched APR or colour)
+      // write it back as a real anchor the owner never typed. A blank field asserts
+      // nothing; openingAnchor('') below confirms that.
+      balance: isUnanchored(account) ? '' : currentOf(account).toString(),
       creditLimit: account.creditLimit?.toString() || '',
       apr: account.apr?.toString() || '',
       statementDate: account.statementDate?.toString() || '',
@@ -247,7 +258,37 @@ export default function AccountsPage() {
       // UI-106 (audit accuracy): re-anchor ONLY when the balance was actually
       // edited. Renaming an account must not move its numbers — the old code
       // set openingDate to today on every save, silently shifting balances.
-      ...(!editingAccount || Math.abs((parseFloat(accountForm.balance) || 0) - currentOf(editingAccount)) > 0.004
+      //
+      // #83 round 4a Defect 2 (the plausible-anchor trap): round 3a "fixed" the
+      // Edit-account trap by forcing this branch whenever isUnanchored(editingAccount),
+      // delta or not — but that meant changing ONLY the APR, last-four digits, or
+      // colour on an unanchored account wrote openingBalance: currentOf(editingAccount)
+      // (a real, plausible-looking NUMBER — the derived net-movement figure) with
+      // openingDate: today. That manufactures the exact assertion #83 exists to
+      // prevent, just with a number instead of $0.
+      //
+      // The other half of the fix lives in openEditAccount(): an unanchored account's
+      // balance field prefills EMPTY, not with currentOf(). A blank field parses to 0
+      // here, which diverges from currentOf(editingAccount) by more than the delta
+      // threshold, so the branch below still fires on an untouched APR-only edit —
+      // but openingAnchor('') returns { openingBalance: 0 } with no openingDate, so
+      // that write leaves the account unanchored unless the owner actually typed a
+      // number. That covers the blank-field path on its own.
+      //
+      // It does NOT cover the owner reading the derived figure off the row caption,
+      // opening Edit, and typing it back verbatim (e.g. $10,458.03 for the one real
+      // unanchored account in production, Amazon Store Card): parseFloat(that string)
+      // then EQUALS currentOf(editingAccount) exactly, delta 0, the plain guard takes
+      // the `else` branch, and the save silently preserves "unanchored" with no
+      // feedback — the confirmation from #83 round 4a Defect 1 (accounts.ts:111)
+      // never happens because handleSaveAccount never even calls reconcile(). The
+      // isUnanchored(editingAccount) disjunct restores that path: for an unanchored
+      // account ANY save always re-derives openingAnchor from whatever is in the
+      // field (blank => still unanchored, any typed number including the derived
+      // figure or 0 => a real claim). An untouched ANCHORED account still takes the
+      // `else` branch below and keeps its own anchor (UI-106) — isUnanchored is false
+      // for it, so this disjunct never fires there.
+      ...(!editingAccount || isUnanchored(editingAccount) || Math.abs((parseFloat(accountForm.balance) || 0) - currentOf(editingAccount)) > 0.004
         ? openingAnchor(accountForm.balance, new Date().toISOString().slice(0, 10))
         : {
             openingBalance: editingAccount.openingBalance,
@@ -475,6 +516,10 @@ export default function AccountsPage() {
               {netWorth < 0 ? '-' : ''}{formatMoney(Math.abs(netWorth), profile?.currency, 2)}
             </p>
             <p className="text-xs text-[var(--foreground-muted)]">cash − all debt</p>
+            {/* Round 4b Fix 2: netWorthOf sums isCashAccount + isDebtAccount, and those
+                two predicates partition every AccountType that exists today — so the
+                full roster IS this figure's own scope, unlike the three cards below it. */}
+            <UnanchoredNote accounts={derivedAccounts} />
           </div>
           <div className="stat-card">
             <div className="flex items-center justify-between mb-2">
@@ -485,6 +530,11 @@ export default function AccountsPage() {
               {formatMoney(totalBankBalance, profile?.currency, 2)}
             </p>
             <p className="text-xs text-[var(--foreground-muted)]">across all cash accounts</p>
+            {/* Round 4b Fix 2: this used to sit under a single note for the whole
+                5-card grid — including this cash-only figure, which an unanchored
+                CREDIT CARD (production's actual shape) has no part in. Same inverse
+                error Fix 1 corrects one screen over. */}
+            <UnanchoredNote accounts={derivedAccounts.filter(isCashAccount)} />
           </div>
           <div className="stat-card">
             <div className="flex items-center justify-between mb-2">
@@ -497,6 +547,11 @@ export default function AccountsPage() {
             <p className="text-xs text-[var(--foreground-muted)]">
               {creditUtilization}% of {formatMoney(totalCreditLimit, profile?.currency, 2)} limit
             </p>
+            {/* totalCreditUsed above is credit_card accounts only — accountsBehindFigure's
+                'debt' scope matches that exactly (not isDebtAccount's broader
+                credit_card + personal_loan). This is the one figure production's
+                Amazon Store Card actually lands in on this screen. */}
+            <UnanchoredNote accounts={accountsBehindFigure('all', derivedAccounts, 'debt')} />
           </div>
           <div className="stat-card">
             <div className="flex items-center justify-between mb-2">
@@ -537,7 +592,6 @@ export default function AccountsPage() {
             <p className="text-xs text-[var(--foreground-muted)]">{budgetIsDerived ? 'typical monthly spend' : 'your set budget'}</p>
           </div>
         </div>
-
         {/* Tabs */}
         <div className="flex flex-nowrap sm:flex-wrap whitespace-nowrap sm:whitespace-normal gap-2 mb-6 scroll-x-mobile">
           {[
@@ -647,10 +701,36 @@ export default function AccountsPage() {
                           <p className={`text-lg font-semibold ${account.type === 'credit_card' || account.type === 'personal_loan' ? 'text-[var(--accent-danger)]' : 'text-[var(--accent-success)]'}`}>
                             {account.type === 'credit_card' || account.type === 'personal_loan' ? '-' : ''}{formatMoney(Math.abs(currentOf(account)), profile?.currency, 2)}
                           </p>
-                          {account.openingDate && (
-                            <p className="text-xs text-[var(--foreground-muted)]" title="Balances derive from transactions since this date">
-                              as of {account.openingDate.slice(0, 10)}
-                            </p>
+                          {/* #83: no opening anchor means this figure is net movement across the
+                              rows we hold, not a bank balance — say so, don't just show it.
+                              balanceCaption() is the SAME three-way text AccountDetailModal and
+                              History already render for one account; this row used to hand-roll
+                              its own copy, which is exactly how two screens describing the same
+                              account drift into disagreeing captions. */}
+                          <p
+                            className="text-xs text-[var(--foreground-muted)]"
+                            title={account.openingDate ? 'Balances derive from transactions since this date' : 'No starting balance was ever set; this is net movement across imported transactions'}
+                          >
+                            {balanceCaption(account, transactions)}
+                          </p>
+                          {/* Round 3a: the disclosure above used to be a dead end. The obvious
+                              fix — open Edit, confirm the number — was a TRAP (see the comment
+                              on handleSaveAccount above): the form prefills the derived figure,
+                              so confirming it looked like a no-op and left the account unanchored
+                              forever. This is the one real exit, and it goes through
+                              ReconcileSheet -> reconcileAccount so the DriftObservation (INV-1)
+                              still gets recorded — never a second path that writes openingDate
+                              directly (FIN-SETTLEMENT-003: nothing here anchors on its own, the
+                              sheet's own confirm step does). */}
+                          {isUnanchored(account) && (
+                            <button
+                              type="button"
+                              onClick={() => setReconcileForAccount(account)}
+                              aria-label={`Set balance for ${account.name}`}
+                              className="tap-target relative text-xs text-[var(--accent-primary)] underline decoration-dotted underline-offset-2 hover:text-[var(--foreground)] transition-colors"
+                            >
+                              Set balance
+                            </button>
                           )}
                           {account.creditLimit && (
                             <p className="text-xs text-[var(--foreground-muted)]">
@@ -908,6 +988,22 @@ export default function AccountsPage() {
           account={graphAccount}
           transactions={transactions}
           onClose={() => setGraphAccount(null)}
+        />
+      )}
+
+      {/* Round 3a Fix B: routed through reconcileAccount (not a direct
+          updatePaymentAccount call) so the drift gets recorded as a
+          DriftObservation — the entire premise of INV-1 — same as the reconcile
+          entry point on /flow. No second math path. */}
+      {reconcileForAccount && (
+        <ReconcileSheet
+          accountName={reconcileForAccount.name}
+          inputLabel={isDebtAccount(reconcileForAccount) ? 'amount you currently owe' : 'real balance right now'}
+          derivedCurrent={currentOf(reconcileForAccount)}
+          currency={profile?.currency}
+          unanchored={isUnanchored(reconcileForAccount)}
+          onConfirm={(entered) => reconcileAccount(reconcileForAccount.id, entered, currentOf(reconcileForAccount))}
+          onClose={() => setReconcileForAccount(null)}
         />
       )}
 

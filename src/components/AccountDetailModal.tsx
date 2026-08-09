@@ -7,7 +7,7 @@ import {
 import { X } from 'lucide-react';
 import { PaymentAccount, Transaction } from '@/types';
 import { isPositive } from '@/lib/classify';
-import { currentOf } from '@/lib/accounts';
+import { currentOf, balanceCaption } from '@/lib/accounts';
 import { formatMoney } from '@/lib/money';
 import Sheet from '@/components/Sheet';
 import ChartSrTable from '@/components/ChartSrTable';
@@ -86,7 +86,13 @@ export default function AccountDetailModal({ account, transactions, onClose }: {
             <h2 className="text-xl font-bold text-[var(--foreground)]">{account.name}</h2>
             <p className={`text-lg font-semibold mt-1 ${isDebt ? 'text-[var(--accent-danger)]' : 'text-[var(--accent-success)]'}`}>
               {isDebt ? 'Owe ' : ''}{money(Math.abs(current))}
-              {account.openingDate && <span className="text-xs text-[var(--foreground-muted)] font-normal"> · as of {account.openingDate.slice(0, 10)}</span>}
+              {/* #83 Finding 2: this is one graph-button click from the Accounts row, which
+                  already gives anchored/unanchored their own caption (accounts/page.tsx) —
+                  this modal showed "as of" for anchored and NOTHING for unanchored, next to
+                  the same big balance the caption below calls "your real balance owed".
+                  balanceCaption() is that same three-way treatment, so the two surfaces
+                  can't drift into disagreeing about the same account. */}
+              <span className="text-xs text-[var(--foreground-muted)] font-normal"> · {balanceCaption(account, transactions)}</span>
             </p>
           </div>
           <button onClick={onClose} aria-label="Close" className="p-2 rounded-control text-[var(--foreground-muted)] hover:bg-[var(--background-tertiary)]">
