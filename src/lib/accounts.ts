@@ -90,7 +90,14 @@ export function reconcile(
     derivedCents,
     driftCents,
     includePending: ctx.includePending,
-    providerCheckedAt: ctx.providerCheckedAt,
+    // Omit the key entirely rather than write `undefined`: Firestore's addDoc rejects
+    // undefined at ANY depth (not just top-level), and stripUndefined() in audit.ts
+    // only strips the entry's OWN keys, never descending into `after`. The only
+    // production caller (UserProfileContext.reconcileAccount) never passes
+    // providerCheckedAt, so every write hit this and threw inside addDoc — silently,
+    // because recordAudit's catch (by design) must never fail the write it observes.
+    // Every drift observation was being recorded and then discarded, 100% of the time.
+    ...(ctx.providerCheckedAt ? { providerCheckedAt: ctx.providerCheckedAt } : {}),
     anchored: !isUnanchored(account),
     source: ctx.source,
   };

@@ -11,6 +11,7 @@ import { useUserProfile } from '@/context/UserProfileContext';
 import { formatMoney } from '@/lib/money';
 import { matchIncomeDeposits } from '@/lib/ask';
 import { currentOf } from '@/lib/accounts';
+import { deriveAccountBalance } from '@/lib/forecast';
 import { PaymentAccount, Transaction, displayCategory } from '@/types';
 
 /**
@@ -65,7 +66,7 @@ export default function DataChatSheet({ open, onClose, seed }: {
   seed?: string;
 }) {
   const { transactions, addRule } = useTransactions();
-  const { profile, reconcileAccount, addIncomeSource } = useUserProfile();
+  const { profile, reconcileAccount, addIncomeSource, incomeContext } = useUserProfile();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -219,7 +220,14 @@ export default function DataChatSheet({ open, onClose, seed }: {
     if (!account) return;
     setBusy(true);
     try {
-      await reconcileAccount(account.id, m.balance.balance, currentOf(account));
+      // `account` is the RAW profile record — currentOf() falls back to openingBalance,
+      // which is 0 for an unanchored account (src/types/index.ts:193 — currentBalance
+      // is only ever attached in memory by withDerivedBalances, never here). Passing
+      // that through would have recorded a DriftObservation.derivedCents of 0 for an
+      // account with real transaction history: a fabricated drift, not a measurement.
+      // deriveAccountBalance() computes the real number reconcile() is documented to record.
+      const derived = deriveAccountBalance(account, transactions, incomeContext);
+      await reconcileAccount(account.id, m.balance.balance, derived);
       setMessages((prev) => [
         ...prev.map((x) => (x.id === m.id ? { ...x, status: 'applied' as const } : x)),
         mk('assistant', `Saved — ${account.name} reads ${formatMoney(m.balance!.balance, profile?.currency, 2)} as of today. No transaction changed.`),

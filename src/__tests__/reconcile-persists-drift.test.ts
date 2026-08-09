@@ -56,6 +56,18 @@ jest.mock('@/lib/audit', () => {
 const firestoreMock = jest.requireMock('@/lib/firestore');
 const { recordAudit } = jest.requireMock('@/lib/audit') as { recordAudit: jest.Mock };
 
+/** Firestore's addDoc rejects a literal `undefined` at ANY depth, not just the top
+ *  level — stripUndefined() in src/lib/audit.ts only strips the entry's own keys, so
+ *  an undefined nested inside `after` (e.g. a DriftObservation's providerCheckedAt)
+ *  reaches addDoc unstripped and throws. */
+function assertNoUndefinedDeep(value: unknown, path: string): void {
+  if (value === undefined) throw new Error(`${path} is undefined`);
+  if (value === null || typeof value !== 'object') return;
+  for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
+    assertNoUndefinedDeep(v, `${path}.${key}`);
+  }
+}
+
 const SEED_ACCOUNT = {
   id: 'acc1', name: 'Chase', type: 'bank_account', provider: 'chase',
   color: '#000', isActive: true, openingBalance: 100, openingDate: '2026-01-01',
@@ -102,6 +114,16 @@ describe('reconcileAccount persists the drift observation', () => {
       target: 'accounts/acc1',
       after: expect.objectContaining({ driftCents: 46500, derivedCents: 877000, includePending: true }),
     }));
+
+    // recordAudit is mocked above (jest.mock('@/lib/audit')), so the real
+    // stripUndefined()/addDoc() never run in this suite and a literal `undefined`
+    // anywhere in `after` would sail through unnoticed — exactly why the production
+    // bug (ctx.providerCheckedAt undefined -> addDoc throws -> recordAudit's own
+    // catch swallows it -> every drift observation silently dropped) had no test
+    // catching it. Walk the real payload recordAudit was called with instead of
+    // trusting the shape.
+    const [, entry] = recordAudit.mock.calls[0];
+    assertNoUndefinedDeep(entry.after, 'after');
 
     // Order is the whole point of this task: the audit write must be observed to
     // happen before the account update that moves openingBalance/openingDate,

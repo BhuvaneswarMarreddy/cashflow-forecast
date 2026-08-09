@@ -205,8 +205,11 @@ export interface PaymentAccount {
  * `reconcile()` compares an asserted balance against the derived one and then
  * re-anchors, after which the two agree BY CONSTRUCTION. No provider balance is
  * stored anywhere, so this record is the only surviving evidence that the
- * derivation was ever checked. Create-only; never edited — recorded as the
- * `after` payload of an audit-log entry (src/lib/audit.ts), not its own collection.
+ * derivation was ever checked. Recorded as the `after` payload of an audit-log
+ * entry (src/lib/audit.ts) — not its own collection, so it lives at
+ * `users/{uid}/audit`. `firestore.rules` denies UPDATE there, so an entry can
+ * never be edited, only DELETEd wholesale along with the rest of an account's
+ * audit trail — deliberately allowed, because account deletion is a privacy promise.
  */
 export interface DriftObservation {
   accountId: string;
