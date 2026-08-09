@@ -249,3 +249,28 @@ class Timezone(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DateKeyOfPort(unittest.TestCase):
+    """date_key_of must survive a Firestore timestamp.
+
+    Existing rows store `date` as a Firestore timestamp, which is tz-aware and so
+    HAS .astimezone — the branch that referenced `sync_core.TZ` from inside
+    sync_core itself. Every sync that compared against stored rows raised
+    NameError; string dates took the other branch and passed, which is why the
+    unit tests stayed green while the Refresh button failed in production.
+    """
+
+    def test_firestore_timestamp_renders_the_local_calendar_day(self):
+        ts = dt.datetime(2026, 8, 8, 12, 0, tzinfo=dt.timezone.utc)
+        self.assertEqual(sc.date_key_of(ts), "2026-08-08")
+
+    def test_utc_instant_is_rendered_in_the_app_zone_not_utc(self):
+        # 02:30 UTC on the 9th is still the 8th in America/Chicago. If this ever
+        # returns "2026-08-09" the +/-3-day match window has silently shifted.
+        ts = dt.datetime(2026, 8, 9, 2, 30, tzinfo=dt.timezone.utc)
+        self.assertEqual(sc.date_key_of(ts), "2026-08-08")
+
+    def test_string_and_empty_values_still_take_the_slice_branch(self):
+        self.assertEqual(sc.date_key_of("2026-08-08T12:00:00Z"), "2026-08-08")
+        self.assertEqual(sc.date_key_of(None), "")

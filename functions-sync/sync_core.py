@@ -581,7 +581,14 @@ def date_key_of(value) -> str:
     """Existing rows store `date` as a Firestore timestamp; render it in the app's
     zone so the +/-3-day compare uses the calendar day the UI actually shows."""
     if hasattr(value, "astimezone"):
-        return value.astimezone(sync_core.TZ).date().isoformat()
+        # TZ, not sync_core.TZ: this IS sync_core, and a module cannot reference
+        # itself by name. date_key_of moved here from simplefin.py in #112, where
+        # the qualifier was correct because that file imports sync_core. The move
+        # carried it over, and because the bad branch only runs for a value with
+        # .astimezone — a Firestore timestamp, i.e. an EXISTING row — every sync
+        # against real stored data died with "NameError: name 'sync_core' is not
+        # defined" while string dates kept working.
+        return value.astimezone(TZ).date().isoformat()
     return str(value or "")[:10]
 def pick_match(candidates: list, date_key: str, source: str):
     """`source` is now REQUIRED. It defaulted to SimpleFIN's SOURCE constant, which was
