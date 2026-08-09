@@ -27,6 +27,8 @@ export interface AiDecisionRequest {
   budgetContext?: unknown;
   goalsContext?: unknown;
   debtContext?: unknown;
+  /** #83: which accounts (if any) have no confirmed bank balance, and why — see buildPrompt. */
+  dataCaveats?: unknown;
   /** emergency_fund only: pre-computed forecast context from the panel */
   forecast?: Record<string, unknown>;
 }
@@ -52,17 +54,23 @@ export function buildPrompt(
     budgetContext,
     goalsContext,
     debtContext,
+    dataCaveats,
   } = body;
 
   // Build enhanced context if additional data is provided (verbatim from route)
   let enhancedForecastData = forecastData || '';
 
-  if (budgetContext || goalsContext || debtContext) {
+  // #83: dataCaveats must join budget/goals/debt here, not just live on AiDecisionRequest —
+  // financialContext() names which accounts are unanchored, but a field that is accepted
+  // and never assembled into the prompt never reaches the model. That gap is what made
+  // the previous disclosure attempt decorative: the UI told the owner, the AI stayed blind.
+  if (budgetContext || goalsContext || debtContext || dataCaveats) {
     try {
       const parsed = forecastData ? JSON.parse(forecastData) : {};
       if (budgetContext) parsed.budgets = budgetContext;
       if (goalsContext) parsed.savingsGoals = goalsContext;
       if (debtContext) parsed.debts = debtContext;
+      if (dataCaveats) parsed.dataCaveats = dataCaveats;
       enhancedForecastData = JSON.stringify(parsed, null, 2);
     } catch {
       // Keep original if parsing fails

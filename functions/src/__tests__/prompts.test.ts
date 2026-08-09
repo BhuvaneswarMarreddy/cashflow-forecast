@@ -125,6 +125,32 @@ describe('buildPrompt', () => {
     expect(prompt).toContain('not-json');
   });
 
+  // #83: financialContext() (src/lib/ai-context.ts) now names WHICH accounts are
+  // unanchored so the model can say which figure is soft instead of hedging every
+  // number. If dataCaveats is dropped here like the previous attempt, the disclosure
+  // chain is decorative — the UI shows it, the model never sees it.
+  it('merges dataCaveats into forecastData, naming the unanchored account', () => {
+    const prompt = buildPrompt('question', {
+      forecastData: '{"startingBalance":100}',
+      question: 'Can I afford this?',
+      dataCaveats: {
+        unanchoredAccounts: ['Venmo'],
+        reason: 'balance is net movement over imported history, not a confirmed bank balance',
+      },
+    })!;
+    expect(prompt).toContain('"dataCaveats"');
+    expect(prompt).toContain('Venmo');
+  });
+
+  it('omits dataCaveats from forecastData when not provided', () => {
+    const prompt = buildPrompt('question', {
+      forecastData: '{"startingBalance":100}',
+      question: 'Can I afford this?',
+    })!;
+    expect(prompt).not.toContain('dataCaveats');
+    expect(prompt).not.toContain('Venmo');
+  });
+
   it('returns null for unknown types (route returned 400)', () => {
     expect(buildPrompt('tight_period', {})).toBeNull();
     expect(buildPrompt(undefined, {})).toBeNull();
