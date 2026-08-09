@@ -7,6 +7,7 @@
 import { UserProfile, Transaction } from '@/types';
 import { withDerivedBalances, monthlyAverages } from './forecast';
 import { sumExpenseCents, IncomeContext } from './classify';
+import { isUnanchored } from './accounts';
 
 /**
  * `policy` is required (#102): the AI must be told the same financial state the owner is
@@ -62,5 +63,18 @@ export function financialContext(
     ? profile.savingsGoals.map((g) => ({ name: g.name, target: g.targetAmount, saved: g.currentAmount }))
     : undefined;
 
-  return { debtContext, budgetContext, goalsContext };
+  // #83: an unanchored account (no openingDate) has a `currentOf`/`currentBalance` that is
+  // net movement over the rows we hold, not a confirmed bank balance — already baked into
+  // debtContext/budgetContext above with no flag. Accounts, Dashboard, and Forecast all
+  // disclose this on screen; without it here the AI is the one surface left that can still
+  // say "you have $X available" with false confidence. Gated on accounts alone (not on
+  // debtContext/budgetContext existing) because an unanchored bank account with no budget
+  // set must still be disclosed. Named, not just counted, so the model can say WHICH
+  // figure is soft instead of hedging every number in the response.
+  const unanchored = accounts.filter(isUnanchored);
+  const dataCaveats = unanchored.length > 0
+    ? { unanchoredAccounts: unanchored.map((a) => a.name), reason: 'balance is net movement over imported history, not a confirmed bank balance' }
+    : undefined;
+
+  return { debtContext, budgetContext, goalsContext, dataCaveats };
 }

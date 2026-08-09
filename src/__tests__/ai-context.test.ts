@@ -30,4 +30,26 @@ describe('financialContext', () => {
   it('returns empty for a null profile', () => {
     expect(financialContext(null, [], POSTED_ONLY)).toEqual({});
   });
+
+  // #83: an unanchored account's balance is net movement over the rows we hold, not a
+  // bank balance. Accounts/Dashboard/Forecast already disclose this on screen — without
+  // it here, the AI is the one surface left that can tell the owner "you have $X
+  // available" with false confidence. Named accounts, not just a count, so the model can
+  // say WHICH figure is soft instead of hedging everything.
+  it('names unanchored accounts so the AI cannot state a confident spendable figure', () => {
+    const withUnanchored = {
+      ...profile,
+      paymentAccounts: [
+        ...profile.paymentAccounts,
+        { id: 'venmo', name: 'Venmo', type: 'bank_account', provider: 'other', openingBalance: 250, color: '#000', isActive: true },
+      ],
+    } as unknown as UserProfile;
+    const ctx = financialContext(withUnanchored, txns, POSTED_ONLY);
+    expect(ctx.dataCaveats?.unanchoredAccounts).toEqual(['Venmo']);
+  });
+
+  it('omits the caveat when every account has an opening anchor', () => {
+    const ctx = financialContext(profile, txns, POSTED_ONLY);
+    expect(ctx.dataCaveats).toBeUndefined();
+  });
 });
