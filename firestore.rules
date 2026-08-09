@@ -222,6 +222,33 @@ service cloud.firestore {
       }
 
       // =========================================
+      // Audit Log (AUD-1)
+      // =========================================
+      // What CHANGED, as opposed to obs/provenance.ts which explains how a number was
+      // computed from today's inputs. Append-only in the sense that matters: an entry
+      // can never be rewritten. Delete IS allowed, because account deletion is a
+      // privacy promise and this holds the owner's financial data — so the log can be
+      // erased wholesale but never quietly falsified.
+      //
+      // `at` is stamped by auditEntry() rather than trusted from the client, and the
+      // rule below refuses an entry that omits the fields that make it addressable.
+
+      match /audit/{entryId} {
+        allow read: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+          request.resource.data.keys().hasAll(['at', 'actor', 'action', 'target']) &&
+          request.resource.data.actor in ['user', 'sync', 'import', 'batch', 'restore'] &&
+          request.resource.data.action is string &&
+          request.resource.data.target is string;
+
+        // A log that can be edited is a table.
+        allow update: if false;
+
+        allow delete: if isOwner(userId);
+      }
+
+      // =========================================
       // Transaction Links Subcollection (FIN-RELATION-001)
       // =========================================
       // An auditable statement that one transaction acts on another: a refund against a
