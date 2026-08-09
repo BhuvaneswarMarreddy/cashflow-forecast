@@ -214,7 +214,12 @@ export default function AccountsPage() {
       name: account.name,
       type: account.type,
       provider: account.provider,
-      balance: currentOf(account).toString(),
+      // #83 round 4a Defect 2: an unanchored account's balance field prefills EMPTY,
+      // never currentOf() — that derived figure is NET MOVEMENT, not a bank balance,
+      // and prefilling it made every save (even one that only touched APR or colour)
+      // write it back as a real anchor the owner never typed. A blank field asserts
+      // nothing; openingAnchor('') below confirms that.
+      balance: isUnanchored(account) ? '' : currentOf(account).toString(),
       creditLimit: account.creditLimit?.toString() || '',
       apr: account.apr?.toString() || '',
       statementDate: account.statementDate?.toString() || '',
@@ -254,20 +259,24 @@ export default function AccountsPage() {
       // edited. Renaming an account must not move its numbers — the old code
       // set openingDate to today on every save, silently shifting balances.
       //
-      // #83 round 3a (the Edit-account trap): an UNANCHORED account always takes
-      // this branch too, delta or not. openEditAccount() prefills `balance` with
-      // currentOf(editingAccount) — the same derived figure the delta below is
-      // compared against — so an owner who opens Edit on an unanchored account,
-      // sees the number, agrees it's right, and saves WITHOUT changing it gets a
-      // delta of 0 and would otherwise hit the `else` branch, which writes back
-      // `openingDate: editingAccount.openingDate` — i.e. still undefined.
-      // Confirming a correct number would silently leave the account unanchored
-      // forever, the exact opposite of what a Save button means. An unanchored
-      // account has no anchor to preserve, so there is nothing UI-106 protects
-      // here: isUnanchored() forces the anchor branch whenever editingAccount has
-      // no openingDate, while an untouched ANCHORED account still takes the
-      // `else` branch below and keeps its own openingBalance/openingDate.
-      ...(!editingAccount || isUnanchored(editingAccount) || Math.abs((parseFloat(accountForm.balance) || 0) - currentOf(editingAccount)) > 0.004
+      // #83 round 4a Defect 2 (the plausible-anchor trap): round 3a "fixed" the
+      // Edit-account trap by forcing this branch whenever isUnanchored(editingAccount),
+      // delta or not — but that meant changing ONLY the APR, last-four digits, or
+      // colour on an unanchored account wrote openingBalance: currentOf(editingAccount)
+      // (a real, plausible-looking NUMBER — the derived net-movement figure) with
+      // openingDate: today. That manufactures the exact assertion #83 exists to
+      // prevent, just with a number instead of $0.
+      //
+      // The actual fix lives in openEditAccount(): an unanchored account's balance
+      // field prefills EMPTY, not with currentOf(). A blank field parses to 0 here,
+      // which still diverges from currentOf(editingAccount) by more than the delta
+      // threshold — so this branch still fires — but openingAnchor('') returns
+      // { openingBalance: 0 } with no openingDate, so the write leaves the account
+      // unanchored unless the owner actually typed a number. No isUnanchored special
+      // case needed: the ordinary delta guard does the right thing on its own once
+      // the prefill stops asserting a figure nobody entered. An untouched ANCHORED
+      // account still takes the `else` branch below and keeps its own anchor (UI-106).
+      ...(!editingAccount || Math.abs((parseFloat(accountForm.balance) || 0) - currentOf(editingAccount)) > 0.004
         ? openingAnchor(accountForm.balance, new Date().toISOString().slice(0, 10))
         : {
             openingBalance: editingAccount.openingBalance,

@@ -20,13 +20,28 @@ import '@testing-library/jest-dom';
 import { PaymentAccount, Transaction } from '@/types';
 import { deriveAccountBalance } from '@/lib/forecast';
 import { POSTED_ONLY } from '@/lib/classify';
+import { reconcile, driftStatus } from '@/lib/accounts';
 
 jest.mock('@/components/Navbar', () => ({ __esModule: true, default: () => <nav /> }));
 
 const mockUpdatePaymentAccount = jest.fn().mockResolvedValue(undefined);
-// UNANCHORED has no openingDate, so a real reconcileAccount call would resolve
-// NOT_APPLICABLE — matching the shape the real context now returns (INV-1 Fix 3).
-const mockReconcileAccount = jest.fn().mockResolvedValue({ driftCents: 0, status: 'NOT_APPLICABLE' });
+// A stand-in for the REAL UserProfileContext.reconcileAccount that runs the actual
+// reconcile()/driftStatus() from src/lib/accounts.ts — not a canned resolved value —
+// and, like the real implementation, calls updatePaymentAccount ONLY when reconcile()
+// returns a `reanchor`. A canned value can't exercise accounts.ts's driftCents===0
+// branch (#83 round 4a Defect 1: an unanchored account must still re-anchor at zero
+// drift, since the confirm itself is the owner's first assertion); this does, so a
+// regression on that branch turns the FIX B test below red instead of staying green
+// no matter what accounts.ts does.
+const mockReconcileAccount = jest.fn(async (id: string, entered: number, derived: number) => {
+  const account = PROFILE.paymentAccounts.find((x) => x.id === id)!;
+  const today = new Date().toISOString().slice(0, 10);
+  const { driftCents, reanchor, observation } = reconcile(
+    account, entered, derived, today, { includePending: false, source: 'user' }
+  );
+  if (reanchor) await mockUpdatePaymentAccount(id, reanchor);
+  return { driftCents, status: driftStatus(observation, today) };
+});
 
 const UNANCHORED: PaymentAccount = {
   id: 'card-amazon', name: 'Amazon Store Card', type: 'credit_card', provider: 'other',
@@ -95,25 +110,51 @@ beforeEach(() => {
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
 describe('FIX A — the Edit-account trap', () => {
-  it('confirming the prefilled balance on an UNANCHORED account anchors it (openingDate gets set)', async () => {
+  it('typing a balance on an UNANCHORED account anchors it to that number (#83 round 4a Defect 2)', async () => {
     render(<AccountsPage />);
     fireEvent.click(screen.getByRole('button', { name: `Edit ${UNANCHORED.name}` }));
 
-    // The form prefilled `balance` with the derived figure — the owner changes nothing.
+    // The balance field must prefill EMPTY, never currentOf() — that derived figure
+    // is net movement, not a bank balance, and prefilling it let ANY save (even one
+    // that only touched APR or colour) silently assert that number as a real anchor.
     // (The "Current Balance" <label> isn't programmatically associated with its
     // <input> — no htmlFor/id pair — so this locates it by its unique placeholder.)
     const balanceInput = screen.getByPlaceholderText('0.00') as HTMLInputElement;
-    expect(balanceInput.value).toBe(String(DERIVED_CARD_BALANCE));
+    expect(balanceInput.value).toBe('');
 
+    // 700, not 500: the $500 expense on this credit card makes DERIVED_CARD_BALANCE
+    // exactly 500 too, and typing the SAME number the account would already derive
+    // gives a delta of 0 — indistinguishable from not typing anything. Picking a
+    // value that actually differs is what proves TYPING (not merely re-affirming
+    // the derived figure) is what anchors it.
+    fireEvent.change(balanceInput, { target: { value: '700' } });
     fireEvent.click(screen.getByRole('button', { name: 'Update Account' }));
 
     await waitFor(() => expect(mockUpdatePaymentAccount).toHaveBeenCalled());
     const [id, updates] = mockUpdatePaymentAccount.mock.calls[0];
     expect(id).toBe(UNANCHORED.id);
-    // The trap: an unchanged, agreed-with number must still anchor, not vanish
-    // into an `openingDate: editingAccount.openingDate` (i.e. still undefined).
+    // Typing a real number is the owner's first assertion — it must anchor.
     expect(updates.openingDate).toBe(todayISO());
-    expect(updates.openingBalance).toBe(DERIVED_CARD_BALANCE);
+    expect(updates.openingBalance).toBe(700);
+  });
+
+  it('editing only a non-balance field on an UNANCHORED account (balance left blank) leaves it unanchored', async () => {
+    render(<AccountsPage />);
+    fireEvent.click(screen.getByRole('button', { name: `Edit ${UNANCHORED.name}` }));
+
+    // Balance field is left exactly as prefilled — blank. Only APR changes.
+    fireEvent.change(screen.getByPlaceholderText('24.99'), { target: { value: '24.99' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Update Account' }));
+
+    await waitFor(() => expect(mockUpdatePaymentAccount).toHaveBeenCalled());
+    const [id, updates] = mockUpdatePaymentAccount.mock.calls[0];
+    expect(id).toBe(UNANCHORED.id);
+    expect(updates.apr).toBe(24.99);
+    // No balance was typed — openingAnchor('') asserts nothing, so the account must
+    // still have no anchor after save. Manufacturing one here (a plausible NUMBER
+    // instead of $0) was exactly #83 round 4a Defect 2.
+    expect(updates.openingBalance).toBe(0);
+    expect(updates.openingDate).toBeUndefined();
   });
 
   it('UI-106 survives: editing an ANCHORED account\'s name without touching the balance does NOT re-anchor', async () => {
@@ -160,8 +201,14 @@ describe('FIX B — Set balance control on the unanchored disclosure', () => {
     await waitFor(() => expect(mockReconcileAccount).toHaveBeenCalledWith(
       UNANCHORED.id, DERIVED_CARD_BALANCE, DERIVED_CARD_BALANCE
     ));
-    // The control must route through reconcileAccount (which records the
-    // DriftObservation) — never a second, direct write path.
-    expect(mockUpdatePaymentAccount).not.toHaveBeenCalled();
+    // #83 round 4a Defect 1: entered === derived here (driftCents 0) — the owner's
+    // most likely path, confirming the number the sheet already showed them. On an
+    // UNANCHORED account that confirmation IS the first assertion, so it must still
+    // write, THROUGH reconcileAccount (mockReconcileAccount above mirrors the real
+    // implementation's own internal updatePaymentAccount call) — never a second,
+    // direct write path from this page.
+    await waitFor(() => expect(mockUpdatePaymentAccount).toHaveBeenCalledWith(
+      UNANCHORED.id, { openingBalance: DERIVED_CARD_BALANCE, openingDate: todayISO() }
+    ));
   });
 });
