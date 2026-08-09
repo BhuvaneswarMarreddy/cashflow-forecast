@@ -80,3 +80,33 @@ describe('buildExportWorkbook — unanchored disclosure (#83 Fix 4)', () => {
     expect(String(rows[bankIdx + 1]?.[0] ?? '')).not.toContain('unanchored');
   });
 });
+
+// Round 4b Fix 4: DebtPlan wrote `originalBalance` with no caption at all — the same
+// number the Accounts sheet already never leaves silent. The spreadsheet is the most
+// authoritative-looking thing this app produces and it leaves the app entirely, so the
+// claim has to travel with the number here too, not just on-screen.
+describe('buildExportWorkbook — DebtPlan sheet discloses an unanchored debt (round 4b Fix 4)', () => {
+  const unanchoredCard = acct({ id: 'Card', type: 'credit_card', provider: 'amex', openingBalance: 0, openingDate: undefined });
+  const txns = [tx({ id: 'purchase', amount: 300, type: 'expense', accountId: 'Card', date: '2026-02-01' })];
+  const debtPlan = {
+    strategy: 'avalanche' as const,
+    extraMonthlyPayment: 100,
+    totalInterestPaid: 50,
+    totalMonths: 6,
+    interestSaved: 20,
+    debts: [{
+      accountId: 'Card', accountName: 'Card', originalBalance: 300, apr: 24.99,
+      payoffOrder: 1, payoffDate: '2026-08-01', totalInterestPaid: 50, monthsToPayoff: 6,
+    }],
+  };
+  const wb = buildExportWorkbook({
+    profile, accounts: [unanchoredCard], incomeSources: [], transactions: txns, debtPlan,
+  });
+
+  it('carries the same balanceCaption the Accounts sheet uses for this account, never a blank claim', () => {
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets['DebtPlan'], { range: 8 });
+    const row = rows.find((r) => r['Account'] === 'Card')!;
+    expect(row['Balance']).toBe(300); // the number is still shown
+    expect(row['Balance As Of']).toBe('net since 2026-02-01 · no starting balance set');
+  });
+});

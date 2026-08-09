@@ -9,7 +9,7 @@
 import * as XLSX from 'xlsx';
 import { withDerivedBalances } from '@/lib/forecast';
 import { PaymentAccount, Transaction, IncomeSource, InflowReview, SavingsGoal, DebtPayoffPlan, UserProfile } from '@/types';
-import { currentOf, isUnanchored, balanceCaption } from '@/lib/accounts';
+import { currentOf, balanceCaption, unanchoredPhrase } from '@/lib/accounts';
 import { interpretTransaction, isPositive, sumIncomeCents, sumExpenseCents, IncomeContext } from '@/lib/classify';
 
 export interface ExportData {
@@ -194,11 +194,19 @@ export function buildExportWorkbook(data: ExportData): XLSX.WorkBook {
       ['Interest Saved vs Minimums', data.debtPlan.interestSaved],
       [''],
       ['Payoff Order'],
-      ['#', 'Account', 'Balance', 'APR %', 'Months', 'Payoff Date', 'Interest'],
-      ...data.debtPlan.debts.map(d => [
-        d.payoffOrder, d.accountName, d.originalBalance, d.apr,
-        d.monthsToPayoff, formatDate(d.payoffDate), d.totalInterestPaid,
-      ]),
+      ['#', 'Account', 'Balance', 'Balance As Of', 'APR %', 'Months', 'Payoff Date', 'Interest'],
+      // Round 4b Fix 4: originalBalance used to carry no caption at all — the Accounts
+      // sheet a few tabs over already never leaves this same number unexplained.
+      // `accounts` here is the derived roster from the top of this function, so a
+      // lookup miss is only possible if the plan itself references a deleted account.
+      ...data.debtPlan.debts.map(d => {
+        const account = accounts.find(a => a.id === d.accountId);
+        return [
+          d.payoffOrder, d.accountName, d.originalBalance,
+          account ? balanceCaption(account, data.transactions) : '',
+          d.apr, d.monthsToPayoff, formatDate(d.payoffDate), d.totalInterestPaid,
+        ];
+      }),
     ];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(debtPlanData), 'DebtPlan');
   }
@@ -225,10 +233,13 @@ function signedAmount(t: Transaction, accounts?: PaymentAccount[]): number {
 // reaches whoever opens this file. `group` must already be the accounts a given total
 // is summed FROM (never the whole roster), or this would name an account a figure
 // excludes — the exact bug Fix 1 exists to correct, one layer up in the app.
+//
+// Round 4b: the count-and-pluralize arithmetic now comes from `unanchoredPhrase` (same
+// source `UnanchoredNote` uses) so the two sentences can only ever drift in the wording
+// AROUND the count — never in the count itself.
 function unanchoredNote(group: PaymentAccount[]): string | null {
-  const n = group.filter(isUnanchored).length;
-  if (n === 0) return null;
-  return `Note: includes ${n} unanchored account${n === 1 ? '' : 's'} — balance is net movement since import, not a bank-confirmed starting balance`;
+  const phrase = unanchoredPhrase(group);
+  return phrase ? `Note: includes ${phrase} — balance is net movement since import, not a bank-confirmed starting balance` : null;
 }
 
 function getMonthlyAmount(amount: number, frequency: string): number {
