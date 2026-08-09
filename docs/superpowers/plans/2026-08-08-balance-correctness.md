@@ -2,6 +2,20 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+## Revision 2 — rebased onto `76c3f0e`, 2026-08-08
+
+Main advanced nine commits while this plan was being written. Three tasks are now
+superseded and one is absorbed:
+
+| Task | Status |
+|---|---|
+| **1** | **SUPERSEDED by #117.** `CSVImportModal` no longer stamps `openingDate`, and `PaymentAccount.openingDate` is already optional (`types/index.ts:191`). |
+| **4** | **ABSORBED by #115.** `src/lib/audit.ts` shipped an append-only log with a free-form `after` payload and a `recordAudit()` that never throws. A parallel `driftObservations` collection would be a second history beside the one that exists. No new collection, no `firestore.rules` change, no manual rules deploy. |
+| **9** | **SUPERSEDED by #117.** `scripts/fix_opening_anchor.py` shipped. It has **not** been run with `--apply`: it found one account (Amazon Store Card, $0 anchored 2026-08-08, 204 rows hidden, +$10,458.03) and the owner held it, because stored data cannot distinguish "typed 0" from "left blank". **That ambiguity is what Tasks 2/6/7 resolve** — an unanchored account stops claiming to be a balance, so the $0 becomes answerable instead of guessed. |
+
+**Remaining: Tasks 2, 3, 5, 6, 7, 8.** #83 is closed; the half that stops a net-movement
+figure reading as a bank balance, and INV-1, are not built.
+
 **Goal:** Stop CSV-imported accounts asserting a false "$0.00 as of today" anchor that hides their entire history, surface unanchored accounts honestly, and persist the reconciliation drift the code currently discards.
 
 **Architecture:** No new concepts. `openingAnchor()` already encodes the correct anchor semantics and is used at 4 of 5 creation sites — route the fifth through it. "Unanchored" is the already-possible state `openingDate === undefined`, surfaced rather than invented. INV-1 persists the `driftCents` that `reconcile()` computes and throws away, at the only moment the derived and provider balances are independent.
@@ -37,7 +51,13 @@
 
 ---
 
-### Task 1: Auto-created accounts carry no anchor
+### Task 1: Auto-created accounts carry no anchor — SUPERSEDED BY #117, DO NOT IMPLEMENT
+
+Shipped on main. `CSVImportModal.tsx:41` returns no `openingDate`, and
+`PaymentAccount.openingDate` is optional at `types/index.ts:191`. Original text below
+for provenance only.
+
+#### Task 1 (original)
 
 **Files:**
 - Modify: `src/types/index.ts:183`
@@ -421,7 +441,15 @@ git commit -m "feat(INV-1): reconcile() returns a DriftObservation instead of di
 
 ---
 
-### Task 4: Persist observations
+### Task 4: Persist observations — SUPERSEDED, DO NOT IMPLEMENT
+
+**Absorbed by the audit log that shipped in #115.** A drift observation is recorded as an
+audit entry in Task 5; there is no `driftObservations` collection, no new `firestore.rules`
+block, and nothing to deploy by hand. The original text is kept below for provenance only.
+
+<details><summary>Superseded original</summary>
+
+#### Task 4 (original): Persist observations
 
 **Files:**
 - Modify: `src/lib/firestore.ts` (writer near `setInflowReview` ~line 628; `deleteAllUserData` ~line 1089)
@@ -527,14 +555,30 @@ git commit -m "feat(INV-1): create-only driftObservations store"
 
 ---
 
-### Task 5: `reconcileAccount` persists the observation before re-anchoring
+</details>
+
+---
+
+### Task 5: `reconcileAccount` records the drift before re-anchoring
 
 **Files:**
 - Modify: `src/context/UserProfileContext.tsx:347-360`
 - Test: `src/__tests__/reconcile-persists-drift.test.ts`
 
 **Interfaces:**
-- Consumes: `reconcile` (Task 3), `addDriftObservation` (Task 4)
+- Consumes: `reconcile` (Task 3); `recordAudit`, `auditEntry` from `src/lib/audit.ts` (shipped in #115)
+
+**Revision 2:** persist through the existing audit log, not a new collection.
+
+```ts
+recordAudit(uid, auditEntry('account.reconcile', `accounts/${acc.id}`, {
+  actor: 'user',
+  after: observation,   // the DriftObservation from Task 3
+}));
+```
+
+`recordAudit` never throws by design — a failed log entry must not lose the reconciliation
+it observes. That is the same property INV-1 wants, so no extra error handling is needed.
 
 Order matters: **write the observation first.** After `reanchor` is applied the two balances agree by construction and the evidence no longer exists.
 
@@ -571,7 +615,7 @@ Expected: PASS (Task 3 already satisfies it). This test exists to pin the orderi
 
 - [ ] **Step 3: Wire the persistence**
 
-In `src/context/UserProfileContext.tsx`, replace the `reconcile` call and what follows it in `reconcileAccount`:
+In `src/context/UserProfileContext.tsx`, replace the `reconcile` call in `reconcileAccount`:
 
 ```ts
     const { driftCents, reanchor, observation } = reconcile(
@@ -579,14 +623,17 @@ In `src/context/UserProfileContext.tsx`, replace the `reconcile` call and what f
       { includePending: incomeContext.includePending ?? false, source: 'user' }
     );
     // Evidence first: once `reanchor` lands, entered and derived agree by
-    // construction and the measurement is gone (INV-1).
+    // construction and the measurement is gone (INV-1). recordAudit never throws,
+    // so a lost log entry can never cost us the reconciliation itself.
     if (user?.id) {
-      await firestoreService.addDriftObservation(user.id, observation).catch((err) =>
-        console.warn('Drift observation write failed:', err)
-      );
+      await recordAudit(user.id, auditEntry('account.reconcile', `accounts/${acc.id}`, {
+        actor: 'user',
+        after: observation,
+      }));
     }
 ```
 
+Add `import { recordAudit, auditEntry } from '@/lib/audit';` at the top of the file.
 Leave the existing `reanchor` application below unchanged.
 
 - [ ] **Step 4: Run the reconcile suites**
@@ -696,17 +743,35 @@ In `src/app/accounts/page.tsx`, at the block around line 653 that renders `as of
 
 Import `earliestRowDate` and `isUnanchored` from `@/lib/accounts`.
 
-- [ ] **Step 6: Add the totals note**
+- [ ] **Step 6: Extract the shared note component, then use it**
 
-Near the totals at lines 380-390, after the existing cash/debt figures:
+**Revision 2:** the same block is needed on three screens, so it is a component, not
+three copies. Create `src/components/UnanchoredNote.tsx`:
 
 ```tsx
-{derivedAccounts.filter(isUnanchored).length > 0 && (
-  <p className="text-xs text-[var(--foreground-muted)] mt-1">
-    includes {derivedAccounts.filter(isUnanchored).length} unanchored account
-    {derivedAccounts.filter(isUnanchored).length === 1 ? '' : 's'}
-  </p>
-)}
+import { PaymentAccount } from '@/types';
+import { isUnanchored } from '@/lib/accounts';
+
+/**
+ * Disclosure for totals that contain an account nobody ever anchored. Its balance is
+ * net movement over the rows we hold, not a bank balance — so a total containing one
+ * must not read as measured. Renders nothing when every account is anchored.
+ */
+export function UnanchoredNote({ accounts }: { accounts: readonly PaymentAccount[] }) {
+  const n = accounts.filter(isUnanchored).length;
+  if (n === 0) return null;
+  return (
+    <p className="text-xs text-[var(--foreground-muted)] mt-1">
+      includes {n} unanchored account{n === 1 ? '' : 's'}
+    </p>
+  );
+}
+```
+
+Then near the totals at lines 380-390, after the existing cash/debt figures:
+
+```tsx
+<UnanchoredNote accounts={derivedAccounts} />
 ```
 
 - [ ] **Step 7: Verify in the real app**
@@ -754,18 +819,21 @@ Expected: FAIL for `dashboard/page.tsx` and `forecast/page.tsx`.
 
 - [ ] **Step 3: Add the note to both screens**
 
-In each file, import `isUnanchored` from `@/lib/accounts` and render beneath the cash / starting-cash figure:
+**Revision 2:** reuse the component from Task 6 — do not re-inline the markup.
+
+In each file, `import { UnanchoredNote } from '@/components/UnanchoredNote';` and render
+it beneath the cash / starting-cash figure:
 
 ```tsx
-{derivedAccounts.filter(isUnanchored).length > 0 && (
-  <p className="text-xs text-[var(--foreground-muted)] mt-1">
-    includes {derivedAccounts.filter(isUnanchored).length} unanchored account
-    {derivedAccounts.filter(isUnanchored).length === 1 ? '' : 's'}
-  </p>
-)}
+<UnanchoredNote accounts={derivedAccounts} />
 ```
 
-On Forecast the variable is the memo at line 141; on Dashboard it is `derivedAccounts` at line 94.
+On Forecast the accounts variable is the memo at line 141; on Dashboard it is
+`derivedAccounts` at line 94.
+
+The Step 1 test greps for `isUnanchored`; since the screens now import `UnanchoredNote`
+instead, update that test to grep for `UnanchoredNote` on the two screens and
+`isUnanchored` on `src/components/UnanchoredNote.tsx`.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -847,7 +915,14 @@ git commit -m "feat(#83): AI context discloses unanchored accounts"
 
 ---
 
-### Task 9: `scripts/reanchor.py` migration
+### Task 9: migration — SUPERSEDED BY #117, DO NOT IMPLEMENT
+
+`scripts/fix_opening_anchor.py` shipped on main and has **not** been applied. Owner
+decision pending: one account (Amazon Store Card, $0 anchored 2026-08-08, 204 rows,
++$10,458.03), held because stored data cannot distinguish "typed 0" from "left blank".
+Tasks 2/6/7 are what make that answerable. Original text below for provenance only.
+
+#### Task 9 (original): `scripts/reanchor.py` migration
 
 **Files:**
 - Create: `scripts/reanchor.py`
