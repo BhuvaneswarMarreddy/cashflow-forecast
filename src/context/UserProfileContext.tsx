@@ -1,11 +1,12 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef, useMemo } from 'react';
-import { UserProfile, PaymentAccount, IncomeSource, InflowReview } from '@/types';
+import { UserProfile, PaymentAccount, IncomeSource, InflowReview, DriftStatus } from '@/types';
 import type { IncomeContext } from '@/lib/classify';
 import { useAuth } from './AuthContext';
 import * as firestoreService from '@/lib/firestore';
-import { sortAccounts, reindex, reconcile } from '@/lib/accounts';
+import { sortAccounts, reindex, reconcile, driftStatus } from '@/lib/accounts';
+import { lastScheduledSyncSlot } from '@/lib/dates';
 import { fromFirestoreSettings, toFirestoreSettings } from '@/lib/profile-settings';
 import { startSpan, getTrace, errorType } from '@/lib/obs/trace';
 import { isUnsyncedId } from '@/lib/offline-queue';
@@ -24,7 +25,9 @@ export interface UserProfileContextType {
   // addPaymentAccount would read a stale `profile` each iteration and lose all but one.
   addPaymentAccounts: (accounts: Omit<PaymentAccount, 'id'>[]) => Promise<string[]>;
   updatePaymentAccount: (id: string, updates: Partial<PaymentAccount>) => Promise<void>;
-  reconcileAccount: (id: string, enteredCurrent: number, derivedCurrent: number) => Promise<number>;
+  // INV-1 Fix 3: the interpretation of the drift reconcile() just measured, not only
+  // its magnitude — driftStatus()'s one production caller lives inside this function.
+  reconcileAccount: (id: string, enteredCurrent: number, derivedCurrent: number) => Promise<{ driftCents: number; status: DriftStatus }>;
   reorderPaymentAccounts: (orderedIds: string[]) => Promise<void>;
   deletePaymentAccount: (id: string) => Promise<void>;
   addIncomeSource: (income: Omit<IncomeSource, 'id'>) => Promise<void>;
@@ -337,17 +340,33 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
 
   // Reconcile an account to the user's real balance. `derivedCurrent` is passed by the
   // caller (which holds the transaction ledger) so this context stays ledger-free. Any
-  // drift re-anchors (openingBalance = entered, openingDate = today). Returns drift cents.
-  const reconcileAccount = async (id: string, enteredCurrent: number, derivedCurrent: number): Promise<number> => {
-    if (!profile) return 0;
+  // drift re-anchors (openingBalance = entered, openingDate = today). Returns drift cents
+  // AND the interpreted status (INV-1 Fix 3), so a caller can surface what the
+  // measurement actually found instead of a bare number.
+  const reconcileAccount = async (id: string, enteredCurrent: number, derivedCurrent: number): Promise<{ driftCents: number; status: DriftStatus }> => {
+    if (!profile) return { driftCents: 0, status: 'NOT_APPLICABLE' };
     const acc = profile.paymentAccounts.find((x) => x.id === id);
-    if (!acc) return 0;
+    if (!acc) return { driftCents: 0, status: 'NOT_APPLICABLE' };
     const today = new Date().toISOString().slice(0, 10);
     // includePending was a Task-4 placeholder (`false` always); this is the one real
     // policy value every other screen already reads, so a reconcile computed under a
     // different pending-inclusion rule than the balance it's checking is not possible.
+    //
+    // providerCheckedAt (INV-1 Fix 2) is deliberately OMITTED: the only place that value
+    // exists client-side is sync_now's callable response (src/lib/sync-client.ts), which
+    // is a live 10-20s bank round trip — never something to trigger just to interpret a
+    // reconcile. meta/<source> itself is not client-readable (no match block for `meta`
+    // in firestore.rules; see src/lib/obs/provenance.ts's identical conclusion). Until
+    // something already loads that value into app state, STALE_INPUT stays reachable in
+    // driftStatus() but unobserved in production — an absent value is honest; blocking
+    // this on a network read would not be.
     const { driftCents, reanchor, observation } = reconcile(acc, enteredCurrent, derivedCurrent, today,
       { includePending: incomeContext.includePending ?? false, source: 'user' });
+    // driftStatus's one production caller: interpret the observation against the sync
+    // schedule at the SAME instant it was stamped (observation.at), not a fresh
+    // `new Date()` here — the two calls are microseconds apart, but the observation's
+    // own timestamp is the one honest reference for "when was this measured".
+    const status = driftStatus(observation, lastScheduledSyncSlot(new Date(observation.at)).toISOString());
     // INV-1: write the observation BEFORE the reanchor lands. Once `updatePaymentAccount`
     // below moves openingBalance/openingDate, entered and derived agree by construction —
     // the drift this observation records is the only trace it was ever off. recordAudit
@@ -359,7 +378,7 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
       }));
     }
     if (reanchor) await updatePaymentAccount(id, reanchor);
-    return driftCents;
+    return { driftCents, status };
   };
 
   // Persist a new account order: optimistic reorder + one batched sortIndex write.

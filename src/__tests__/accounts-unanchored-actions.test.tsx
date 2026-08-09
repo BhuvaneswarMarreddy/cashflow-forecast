@@ -24,7 +24,9 @@ import { POSTED_ONLY } from '@/lib/classify';
 jest.mock('@/components/Navbar', () => ({ __esModule: true, default: () => <nav /> }));
 
 const mockUpdatePaymentAccount = jest.fn().mockResolvedValue(undefined);
-const mockReconcileAccount = jest.fn().mockResolvedValue(0);
+// UNANCHORED has no openingDate, so a real reconcileAccount call would resolve
+// NOT_APPLICABLE — matching the shape the real context now returns (INV-1 Fix 3).
+const mockReconcileAccount = jest.fn().mockResolvedValue({ driftCents: 0, status: 'NOT_APPLICABLE' });
 
 const UNANCHORED: PaymentAccount = {
   id: 'card-amazon', name: 'Amazon Store Card', type: 'credit_card', provider: 'other',

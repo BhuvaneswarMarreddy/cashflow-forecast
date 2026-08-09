@@ -103,11 +103,16 @@ describe('reconcileAccount persists the drift observation', () => {
     await waitFor(() => expect(ctx?.profile?.paymentAccounts.length).toBe(1));
 
     let driftCents = 0;
+    let status: string | undefined;
     await act(async () => {
-      driftCents = await ctx!.reconcileAccount('acc1', 9235, 8770);
+      ({ driftCents, status } = await ctx!.reconcileAccount('acc1', 9235, 8770));
     });
 
     expect(driftCents).toBe(46500);
+    // INV-1 Fix 3: driftStatus's one production caller lives inside reconcileAccount.
+    // SEED_ACCOUNT is anchored and the drift is non-zero, so this must read VIOLATION —
+    // proving the call actually happened, not just that the type compiles.
+    expect(status).toBe('VIOLATION');
     expect(recordAudit).toHaveBeenCalledTimes(1);
     expect(recordAudit).toHaveBeenCalledWith('u1', expect.objectContaining({
       action: 'account.reconcile',
@@ -142,8 +147,9 @@ describe('reconcileAccount persists the drift observation', () => {
 
     await waitFor(() => expect(ctx?.profile?.paymentAccounts.length).toBe(1));
 
+    let status: string | undefined;
     await act(async () => {
-      await ctx!.reconcileAccount('acc1', 100, 100);
+      ({ status } = await ctx!.reconcileAccount('acc1', 100, 100));
     });
 
     // Zero drift still calls recordAudit (a clean check is evidence too, per
@@ -151,5 +157,31 @@ describe('reconcileAccount persists the drift observation', () => {
     // reanchor to apply.
     expect(recordAudit).toHaveBeenCalledTimes(1);
     expect(firestoreMock.updateAccount).not.toHaveBeenCalled();
+    expect(status).toBe('PASS');
+  });
+
+  it('reports NOT_APPLICABLE for an unanchored account — there was no prior claim to violate', async () => {
+    // #83: an account with no openingDate has no anchor, so a "drift" against it isn't
+    // a broken claim — driftStatus() must say so rather than reporting VIOLATION/PASS.
+    firestoreMock.getAccounts.mockResolvedValue([{ ...SEED_ACCOUNT, openingDate: undefined }]);
+    let ctx: UserProfileContextType | undefined;
+    render(
+      React.createElement(UserProfileProvider, null,
+        React.createElement(Harness, { onReady: (c) => { ctx = c; } }))
+    );
+
+    // Waiting on LENGTH alone is not enough here: the provider's fast path loads a
+    // cached profile from localStorage synchronously before Firestore's mocked
+    // (unanchored) response lands, and the prior two tests in this file already wrote
+    // an ANCHORED acc1 to that same localStorage key — same length, wrong account.
+    // Wait for the field this test actually depends on.
+    await waitFor(() => expect(ctx?.profile?.paymentAccounts[0]?.openingDate).toBeUndefined());
+
+    let status: string | undefined;
+    await act(async () => {
+      ({ status } = await ctx!.reconcileAccount('acc1', 9235, 8770));
+    });
+
+    expect(status).toBe('NOT_APPLICABLE');
   });
 });

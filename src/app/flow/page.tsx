@@ -1828,7 +1828,8 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
             accountName={reconcileFor.name}
             inputLabel="real balance right now"
             derivedCurrent={reconcileFor.derived}
-            onConfirm={async (entered) => { await reconcileAccount(reconcileFor.accountId, entered, reconcileFor.derived); }}
+            currency={profile?.currency}
+            onConfirm={(entered) => reconcileAccount(reconcileFor.accountId, entered, reconcileFor.derived)}
             onClose={() => setReconcileFor(null)}
           />
         )}

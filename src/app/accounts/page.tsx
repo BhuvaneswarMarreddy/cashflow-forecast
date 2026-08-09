@@ -970,9 +970,8 @@ export default function AccountsPage() {
           accountName={reconcileForAccount.name}
           inputLabel={isDebtAccount(reconcileForAccount) ? 'amount you currently owe' : 'real balance right now'}
           derivedCurrent={currentOf(reconcileForAccount)}
-          onConfirm={async (entered) => {
-            await reconcileAccount(reconcileForAccount.id, entered, currentOf(reconcileForAccount));
-          }}
+          currency={profile?.currency}
+          onConfirm={(entered) => reconcileAccount(reconcileForAccount.id, entered, currentOf(reconcileForAccount))}
           onClose={() => setReconcileForAccount(null)}
         />
       )}
