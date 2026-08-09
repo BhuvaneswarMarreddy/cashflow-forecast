@@ -19,7 +19,7 @@ import DebtPlannerPanel from '@/components/DebtPlannerPanel';
 import { UnanchoredNote } from '@/components/UnanchoredNote';
 import { PAYMENT_METHODS, ACCOUNT_TYPES, PaymentAccount, IncomeSource, AccountType, PaymentMethod, CategoryBudget } from '@/types';
 import { withDerivedBalances, monthlyAverages, calculateCurrentCash } from '@/lib/forecast';
-import { currentOf, isDebtAccount, isUnanchored, netWorthOf, openingAnchor, balanceCaption } from '@/lib/accounts';
+import { currentOf, isCashAccount, isDebtAccount, isUnanchored, netWorthOf, openingAnchor, balanceCaption, accountsBehindFigure } from '@/lib/accounts';
 import ReconcileSheet from '@/components/ReconcileSheet';
 import { syncNow, describeSync, connectBankWithPlaid } from '@/lib/sync-client';
 import { useAccountsObservability } from '@/lib/obs/useAccountsObservability';
@@ -504,6 +504,10 @@ export default function AccountsPage() {
               {netWorth < 0 ? '-' : ''}{formatMoney(Math.abs(netWorth), profile?.currency, 2)}
             </p>
             <p className="text-xs text-[var(--foreground-muted)]">cash − all debt</p>
+            {/* Round 4b Fix 2: netWorthOf sums isCashAccount + isDebtAccount, and those
+                two predicates partition every AccountType that exists today — so the
+                full roster IS this figure's own scope, unlike the three cards below it. */}
+            <UnanchoredNote accounts={derivedAccounts} />
           </div>
           <div className="stat-card">
             <div className="flex items-center justify-between mb-2">
@@ -514,6 +518,11 @@ export default function AccountsPage() {
               {formatMoney(totalBankBalance, profile?.currency, 2)}
             </p>
             <p className="text-xs text-[var(--foreground-muted)]">across all cash accounts</p>
+            {/* Round 4b Fix 2: this used to sit under a single note for the whole
+                5-card grid — including this cash-only figure, which an unanchored
+                CREDIT CARD (production's actual shape) has no part in. Same inverse
+                error Fix 1 corrects one screen over. */}
+            <UnanchoredNote accounts={derivedAccounts.filter(isCashAccount)} />
           </div>
           <div className="stat-card">
             <div className="flex items-center justify-between mb-2">
@@ -526,6 +535,11 @@ export default function AccountsPage() {
             <p className="text-xs text-[var(--foreground-muted)]">
               {creditUtilization}% of {formatMoney(totalCreditLimit, profile?.currency, 2)} limit
             </p>
+            {/* totalCreditUsed above is credit_card accounts only — accountsBehindFigure's
+                'debt' scope matches that exactly (not isDebtAccount's broader
+                credit_card + personal_loan). This is the one figure production's
+                Amazon Store Card actually lands in on this screen. */}
+            <UnanchoredNote accounts={accountsBehindFigure('all', derivedAccounts, 'debt')} />
           </div>
           <div className="stat-card">
             <div className="flex items-center justify-between mb-2">
@@ -566,11 +580,6 @@ export default function AccountsPage() {
             <p className="text-xs text-[var(--foreground-muted)]">{budgetIsDerived ? 'typical monthly spend' : 'your set budget'}</p>
           </div>
         </div>
-        {/* #83: Net Worth / Bank Balance / Credit Used above can each contain an
-            unanchored account's net-movement figure — disclose it once for the group
-            rather than re-deriving per card. */}
-        <UnanchoredNote accounts={derivedAccounts} />
-
         {/* Tabs */}
         <div className="flex flex-nowrap sm:flex-wrap whitespace-nowrap sm:whitespace-normal gap-2 mb-6 scroll-x-mobile">
           {[

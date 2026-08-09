@@ -15,7 +15,7 @@
  */
 
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { PaymentAccount, Transaction } from '@/types';
 import { deriveAccountBalance } from '@/lib/forecast';
@@ -210,5 +210,50 @@ describe('FIX B — Set balance control on the unanchored disclosure', () => {
     await waitFor(() => expect(mockUpdatePaymentAccount).toHaveBeenCalledWith(
       UNANCHORED.id, { openingBalance: DERIVED_CARD_BALANCE, openingDate: todayISO() }
     ));
+  });
+});
+
+/**
+ * Round 4b Fix 2: the five stat-cards (Net Worth / Bank Balance / Credit Used /
+ * Monthly Income / Monthly Budget) used to share ONE whole-roster note floating below
+ * the whole grid — the inverse of Fix 1's bug. UNANCHORED here is a credit_card, so
+ * it is IN Credit Used and IN Net Worth, but excluded from Bank Balance entirely
+ * (cash-only) and has nothing to do with Monthly Income/Budget (not account-balance
+ * figures at all). This fixture is production's exact shape: one anchored bank
+ * account, one unanchored credit card.
+ */
+describe('FIX (round 4b) — stat-card disclosures are scoped per card, not one note under the whole grid', () => {
+  it('Bank Balance (cash-only) shows no note — the only unanchored account is a credit card, which this figure excludes', () => {
+    render(<AccountsPage />);
+    const bankCard = screen.getByText('Bank Balance').closest('.stat-card') as HTMLElement;
+    expect(within(bankCard).queryByText(/unanchored/)).not.toBeInTheDocument();
+  });
+
+  it('Credit Used shows the note — Amazon Store Card IS the account this figure sums', () => {
+    render(<AccountsPage />);
+    const creditCard = screen.getByText('Credit Used').closest('.stat-card') as HTMLElement;
+    expect(within(creditCard).getByText('includes 1 unanchored account')).toBeInTheDocument();
+  });
+
+  it('Net Worth shows the note too — the full roster (cash + debt) contains the unanchored card', () => {
+    render(<AccountsPage />);
+    const netWorthCard = screen.getByText('Net Worth').closest('.stat-card') as HTMLElement;
+    expect(within(netWorthCard).getByText('includes 1 unanchored account')).toBeInTheDocument();
+  });
+
+  it('Monthly Income and Monthly Budget carry no note — neither is an account-balance figure', () => {
+    render(<AccountsPage />);
+    const incomeCard = screen.getByText('Monthly Income').closest('.stat-card') as HTMLElement;
+    const budgetCard = screen.getByText('Monthly Budget').closest('.stat-card') as HTMLElement;
+    expect(within(incomeCard).queryByText(/unanchored/)).not.toBeInTheDocument();
+    expect(within(budgetCard).queryByText(/unanchored/)).not.toBeInTheDocument();
+  });
+
+  it('no whole-roster note floats below the grid, unattached to any single card (the exact prior bug)', () => {
+    render(<AccountsPage />);
+    // Exactly the two scoped notes above (Credit Used + Net Worth) anywhere on the
+    // page — a third, group-level note sitting as the grid's own sibling (the prior
+    // bug) would inflate this past 2.
+    expect(screen.getAllByText('includes 1 unanchored account')).toHaveLength(2);
   });
 });
