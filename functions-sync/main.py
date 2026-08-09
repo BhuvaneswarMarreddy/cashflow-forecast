@@ -25,6 +25,7 @@ import firebase_admin
 from firebase_admin import auth, firestore
 from firebase_functions import https_fn, options, scheduler_fn
 
+import backup
 import plaid_ingest
 import simplefin
 import sync_core
@@ -115,6 +116,41 @@ def monarch_sync_now(req: https_fn.Request) -> https_fn.Response:
     status = _run()
     return https_fn.Response(json.dumps(status, default=str, indent=2),
                              mimetype="application/json")
+
+
+BACKUP_BUCKET = "marreddy-cashflow.firebasestorage.app"
+
+
+@scheduler_fn.on_schedule(
+    # 02:30, before the 07:30 Monarch pull and the 07:00 Plaid pull, so the snapshot is
+    # of a settled database rather than one mid-sync.
+    schedule="every day 02:30",
+    timezone=scheduler_fn.Timezone("America/Chicago"),
+    memory=options.MemoryOption.MB_256,
+    timeout_sec=120,
+)
+def firestore_backup(event: scheduler_fn.ScheduledEvent) -> None:
+    """Daily managed export to GCS (#4).
+
+    Before this, the only backups were the ones somebody remembered to take by hand.
+    The 2026-08-06 reset wiped 451 review decisions and a hand-taken backup is the
+    only reason any of them were recoverable (#111) — this removes "remembered" from
+    that sentence.
+
+    RE-RAISES on failure, like the syncs: a backup that quietly stopped running is
+    worse than no backup, because it is a restore point you believe you have.
+    """
+    db = firestore.client()
+    day = sync_core.now_iso()[:10]
+    try:
+        result = backup.run_backup("marreddy-cashflow", BACKUP_BUCKET, day)
+        db.collection("meta").document("backup").set(
+            {"lastRun": sync_core.now_iso(), "error": None, **result}, merge=True)
+    except Exception as e:
+        print(traceback.format_exc())
+        db.collection("meta").document("backup").set(
+            {"lastRun": sync_core.now_iso(), "error": f"{type(e).__name__}: {e}"}, merge=True)
+        raise
 
 
 def _run_plaid(log=print, reraise: bool = False) -> dict:
