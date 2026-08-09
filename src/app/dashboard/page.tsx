@@ -26,6 +26,7 @@ import { clampedMonthlyDate } from '@/lib/dates';
 import { homeSummary, runwayLabel, RESERVE_TARGET_MONTHS } from '@/lib/home';
 import { displayName } from '@/lib/merchant';
 import { nonNegotiableMonthly, Bill } from '@/lib/bills';
+import { UnanchoredNote } from '@/components/UnanchoredNote';
 import * as firestoreService from '@/lib/firestore';
 
 export default function DashboardPage({ initialBills }: { initialBills?: Bill[] } = {}) {
@@ -315,6 +316,11 @@ export default function DashboardPage({ initialBills }: { initialBills?: Bill[] 
                     full forecast
                   </Link>
                 </p>
+                {/* #83: the runway's cash figure is built from these same accounts, so if
+                    one was never anchored, that figure is net movement, not a bank
+                    balance — say so here too, not only on Accounts. Renders nothing when
+                    every account is anchored. */}
+                <UnanchoredNote accounts={derivedAccounts} />
               </>
             )}
           </section>

@@ -18,6 +18,7 @@ import SavingsGoalsPanel from '@/components/SavingsGoalsPanel';
 import PlannedPaymentsPanel from '@/components/PlannedPaymentsPanel';
 import AssumptionsPanel from '@/components/AssumptionsPanel';
 import BillsTab from '@/components/BillsTab';
+import { UnanchoredNote } from '@/components/UnanchoredNote';
 import { generateForecast, calculateCurrentCash, getAllAccountForecasts, withDerivedBalances, monthlyAverages } from '@/lib/forecast';
 import CashflowTab from '@/components/CashflowTab';
 import { buildAssumptions, AssumptionOverrides } from '@/lib/behavior';
@@ -356,6 +357,11 @@ export default function ForecastPage() {
             {selectedAccountForecast?.accountType === 'credit_card' && (
               <p className="text-xs text-[var(--foreground-muted)] mt-1">Balance owed</p>
             )}
+            {/* #83: the forecast starts from this cash figure, built from the same
+                accounts as Dashboard/Accounts — if one was never anchored, that
+                figure is net movement, not a bank balance. Renders nothing when
+                every account is anchored. */}
+            <UnanchoredNote accounts={derivedAccounts} />
           </div>
 
           <div className="p-5 bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-card">

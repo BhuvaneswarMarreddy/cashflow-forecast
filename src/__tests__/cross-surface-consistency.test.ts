@@ -10,6 +10,7 @@
  * Sanitized fixtures only — invented merchants, invented amounts, invented accounts.
  */
 
+import * as fs from 'node:fs';
 import * as XLSX from 'xlsx';
 import { IncomeSource, PaymentAccount, Transaction, UserProfile } from '@/types';
 import {
@@ -234,6 +235,26 @@ describe('cross-surface consistency', () => {
   it('a refund is income nowhere and reduces spending, on every surface', () => {
     expect(interpretTransaction(REFUND, accounts, INCOME).financialMeaning).toBe('refund');
     expect(sumIncomeCents([REFUND], accounts, INCOME)).toBe(0);
+  });
+});
+
+// #83: an unanchored account's total is net movement over the rows we hold, not a
+// bank balance. Accounts already discloses that (Task 6); this closes Dashboard and
+// Forecast, which build totals from the same accounts and said nothing.
+// Grepping for `UnanchoredNote` (not `isUnanchored`) on the two screens matters: the
+// screens are expected to REUSE the shared component, not re-inline the check —
+// a page that hand-rolls its own `isUnanchored` call would pass a naive grep for
+// that symbol while still duplicating markup Task 6 extracted specifically to share.
+describe('unanchored disclosure is not one screen only (#83)', () => {
+  it.each(['src/app/accounts/page.tsx', 'src/app/dashboard/page.tsx', 'src/app/forecast/page.tsx'])(
+    '%s discloses unanchored accounts via the shared UnanchoredNote component',
+    (path) => {
+      expect(fs.readFileSync(path, 'utf8')).toContain('UnanchoredNote');
+    }
+  );
+
+  it('UnanchoredNote is where the isUnanchored check actually lives', () => {
+    expect(fs.readFileSync('src/components/UnanchoredNote.tsx', 'utf8')).toContain('isUnanchored');
   });
 });
 
