@@ -1,5 +1,5 @@
 import { PaymentAccount } from '@/types';
-import { sortAccounts, reindex } from '@/lib/accounts';
+import { sortAccounts, reindex, isUnanchored } from '@/lib/accounts';
 
 const a = (o: Partial<PaymentAccount> & { id: string }): PaymentAccount => ({
   name: o.id, type: 'bank_account', provider: 'chase', openingBalance: 0,
@@ -35,5 +35,21 @@ describe('reconcile', () => {
     const r = reconcile(bank, 1200, 1150, '2026-03-01');
     expect(r.driftCents).toBe(5000);
     expect(r.reanchor).toEqual({ openingBalance: 1200, openingDate: '2026-03-01' });
+  });
+});
+
+describe('isUnanchored', () => {
+  const base = { id: 'a', name: 'A', type: 'bank_account', provider: 'chase', color: '#000', isActive: true, openingBalance: 0 } as PaymentAccount;
+
+  it('is true when nobody ever asserted a starting balance', () => {
+    expect(isUnanchored(base)).toBe(true);
+  });
+
+  it('is false once an anchor date exists', () => {
+    expect(isUnanchored({ ...base, openingDate: '2026-01-01' })).toBe(false);
+  });
+
+  it('is true for an empty-string date, which asserts nothing', () => {
+    expect(isUnanchored({ ...base, openingDate: '' })).toBe(true);
   });
 });

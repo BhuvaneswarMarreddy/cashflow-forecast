@@ -10,6 +10,14 @@ const BIG = Number.MAX_SAFE_INTEGER;
  */
 export const currentOf = (a: PaymentAccount): number => a.currentBalance ?? a.openingBalance;
 
+/**
+ * True when nobody has ever asserted a starting balance for this account.
+ *
+ * Its derived balance is then NET MOVEMENT across the rows we hold, not a bank
+ * balance. Real, defensible, and it must never be presented as the latter.
+ */
+export const isUnanchored = (a: PaymentAccount): boolean => !a.openingDate;
+
 /** Stable order: sortIndex asc; undefined sorts to the end; ties broken by name. */
 export function sortAccounts(accounts: PaymentAccount[]): PaymentAccount[] {
   return [...accounts].sort((x, y) => {
