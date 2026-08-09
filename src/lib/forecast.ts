@@ -812,6 +812,11 @@ export interface AIUserContext {
   };
 }
 
+// #83: unwired — zero production callers (grep confirms only its own definition and
+// its test import). The live AI path is financialContext() in src/lib/ai-context.ts,
+// which functions/src/prompts.ts assembles into the actual model prompt; this function
+// looks like that path because it carries the same dataCaveats-style caveat, which is
+// exactly what makes it a decoy to whoever greps for "caveat" next.
 export function prepareFullContextForAI(context: AIUserContext): string {
   const { forecast, budgets, savingsGoals, debts, accounts, incomeSources, emergencyFund } = context;
   

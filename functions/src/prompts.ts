@@ -34,6 +34,32 @@ export interface AiDecisionRequest {
 }
 
 /**
+ * #83: `parsed.dataCaveats` above puts the JSON key next to budgets/debts, but a key the
+ * model was never told the meaning of is not a constraint — it is noise a capable model can
+ * rationalize past. This turns it into a hard rule, scoped to exactly the accounts named in
+ * `unanchoredAccounts` (never a blanket hedge), and returns '' when dataCaveats is absent so
+ * the two anchored-data types (decision_check without it, and every call before an account
+ * goes unanchored) never see hedge language they'd learn to tune out.
+ *
+ * Only wired into decision_check/question/comprehensive: those are the only types that
+ * interpolate {forecastData} (see enhancedForecastData above), so they're the only ones
+ * dataCaveats can ever reach. 'insights' and 'emergency_fund' build their prompts from a
+ * different, narrower payload (`data` / `forecast`) that never carries dataCaveats — adding
+ * this instruction there would reference a key the model's context never actually contains.
+ */
+function dataCaveatsInstruction(dataCaveats: unknown): string {
+  const accounts = (dataCaveats as { unanchoredAccounts?: unknown } | undefined)?.unanchoredAccounts;
+  const names = Array.isArray(accounts) ? accounts.filter((a): a is string => typeof a === 'string' && a.length > 0) : [];
+  if (!names.length) return '';
+
+  const plural = names.length > 1;
+  return `\n\nDATA CAVEAT — BINDING:
+${names.join(', ')} ${plural ? 'have' : 'has'} no confirmed bank balance in this data: the figure is net movement over the transactions on record, not a verified starting balance.
+You MUST name ${plural ? 'these accounts' : 'this account'} by name (${names.join(', ')}) in any sentence that states a total, balance, or affordability figure that includes ${plural ? 'them' : 'it'}. A vague hedge ("some accounts may be off") is not acceptable — say which account.
+Do NOT refuse to answer and do NOT withhold the figure. Give the number, then name the caveat. An answer that omits the number over-corrects just as badly as one that states it with false confidence.`;
+}
+
+/**
  * Build the user prompt for a given request type.
  * Returns null for unknown types (caller maps to invalid-argument).
  */
@@ -85,17 +111,20 @@ export function buildPrompt(
       .replace('{newLowestBalance}', newLowestBalance?.toString() || '0')
       .replace('{lowestDate}', lowestDate || 'unknown')
       .replace('{safetyThreshold}', safetyThreshold?.toString() || '500')
-      .replace('{affectedBills}', affectedBills?.join(', ') || 'none');
+      .replace('{affectedBills}', affectedBills?.join(', ') || 'none')
+      + dataCaveatsInstruction(dataCaveats);
   }
 
   if (type === 'question') {
     return QUESTION_PROMPT
       .replace('{forecastData}', enhancedForecastData)
-      .replace('{question}', question || '');
+      .replace('{question}', question || '')
+      + dataCaveatsInstruction(dataCaveats);
   }
 
   if (type === 'comprehensive') {
-    return COMPREHENSIVE_ANALYSIS_PROMPT.replace('{forecastData}', enhancedForecastData);
+    return COMPREHENSIVE_ANALYSIS_PROMPT.replace('{forecastData}', enhancedForecastData)
+      + dataCaveatsInstruction(dataCaveats);
   }
 
   if (type === 'insights') {
