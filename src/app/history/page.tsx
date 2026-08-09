@@ -39,7 +39,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { format, parseISO, startOfMonth, subMonths, isWithinInterval } from 'date-fns';
-import { currentOf } from '@/lib/accounts';
+import { currentOf, balanceCaption } from '@/lib/accounts';
 import { formatMoney, monthlyIncomeOf } from '@/lib/money';
 import { askAbout, askAboutTransaction } from '@/lib/ask';
 
@@ -610,28 +610,35 @@ export default function HistoryPage() {
             {accountSummary && (() => {
               const { acct, spent, income, inbound, outbound, rewards } = accountSummary;
               const money = (n: number) => formatMoney(n, profile?.currency ?? 'USD', 2);
-              // (label, value, color) tiles, chosen by account type
-              let tiles: [string, string, string][];
+              // #83 Finding 3: this block is per-account (`acct` is ONE account, filtered
+              // to by accountFilter) — not a total, so the disclosure is the same as-of /
+              // net-since caption Accounts and the detail modal use for a single account,
+              // not <UnanchoredNote> (worded for a total that "includes N" of many).
+              // Attached to the tile that actually shows the balance/balance-owed figure,
+              // not the whole card, so it can't be read as covering Spent/Paid/Rewards too.
+              const caption = balanceCaption(acct, transactions);
+              // (label, value, color, caption?) tiles, chosen by account type
+              let tiles: [string, string, string, string?][];
               if (acct.type === 'personal_loan') {
                 tiles = [
                   ['Borrowed', money(inbound), 'text-[var(--foreground)]'],
                   ['Paid back', money(outbound), 'text-[var(--foreground)]'],
                   ['Interest / cost', money(Math.max(0, outbound - inbound)), 'text-amber-500'],
-                  ['Balance owed', currentOf(acct) > 0 ? money(currentOf(acct)) : 'Paid off', currentOf(acct) > 0 ? 'text-[var(--accent-danger)]' : 'text-emerald-500'],
+                  ['Balance owed', currentOf(acct) > 0 ? money(currentOf(acct)) : 'Paid off', currentOf(acct) > 0 ? 'text-[var(--accent-danger)]' : 'text-emerald-500', caption],
                 ];
               } else if (acct.type === 'credit_card') {
                 tiles = [
                   ['Spent (purchases)', money(spent), 'text-[var(--foreground)]'],
                   ['Paid to card', money(inbound), 'text-emerald-500'],
                   ['Rewards earned', money(rewards), 'text-[var(--accent-primary)]'],
-                  ['Balance owed', currentOf(acct) > 0 ? money(currentOf(acct)) : 'Paid off', currentOf(acct) > 0 ? 'text-[var(--accent-danger)]' : 'text-emerald-500'],
+                  ['Balance owed', currentOf(acct) > 0 ? money(currentOf(acct)) : 'Paid off', currentOf(acct) > 0 ? 'text-[var(--accent-danger)]' : 'text-emerald-500', caption],
                 ];
               } else {
                 tiles = [
                   ['Income in', money(income), 'text-emerald-500'],
                   ['Spent', money(spent), 'text-[var(--accent-danger)]'],
                   ['Transfers in / out', `${money(inbound)} / ${money(outbound)}`, 'text-[var(--foreground-secondary)]'],
-                  ['Balance', money(currentOf(acct)), 'text-[var(--foreground)]'],
+                  ['Balance', money(currentOf(acct)), 'text-[var(--foreground)]', caption],
                 ];
               }
               return (
@@ -641,10 +648,11 @@ export default function HistoryPage() {
                     <h3 className="font-semibold text-[var(--foreground)]">{acct.name} — summary</h3>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                    {tiles.map(([label, value, color]) => (
+                    {tiles.map(([label, value, color, caption]) => (
                       <div key={label}>
                         <p className="text-xs text-[var(--foreground-muted)]">{label}</p>
                         <p className={`text-lg font-bold ${color}`}>{value}</p>
+                        {caption && <p className="text-xs text-[var(--foreground-muted)]">{caption}</p>}
                       </div>
                     ))}
                   </div>

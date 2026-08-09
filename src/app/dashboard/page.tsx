@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { format, parseISO, isAfter, startOfDay } from 'date-fns';
 import { generateForecast, calculateCurrentCash, withDerivedBalances, monthlyAverages } from '@/lib/forecast';
-import { currentOf } from '@/lib/accounts';
+import { currentOf, accountsBehindFigure } from '@/lib/accounts';
 import { clampedMonthlyDate } from '@/lib/dates';
 import { homeSummary, runwayLabel, RESERVE_TARGET_MONTHS } from '@/lib/home';
 import { displayName } from '@/lib/merchant';
@@ -316,11 +316,13 @@ export default function DashboardPage({ initialBills }: { initialBills?: Bill[] 
                     full forecast
                   </Link>
                 </p>
-                {/* #83: the runway's cash figure is built from these same accounts, so if
-                    one was never anchored, that figure is net movement, not a bank
-                    balance — say so here too, not only on Accounts. Renders nothing when
-                    every account is anchored. */}
-                <UnanchoredNote accounts={derivedAccounts} />
+                {/* #83 Finding 1 (round 2): the hero's cash figure is calculateCurrentCash
+                    (cash-type accounts only, see line 114 above) — NOT derivedAccounts.
+                    Passing the full roster here named an unanchored credit card as the
+                    reason for a cash number it cannot affect. accountsBehindFigure('all', …)
+                    is the same cash-only filter, kept in one place so it can't drift from
+                    calculateCurrentCash (see its doc comment in lib/accounts.ts). */}
+                <UnanchoredNote accounts={accountsBehindFigure('all', derivedAccounts)} />
               </>
             )}
           </section>

@@ -173,6 +173,23 @@ export function accountsBehindFigure(
   return one ? [one] : [];
 }
 
+/**
+ * The single-account balance caption every screen showing ONE account's balance uses:
+ * "as of {date}" when anchored, else "net since {earliest row} · no starting balance
+ * set" (or just the latter when there are no rows at all). Written once (#83 Finding
+ * 2/3) so AccountDetailModal and History's per-account tile — both new call sites —
+ * can't drift into different wording for the same account the way two separately
+ * hand-rolled copies eventually would.
+ */
+export function balanceCaption(
+  account: Pick<PaymentAccount, 'id' | 'openingDate'>,
+  transactions: readonly { accountId?: string; date: string }[]
+): string {
+  if (account.openingDate) return `as of ${account.openingDate.slice(0, 10)}`;
+  const since = earliestRowDate(account.id, transactions);
+  return since ? `net since ${since} · no starting balance set` : 'no starting balance set';
+}
+
 /** Every account whose balance IS cash the owner can spend. */
 export const isCashAccount = (a: PaymentAccount) =>
   a.type === 'bank_account' || a.type === 'debit_card' || a.type === 'cash';

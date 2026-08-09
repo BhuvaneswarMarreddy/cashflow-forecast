@@ -1,5 +1,6 @@
+import fs from 'fs';
 import { PaymentAccount } from '@/types';
-import { sortAccounts, reindex, isUnanchored, accountsBehindFigure } from '@/lib/accounts';
+import { sortAccounts, reindex, isUnanchored, accountsBehindFigure, balanceCaption } from '@/lib/accounts';
 
 const a = (o: Partial<PaymentAccount> & { id: string }): PaymentAccount => ({
   name: o.id, type: 'bank_account', provider: 'chase', openingBalance: 0,
@@ -86,5 +87,57 @@ describe('accountsBehindFigure', () => {
     expect(out).toEqual([anchoredCash]);
     expect(out).not.toContain(unanchoredCard);
     expect(out).not.toContain(unanchoredLoan);
+  });
+});
+
+// #83 Finding 2/3: the single-account caption AccountDetailModal, History's per-account
+// tile, and the XLSX export all now call — pure so each of the three can be trusted
+// without mounting a component or building a workbook to check the wording agrees.
+describe('balanceCaption', () => {
+  const txns = [
+    { accountId: 'x', date: '2026-03-14' },
+    { accountId: 'x', date: '2026-04-01' },
+    { accountId: 'other', date: '2026-01-01' },
+  ];
+
+  it('anchored → "as of" the stated opening date, no row lookup needed', () => {
+    expect(balanceCaption({ id: 'x', openingDate: '2026-01-01' }, [])).toBe('as of 2026-01-01');
+  });
+
+  it('unanchored with rows → net since the account\'s own earliest row', () => {
+    expect(balanceCaption({ id: 'x', openingDate: undefined }, txns)).toBe('net since 2026-03-14 · no starting balance set');
+  });
+
+  it('unanchored with no rows on this account → still discloses, never a blank claim', () => {
+    expect(balanceCaption({ id: 'x', openingDate: undefined }, [])).toBe('no starting balance set');
+    // A row belonging to a DIFFERENT account must not leak in as this one's "earliest".
+    expect(balanceCaption({ id: 'zzz', openingDate: undefined }, txns)).toBe('no starting balance set');
+  });
+});
+
+// #83 Finding 1, round 2: the dashboard hero's cash figure is calculateCurrentCash
+// (cash-type accounts only) — NOT the full account list. A tag-presence grep (see
+// cross-surface-consistency.test.ts) cannot see which accounts are actually passed to
+// UnanchoredNote, so this pins the specific, scoped call and fails if it regresses
+// back to the full roster (the exact bug this fix corrected).
+describe('dashboard scopes UnanchoredNote to the figure it actually shows (#83 Finding 1)', () => {
+  const src = fs.readFileSync('src/app/dashboard/page.tsx', 'utf8');
+
+  it("calls accountsBehindFigure('all', derivedAccounts), matching calculateCurrentCash's filter", () => {
+    expect(src).toContain("<UnanchoredNote accounts={accountsBehindFigure('all', derivedAccounts)} />");
+  });
+
+  it('never passes the unfiltered account list to UnanchoredNote', () => {
+    expect(src).not.toMatch(/<UnanchoredNote accounts=\{derivedAccounts\}/);
+  });
+});
+
+// #83 Finding 3: History's per-account tile must call the shared caption, not
+// silently drop it — a regression here would be a "Balance owed" tile with no
+// disclosure at all, the exact gap this fix closed.
+describe('history wires the per-account balance caption (#83 Finding 3)', () => {
+  it('calls balanceCaption(acct, transactions) and threads it into the tile', () => {
+    const src = fs.readFileSync('src/app/history/page.tsx', 'utf8');
+    expect(src).toContain('balanceCaption(acct, transactions)');
   });
 });

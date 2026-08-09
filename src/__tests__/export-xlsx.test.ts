@@ -49,3 +49,34 @@ describe('buildExportWorkbook', () => {
     expect(checking['Balance']).toBe(-4600);
   });
 });
+
+// #83 Fix 4: an export leaves the app entirely, so an unanchored account's balance
+// needs its own disclosure IN the sheet — a UI-only note never reaches whoever opens
+// this file. The number itself must never be suppressed, only the claim attached to it.
+describe('buildExportWorkbook — unanchored disclosure (#83 Fix 4)', () => {
+  const anchoredBank = acct({ id: 'Checking', openingBalance: 100 });
+  // No openingDate: nobody ever asserted a starting balance for this one (prod has
+  // exactly this shape today — "Amazon Store Card").
+  const unanchoredCard = acct({ id: 'Card', type: 'credit_card', provider: 'amex', openingBalance: 0, openingDate: undefined });
+  const txns = [tx({ id: 'purchase', amount: 300, type: 'expense', accountId: 'Card', date: '2026-02-01' })];
+  const wb = buildExportWorkbook({ profile, accounts: [anchoredBank, unanchoredCard], incomeSources: [], transactions: txns });
+
+  it('the Accounts sheet marks the unanchored row net-since, the anchored row as-of, and never hides the balance', () => {
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets['Accounts']);
+    const card = rows.find((r) => r['Name'] === 'Card')!;
+    expect(card['Balance As Of']).toBe('net since 2026-02-01 · no starting balance set');
+    expect(card['Balance']).toBe(300); // the number is still shown
+    const bank = rows.find((r) => r['Name'] === 'Checking')!;
+    expect(bank['Balance As Of']).toBe('as of 2000-01-01');
+  });
+
+  it('the Summary sheet notes the total the unanchored card is IN, not the one it is excluded from', () => {
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets['Summary'], { header: 1 });
+    const creditIdx = rows.findIndex((r) => r[0] === 'Total Credit Card Debt');
+    const bankIdx = rows.findIndex((r) => r[0] === 'Total Bank Balance');
+    expect(String(rows[creditIdx + 1]?.[0] ?? '')).toContain('includes 1 unanchored account');
+    // The bank total excludes the card entirely — attaching the note here would be
+    // exactly the inversion Fix 1 exists to correct, one layer up in the app.
+    expect(String(rows[bankIdx + 1]?.[0] ?? '')).not.toContain('unanchored');
+  });
+});
