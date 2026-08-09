@@ -8,6 +8,7 @@ import * as firestoreService from '@/lib/firestore';
 import { sortAccounts, reindex, reconcile } from '@/lib/accounts';
 import { fromFirestoreSettings, toFirestoreSettings } from '@/lib/profile-settings';
 import { startSpan, getTrace, errorType } from '@/lib/obs/trace';
+import { isUnsyncedId } from '@/lib/offline-queue';
 import { emit } from '@/lib/obs/events';
 
 export interface UserProfileContextType {
@@ -257,9 +258,11 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const tempId = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const newAccount: PaymentAccount = { ...account, id: tempId };
-    
+    // #71: real Firestore id minted locally, so there is no temp id to swap afterwards
+    // and no window in which the account exists only in localStorage.
+    const id = firestoreService.newDocId(user.id, 'accounts');
+    const newAccount: PaymentAccount = { ...account, id };
+
     const updatedProfile = {
       ...profile,
       paymentAccounts: [...profile.paymentAccounts, newAccount],
@@ -267,41 +270,31 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
     setProfile(updatedProfile);
     saveLocalProfile(user.id, updatedProfile);
 
-    // Always try to save to Firestore
-    try {
-      const firestoreId = await firestoreService.addAccount(user.id, account);
-
-      // Update with real ID
-      const finalAccount = { ...newAccount, id: firestoreId };
-      const finalProfile = {
-        ...updatedProfile,
-        paymentAccounts: updatedProfile.paymentAccounts.map(a => 
-          a.id === tempId ? finalAccount : a
-        ),
-      };
-      setProfile(finalProfile);
-      saveLocalProfile(user.id, finalProfile);
-    } catch (err) {
+    // Unawaited: offline this settles only on reconnect, while the write is already
+    // durable in the SDK's cache.
+    firestoreService.addAccount(user.id, account, id).catch((err) => {
       emit({
         eventName: 'Accounts.AddFailed', eventCategory: 'activity', severity: 'error',
         traceId: getTrace()?.traceId ?? '', service: 'UserProfileContext', operation: 'AddPaymentAccount',
         resultStatus: 'error', metadata: { errorType: errorType(err) },
       });
-    }
+    });
   };
 
   const addPaymentAccounts = async (accounts: Omit<PaymentAccount, 'id'>[]): Promise<string[]> => {
     if (!profile || !user?.id || accounts.length === 0) return [];
 
-    const created: PaymentAccount[] = [];
-    for (const account of accounts) {
-      let id = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      try {
-        id = await firestoreService.addAccount(user.id, account);
-      } catch (err) {
-        console.error('Failed to sync imported account to Firestore:', err);
-      }
-      created.push({ ...account, id });
+    // #71: mint first, write unawaited. The old loop awaited each write and, on
+    // failure, kept a `local_` id that no code path would ever persist.
+    const created: PaymentAccount[] = accounts.map((account) => ({
+      ...account,
+      id: firestoreService.newDocId(user.id, 'accounts'),
+    }));
+    for (const account of created) {
+      const { id, ...rest } = account;
+      firestoreService.addAccount(user.id, rest, id).catch((err) => {
+        console.error('Imported account write queued or failed:', err);
+      });
     }
 
     // One state update with every new account appended — reads `profile` once.
@@ -330,7 +323,7 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
     // screen and localStorage but never reached Firestore, so a reload (which reads
     // balances from the server) showed 0 again. The try/catch already handles a true
     // offline; on success we know we're online.
-    if (!id.startsWith('local_')) {
+    if (!isUnsyncedId(id)) {
       try {
         await firestoreService.updateAccount(user.id, id, updates as any);
         setIsFirestoreOnline(true);
@@ -393,7 +386,7 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
 
     // Always attempt the delete (see updatePaymentAccount) — gating on a cached
     // online flag left deleted accounts to reappear on the next reload.
-    if (!id.startsWith('local_')) {
+    if (!isUnsyncedId(id)) {
       try {
         await firestoreService.deleteAccount(user.id, id);
         setIsFirestoreOnline(true);
@@ -408,9 +401,11 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
   const addIncomeSource = async (income: Omit<IncomeSource, 'id'>) => {
     if (!profile || !user?.id) return;
 
-    const tempId = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const newIncome: IncomeSource = { ...income, id: tempId };
-    
+    // #71: real id up front; no connectivity branch, because the SDK queues the write.
+    // An income source lost offline is how a paycheck stops being recognised as income.
+    const id = firestoreService.newDocId(user.id, 'income');
+    const newIncome: IncomeSource = { ...income, id };
+
     const updatedProfile = {
       ...profile,
       incomeSources: [...profile.incomeSources, newIncome],
@@ -418,23 +413,9 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
     setProfile(updatedProfile);
     saveLocalProfile(user.id, updatedProfile);
 
-    if (isFirestoreOnline) {
-      try {
-        const firestoreId = await firestoreService.addIncome(user.id, income);
-        
-        const finalIncome = { ...newIncome, id: firestoreId };
-        const finalProfile = {
-          ...updatedProfile,
-          incomeSources: updatedProfile.incomeSources.map(i => 
-            i.id === tempId ? finalIncome : i
-          ),
-        };
-        setProfile(finalProfile);
-        saveLocalProfile(user.id, finalProfile);
-      } catch (err) {
-        console.error('Failed to sync income:', err);
-      }
-    }
+    firestoreService.addIncome(user.id, income as never, id).catch((err) => {
+      console.error('Income write queued or failed:', err);
+    });
   };
 
   // Update income source
@@ -448,7 +429,7 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
     setProfile(updatedProfile);
     saveLocalProfile(user.id, updatedProfile);
 
-    if (isFirestoreOnline && !id.startsWith('local_')) {
+    if (!isUnsyncedId(id)) {
       try {
         await firestoreService.updateIncome(user.id, id, updates as any);
       } catch (err) {
@@ -466,7 +447,7 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
     setProfile(updatedProfile);
     saveLocalProfile(user.id, updatedProfile);
 
-    if (isFirestoreOnline && !id.startsWith('local_')) {
+    if (!isUnsyncedId(id)) {
       try {
         await firestoreService.deleteIncome(user.id, id);
       } catch (err) {
