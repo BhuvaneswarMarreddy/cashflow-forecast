@@ -40,6 +40,20 @@ describe('reconcile', () => {
     expect(r.driftCents).toBe(5000);
     expect(r.reanchor).toEqual({ openingBalance: 1200, openingDate: '2026-03-01' });
   });
+
+  // #83 round 4a Defect 1: the zero-drift early return is correct for an ANCHORED
+  // account (UI-106 — an unchanged balance must not move openingDate) but wrong for
+  // an UNANCHORED one. There is no earlier anchor for that guarantee to protect, and
+  // the owner's most likely path — open ReconcileSheet, see the prefilled derived
+  // figure, agree it's right, confirm — is exactly entered === derived. Applying the
+  // same short-circuit there left the account unanchored forever while the caller
+  // reported success.
+  it('no drift on an UNANCHORED account still re-anchors — the confirm IS the first assertion', () => {
+    const unanchored = a({ id: 'u', openingDate: undefined });
+    const r = reconcile(unanchored, 1150, 1150, '2026-03-01', CTX);
+    expect(r.driftCents).toBe(0);
+    expect(r.reanchor).toEqual({ openingBalance: 1150, openingDate: '2026-03-01' });
+  });
 });
 
 describe('isUnanchored', () => {

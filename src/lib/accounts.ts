@@ -101,7 +101,14 @@ export function reconcile(
     anchored: !isUnanchored(account),
     source: ctx.source,
   };
-  if (driftCents === 0) return { driftCents: 0, observation };
+  // Zero drift on an ANCHORED account must not move openingDate — UI-106's guarantee
+  // that an unchanged balance can't silently re-date the anchor. An UNANCHORED account
+  // has no anchor for that guarantee to protect: there is no earlier claim a write here
+  // could disturb, and the save IS the owner's first assertion. Short-circuiting for
+  // BOTH left the owner's most likely path — open ReconcileSheet, see the prefilled
+  // derived figure, agree it's right, confirm — writing nothing: the account stayed
+  // unanchored forever while the sheet reported success (#83 round 4a Defect 1).
+  if (driftCents === 0 && !isUnanchored(account)) return { driftCents: 0, observation };
   return { driftCents, reanchor: { openingBalance: enteredCurrent, openingDate: todayISO }, observation };
 }
 
