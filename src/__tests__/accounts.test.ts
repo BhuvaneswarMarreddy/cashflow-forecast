@@ -28,11 +28,14 @@ describe('reindex', () => {
 import { reconcile } from '@/lib/accounts';
 describe('reconcile', () => {
   const bank = a({ id: 'b', type: 'bank_account', openingBalance: 1000, openingDate: '2026-02-01' });
+  const CTX = { includePending: false, source: 'user' as const };
   it('no drift → no re-anchor', () => {
-    expect(reconcile(bank, 1150, 1150, '2026-03-01')).toEqual({ driftCents: 0 });
+    const r = reconcile(bank, 1150, 1150, '2026-03-01', CTX);
+    expect(r.driftCents).toBe(0);
+    expect(r.reanchor).toBeUndefined();
   });
   it('drift → re-anchor to the entered balance at today', () => {
-    const r = reconcile(bank, 1200, 1150, '2026-03-01');
+    const r = reconcile(bank, 1200, 1150, '2026-03-01', CTX);
     expect(r.driftCents).toBe(5000);
     expect(r.reanchor).toEqual({ openingBalance: 1200, openingDate: '2026-03-01' });
   });

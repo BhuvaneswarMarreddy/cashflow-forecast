@@ -1,4 +1,4 @@
-import { PaymentAccount } from '@/types';
+import { PaymentAccount, DriftObservation, DriftStatus } from '@/types';
 
 const BIG = Number.MAX_SAFE_INTEGER;
 
@@ -59,17 +59,56 @@ export function reindex(orderedIds: string[], accounts: PaymentAccount[]): Array
   return orderedIds.filter((id) => known.has(id)).map((id, i) => ({ id, sortIndex: i }));
 }
 
+export interface DriftContext {
+  includePending: boolean;
+  providerCheckedAt?: string;
+  source: 'user' | 'sync';
+}
+
 /**
- * Reconcile an account against the user's real balance. Anchor-only: any drift
- * re-anchors (openingBalance = the entered balance, openingDate = today), which
- * resets net-since-anchor to zero and makes later pre-today imports harmless.
+ * Reconcile an account against a real balance. Anchor-only: any drift re-anchors
+ * (openingBalance = the entered balance, openingDate = today), which resets
+ * net-since-anchor to zero and makes later pre-today imports harmless.
+ *
+ * The observation is returned ALWAYS, including at zero drift — a clean check is
+ * evidence too, and callers persist it before applying `reanchor`.
  */
 export function reconcile(
-  account: PaymentAccount, enteredCurrent: number, derivedCurrent: number, todayISO: string
-): { driftCents: number; reanchor?: { openingBalance: number; openingDate: string } } {
-  const driftCents = Math.round((enteredCurrent - derivedCurrent) * 100);
-  if (driftCents === 0) return { driftCents: 0 };
-  return { driftCents, reanchor: { openingBalance: enteredCurrent, openingDate: todayISO } };
+  account: PaymentAccount,
+  enteredCurrent: number,
+  derivedCurrent: number,
+  todayISO: string,
+  ctx: DriftContext
+): { driftCents: number; reanchor?: { openingBalance: number; openingDate: string }; observation: DriftObservation } {
+  const enteredCents = Math.round(enteredCurrent * 100);
+  const derivedCents = Math.round(derivedCurrent * 100);
+  const driftCents = enteredCents - derivedCents;
+  const observation: DriftObservation = {
+    accountId: account.id,
+    at: new Date().toISOString(),
+    enteredCents,
+    derivedCents,
+    driftCents,
+    includePending: ctx.includePending,
+    providerCheckedAt: ctx.providerCheckedAt,
+    anchored: !isUnanchored(account),
+    source: ctx.source,
+  };
+  if (driftCents === 0) return { driftCents: 0, observation };
+  return { driftCents, reanchor: { openingBalance: enteredCurrent, openingDate: todayISO }, observation };
+}
+
+/**
+ * An unanchored account has no claim to violate, so it is never PASS.
+ * Staleness is DERIVED from the sync schedule rather than a fixed hour count:
+ * the overnight gap between the 19:00 and 07:00 runs is itself 12 hours, so any
+ * fixed 6h/12h threshold would mark every account stale every morning.
+ */
+export function driftStatus(o: DriftObservation, lastScheduledSlotISO: string): DriftStatus {
+  if (!o.anchored) return 'NOT_APPLICABLE';
+  if (o.driftCents === 0) return 'PASS';
+  if (o.providerCheckedAt && o.providerCheckedAt < lastScheduledSlotISO) return 'STALE_INPUT';
+  return 'VIOLATION';
 }
 
 /**

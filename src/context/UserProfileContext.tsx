@@ -342,7 +342,8 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
     const acc = profile.paymentAccounts.find((x) => x.id === id);
     if (!acc) return 0;
     const today = new Date().toISOString().slice(0, 10);
-    const { driftCents, reanchor } = reconcile(acc, enteredCurrent, derivedCurrent, today);
+    const { driftCents, reanchor } = reconcile(acc, enteredCurrent, derivedCurrent, today,
+      { includePending: false, source: 'user' });
     if (reanchor) await updatePaymentAccount(id, reanchor);
     return driftCents;
   };

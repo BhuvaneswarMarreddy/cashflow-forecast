@@ -199,6 +199,29 @@ export interface PaymentAccount {
   loanStartDate?: string; // When the loan started
 }
 
+/**
+ * INV-1 — one reconciliation measurement, kept.
+ *
+ * `reconcile()` compares an asserted balance against the derived one and then
+ * re-anchors, after which the two agree BY CONSTRUCTION. No provider balance is
+ * stored anywhere, so this record is the only surviving evidence that the
+ * derivation was ever checked. Create-only; never edited — recorded as the
+ * `after` payload of an audit-log entry (src/lib/audit.ts), not its own collection.
+ */
+export interface DriftObservation {
+  accountId: string;
+  at: string;                  // ISO instant the observation was made
+  enteredCents: number;        // the balance a human or provider asserted
+  derivedCents: number;        // deriveAccountBalance at that moment
+  driftCents: number;          // entered − derived, integer cents
+  includePending: boolean;     // the policy in force when derived was computed
+  providerCheckedAt?: string;  // meta/<source>.lastSuccess at observation time
+  anchored: boolean;           // false when openingDate was absent
+  source: 'user' | 'sync';
+}
+
+export type DriftStatus = 'PASS' | 'VIOLATION' | 'STALE_INPUT' | 'NOT_APPLICABLE';
+
 /** What KIND of income a source is. Display/grouping only — it never affects matching. */
 export type IncomeSourceKind =
   | 'employment' | 'secondary' | 'contract' | 'business'
