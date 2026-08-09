@@ -17,8 +17,7 @@ import {
 } from '@/types';
 import { addDays, format, parseISO, startOfDay, isBefore, isAfter, isSameDay } from 'date-fns';
 import { isPositive, classifyTransaction, interpretTransaction, isPosted, IncomeContext } from '@/lib/classify';
-import { currentOf, isUnanchored } from '@/lib/accounts';
-import { monthlyIncomeOf } from '@/lib/money';
+import { currentOf } from '@/lib/accounts';
 import { buildAssumptions, behaviorEvents, AssumptionOverrides } from '@/lib/behavior';
 import { normalizeMerchant } from '@/lib/flows';
 
