@@ -80,6 +80,9 @@ export const inflowMeaningOfCardCredit = (kind: CardCreditKind): FinancialMeanin
 export const PERMITTED_KINDS_BY_LEDGER_MEANING: Record<LedgerMeaning, readonly CardCreditKind[]> = {
   spending: [],
   internal_transfer: [],
+  // #79. Same as internal_transfer: a transfer leg is not a card credit of any kind,
+  // whether the other party is you or someone else.
+  external_transfer: [],
   card_payment: ['card_payment'],
   reward: ['statement_credit', 'cashback_reward', 'promotional_credit'],
   refund: ['merchant_refund', 'partial_refund', 'charge_reversal', 'chargeback_credit', 'manual_adjustment', 'unknown_card_credit'],

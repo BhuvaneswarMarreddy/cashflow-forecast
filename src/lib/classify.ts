@@ -371,6 +371,15 @@ export type LedgerMeaning =
   | 'spending'
   | 'income_candidate'
   | 'internal_transfer'
+  /**
+   * A transfer that names someone who is NOT the owner (#79).
+   *
+   * `internal_transfer` means "money moved between accounts you own". Remitly is not
+   * your account and the recipient is not you, so applying it to a remittance states
+   * something false about $120,562.36 of real outflow. This is the third branch the
+   * transfer binary never had.
+   */
+  | 'external_transfer'
   | 'card_payment'
   | 'refund'
   | 'reward';
@@ -428,15 +437,26 @@ export function interpretTransaction(
   let confidence: number;
   let reason: string;
   if (type === 'transfer') {
-    meaning = settlement ? 'card_payment' : 'internal_transfer';
+    // #79: three branches, not two. `namesExternalCounterparty` was imported here and
+    // never consulted, so a Remitly row typed `transfer` was labelled `internal_transfer`
+    // — "money between accounts you own" — for money that left the owner's net worth.
+    // LABEL ONLY. No treatment changes below for an unconfirmed row: FIN-SETTLEMENT-003
+    // says the derived meaning sets what a proposal DEFAULTS to, and only a confirmation
+    // moves a number.
+    const external = !settlement && namesExternalCounterparty(t);
+    meaning = settlement ? 'card_payment' : external ? 'external_transfer' : 'internal_transfer';
     if (t.type === 'transfer') {
       confidence = 1;
-      reason = 'stored type is transfer (provider-sourced); never re-derived';
+      reason = external
+        ? 'stored type is transfer, but the row names someone who is not you'
+        : 'stored type is transfer (provider-sourced); never re-derived';
     } else {
       confidence = 0.8;
       reason = settlement
         ? 'title matches a card-payment form and names a card account of yours'
-        : 'title matches a transfer form';
+        : external
+          ? 'title matches a transfer form but names an external counterparty'
+          : 'title matches a transfer form';
     }
   } else if (debt && inflow && isReward(named)) {
     meaning = 'reward';
@@ -504,6 +524,11 @@ export function interpretTransaction(
     financialMeaning =
       meaning === 'card_payment' ? 'card_payment'
       : meaning === 'internal_transfer' ? 'internal_transfer'
+      // #79: an EXISTING member, not a new one. #45's six-role work already gives
+      // `gift_or_personal_transfer` the role `transferred` (money-roles.ts) and already
+      // offers it as an outflow answer (OUTFLOW_GROUP_MEANINGS) — so the taxonomy the
+      // issue asked for arrived with #45 and nothing here needs to widen it.
+      : meaning === 'external_transfer' ? 'gift_or_personal_transfer'
       : meaning === 'refund' ? 'refund'
       : meaning === 'reward' ? 'other_non_income_credit'
       : 'personal_expense';
@@ -549,7 +574,15 @@ export function interpretTransaction(
     incomeSourceId,
     income: incomeTreatment,
     expense,
-    transfer: type !== 'transfer' ? 'none' : settlement ? 'card_settlement' : 'internal_leg',
+    // #79: a CONFIRMED external transfer stops being an internal leg — netting it
+    // against a sibling would cancel money that genuinely left. Unconfirmed rows keep
+    // `internal_leg` on purpose: changing it there would move a total without anyone
+    // having confirmed anything, which is the line FIN-SETTLEMENT-003 draws.
+    transfer:
+      type !== 'transfer' ? 'none'
+      : settlement ? 'card_settlement'
+      : confirmed && financialMeaning === 'gift_or_personal_transfer' ? 'none'
+      : 'internal_leg',
     pending,
     forecast: !held && !settledAsTransfer ? 'counted' : 'excluded',
     budget: expense,

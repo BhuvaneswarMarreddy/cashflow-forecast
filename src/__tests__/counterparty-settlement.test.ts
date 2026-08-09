@@ -359,10 +359,16 @@ describe('nothing auto-applies', () => {
     const rows = sends();
     // The proposal exists...
     expect(forParty(groupsFor(rows), 'AVA TREMBLAY', 'outflow')!.suggestion!.meaning).toBe('personal_expense');
-    // ...and has changed nothing.
+    // ...and has moved no NUMBER, which is what this rule is about.
     expect(sumExpenseCents(rows, ACCOUNTS, POSTED_ONLY)).toBe(0);
-    expect(interpretTransaction(rows[0], ACCOUNTS).financialMeaning).toBe('internal_transfer');
     expect(interpretTransaction(rows[0], ACCOUNTS).expense).toBe('excluded');
+    // #79: the LABEL is allowed to be honest before a confirmation, and has to be.
+    // This row is a Zelle to a named person; calling it `internal_transfer` told the
+    // owner "money moving between accounts you own" about money that left entirely.
+    // `gift_or_personal_transfer` costs 0 under personalCostSign, so saying so moves
+    // nothing — the assertion above is what guards the rule, not this one.
+    expect(interpretTransaction(rows[0], ACCOUNTS).financialMeaning).toBe('gift_or_personal_transfer');
+    expect(interpretTransaction(rows[0], ACCOUNTS).transfer).toBe('internal_leg');
   });
 
   it('counts the money as spending once, and only once, the owner confirms', () => {
