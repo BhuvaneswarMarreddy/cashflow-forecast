@@ -382,7 +382,8 @@ function removeUndefined<T extends Record<string, any>>(obj: T): Partial<T> {
 
 export async function addAccount(
   userId: string,
-  account: Omit<FirestoreAccount, 'id' | 'createdAt' | 'updatedAt'>
+  account: Omit<FirestoreAccount, 'id' | 'createdAt' | 'updatedAt'>,
+  id?: string
 ): Promise<string> {
   // OBS-001: the old logging here printed the whole account payload (balance, credit
   // limit, last four) to the browser console on every add. Replaced with a span that
@@ -398,23 +399,17 @@ export async function addAccount(
 
   try {
     const accountsRef = collection(db, 'users', userId, 'accounts');
+    const ref = id ? doc(accountsRef, id) : doc(accountsRef);
     const now = serverTimestamp();
 
-    const docRef = await addDoc(accountsRef, {
-      ...cleanAccount,
-      createdAt: now,
-      updatedAt: now,
-    });
+    // #71: setDoc under a known id, and NO `offline_…` fallback. That fallback reported
+    // a synthetic id as success for a document nobody ever wrote.
+    await setDoc(ref, { ...cleanAccount, createdAt: now, updatedAt: now });
 
-    span.end({ recordCount: 1, metadata: { accountId: docRef.id, type: account.type, fieldsSet: Object.keys(cleanAccount).sort() } });
-    return docRef.id;
+    span.end({ recordCount: 1, metadata: { accountId: ref.id, type: account.type, fieldsSet: Object.keys(cleanAccount).sort() } });
+    return ref.id;
   } catch (error: any) {
     span.end({ status: 'error', error });
-
-    if (isOfflineError(error)) {
-      console.warn('⚠️ [Firestore] Offline - account will sync when online');
-      return `offline_${Date.now()}`;
-    }
     throw error;
   }
 }
@@ -508,7 +503,8 @@ export async function deleteAccount(userId: string, accountId: string): Promise<
 
 export async function addIncome(
   userId: string,
-  income: Omit<FirestoreIncome, 'id' | 'createdAt' | 'updatedAt'>
+  income: Omit<FirestoreIncome, 'id' | 'createdAt' | 'updatedAt'>,
+  id?: string
 ): Promise<string> {
   console.log('📝 [Firestore] addIncome called for user:', userId);
   
@@ -518,22 +514,16 @@ export async function addIncome(
   
   try {
     const incomeRef = collection(db, 'users', userId, 'income');
+    const ref = id ? doc(incomeRef, id) : doc(incomeRef);
     const now = serverTimestamp();
-    
-    const docRef = await addDoc(incomeRef, {
-      ...cleanIncome,
-      createdAt: now,
-      updatedAt: now,
-    });
-    
-    console.log('✅ [Firestore] Income created with ID:', docRef.id);
-    return docRef.id;
+
+    // #71: known id, no `offline_…` fallback — see addTransaction.
+    await setDoc(ref, { ...cleanIncome, createdAt: now, updatedAt: now });
+
+    console.log('✅ [Firestore] Income created with ID:', ref.id);
+    return ref.id;
   } catch (error: any) {
     console.error('❌ [Firestore] Failed to add income:', error);
-    if (isOfflineError(error)) {
-      console.warn('Firestore offline - income will sync when online');
-      return `offline_${Date.now()}`;
-    }
     throw error;
   }
 }
@@ -673,36 +663,46 @@ export async function deleteInflowReview(
 // Transaction Operations
 // ============================================
 
+/**
+ * A real Firestore document id, minted locally (#71).
+ *
+ * `doc(collection(...))` generates an auto-id CLIENT-SIDE — no network, and it is the
+ * id the document will really have. That is the whole fix for offline data loss: with
+ * the id known up front, a write needs nothing from the server, so it can be handed to
+ * the SDK immediately and the persistent cache queues it durably until reconnect.
+ *
+ * The `local_…` / `offline_…` ids this replaces were the opposite: placeholders that
+ * every write path then refused to send, so the row waited for a sync that had no code
+ * to perform it.
+ */
+export function newDocId(userId: string, subcollection: string): string {
+  return doc(collection(db, 'users', userId, subcollection)).id;
+}
+
+/**
+ * Write one transaction. Pass `id` from `newDocId()` and DO NOT await when the caller
+ * is a UI path (#71): offline, this promise does not settle until reconnect, because it
+ * resolves on the server's acknowledgement. The write is already durable in IndexedDB
+ * long before that — awaiting only stalls the interface.
+ */
 export async function addTransaction(
   userId: string,
-  transaction: Omit<Transaction, 'id'>
+  transaction: Omit<Transaction, 'id'>,
+  id?: string
 ): Promise<string> {
-  try {
-    const transactionsRef = collection(db, 'users', userId, 'transactions');
-    const now = serverTimestamp();
-    
-    // Remove undefined fields to avoid Firestore errors
-    const cleanedTransaction = removeUndefined(transaction);
-    
-    console.log('📝 [Firestore] Adding transaction:', JSON.stringify(cleanedTransaction, null, 2));
-    
-    const docRef = await addDoc(transactionsRef, {
-      ...cleanedTransaction,
-      date: Timestamp.fromDate(new Date(transaction.date)),
-      createdAt: now,
-      updatedAt: now,
-    });
-    
-    console.log('✅ [Firestore] Transaction saved with ID:', docRef.id);
-    return docRef.id;
-  } catch (error) {
-    console.error('❌ [Firestore] Error adding transaction:', error);
-    if (isOfflineError(error)) {
-      console.warn('Firestore offline - transaction will sync when online');
-      return `offline_${Date.now()}`;
-    }
-    throw error;
-  }
+  const transactionsRef = collection(db, 'users', userId, 'transactions');
+  const ref = id ? doc(transactionsRef, id) : doc(transactionsRef);
+  const now = serverTimestamp();
+  // No offline catch that invents an `offline_…` id any more. That fallback is what
+  // MADE the orphans: it reported a synthetic id as success, and the row it named was
+  // never written by anyone.
+  await setDoc(ref, {
+    ...removeUndefined(transaction),
+    date: Timestamp.fromDate(new Date(transaction.date)),
+    createdAt: now,
+    updatedAt: now,
+  });
+  return ref.id;
 }
 
 export async function getTransactions(
@@ -865,28 +865,15 @@ export async function addBulkTransactions(
 
 export async function addSavingsGoal(
   userId: string,
-  goal: Omit<SavingsGoal, 'id' | 'createdAt' | 'updatedAt'>
+  goal: Omit<SavingsGoal, 'id' | 'createdAt' | 'updatedAt'>,
+  id?: string
 ): Promise<string> {
-  try {
-    const goalsRef = collection(db, 'users', userId, 'goals');
-    const now = serverTimestamp();
-    
-    const cleanGoal = removeUndefined(goal);
-    
-    const docRef = await addDoc(goalsRef, {
-      ...cleanGoal,
-      createdAt: now,
-      updatedAt: now,
-    });
-    
-    return docRef.id;
-  } catch (error) {
-    if (isOfflineError(error)) {
-      console.warn('Firestore offline - goal will sync when online');
-      return `offline_${Date.now()}`;
-    }
-    throw error;
-  }
+  const goalsRef = collection(db, 'users', userId, 'goals');
+  const ref = id ? doc(goalsRef, id) : doc(goalsRef);
+  const now = serverTimestamp();
+  // #71: known id, no `offline_…` fallback — see addTransaction.
+  await setDoc(ref, { ...removeUndefined(goal), createdAt: now, updatedAt: now });
+  return ref.id;
 }
 
 export async function getSavingsGoals(userId: string): Promise<SavingsGoal[]> {
@@ -970,10 +957,8 @@ export async function addReminder(
     
     return docRef.id;
   } catch (error) {
-    if (isOfflineError(error)) {
-      console.warn('Firestore offline - reminder will sync when online');
-      return `offline_${Date.now()}`;
-    }
+    // #71: no synthetic id. An offline write is queued by the SDK; reporting a made-up
+    // id for it was how a reminder became a row nobody would ever write.
     throw error;
   }
 }
@@ -1150,10 +1135,7 @@ export async function addPlannedTransaction(
     
     return docRef.id;
   } catch (error) {
-    if (isOfflineError(error)) {
-      console.warn('Firestore offline - planned transaction will sync when online');
-      return `offline_${Date.now()}`;
-    }
+    // #71: no synthetic id — see addReminder.
     throw error;
   }
 }

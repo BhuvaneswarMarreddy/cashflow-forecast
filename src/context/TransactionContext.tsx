@@ -7,6 +7,7 @@ import * as firestoreService from '@/lib/firestore';
 import { db, collection, doc, getDocs, setDoc, updateDoc, deleteDoc } from '@/lib/firebase';
 import { applyMappingRules, definedSet, MappingRule, NewMappingRule } from '@/lib/mapping-rules';
 import { generateSampleData } from '@/lib/storage';
+import { isUnsyncedId, planDrain, withoutId } from '@/lib/offline-queue';
 import { interpretTransaction, withoutSupersededHolds, IncomeContext } from '@/lib/classify';
 
 export interface TransactionContextType {
@@ -88,10 +89,25 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
       // offline live only in the mirror and have never been written. Dropping them
       // here — which a plain overwrite does — destroys the user's only copy.
       const synced = new Set(userTransactions.map((t) => t.id));
-      const unsynced = loadLocalTransactions(userId).filter(
-        (t) => /^(local|offline)_/.test(t.id) && !synced.has(t.id)
-      );
-      const merged = [...unsynced, ...userTransactions];
+      const { toPersist } = planDrain(loadLocalTransactions(userId), synced);
+
+      // #71 DRAIN. Preserving the orphans in the mirror (all the old code did) only
+      // postponed the loss to the next storage eviction. Now they are written for real,
+      // under fresh ids, the moment a sync succeeds. This is the data the user is most
+      // likely to miss, and it is the half of the fix that recovers rather than prevents.
+      const rescued: Transaction[] = [];
+      for (const orphan of toPersist) {
+        const id = firestoreService.newDocId(userId, 'transactions');
+        rescued.push({ ...orphan, id });
+        firestoreService
+          .addTransaction(userId, withoutId(orphan) as Omit<Transaction, 'id'>, id)
+          .catch((err) => console.warn('Orphan rescue queued or failed:', err));
+      }
+      if (rescued.length) {
+        console.info(`[#71] rescued ${rescued.length} row(s) that had never reached Firestore`);
+      }
+
+      const merged = [...rescued, ...userTransactions];
 
       setIsFirestoreOnline(true);
       setRawTransactions(merged);
@@ -222,42 +238,25 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const tempId = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const newTransaction: Transaction = {
-      ...transaction,
-      id: tempId,
-    };
+    // #71: a REAL Firestore id, minted locally. There is no temp id to reconcile and
+    // no branch on connectivity — the row's identity is settled before the write, so
+    // the same code path works online and off.
+    const id = firestoreService.newDocId(user.id, 'transactions');
+    const newTransaction: Transaction = { ...transaction, id };
 
-    console.log('📝 [TransactionContext] Created transaction with temp ID:', tempId);
-
-    // Update local state immediately
     setRawTransactions((prev) => {
       const updated = [newTransaction, ...prev];
       saveLocalTransactions(user.id, updated);
       return updated;
     });
 
-    // Try to sync with Firestore
-    if (isFirestoreOnline) {
-      try {
-        console.log('📝 [TransactionContext] Syncing to Firestore...');
-        const firestoreId = await firestoreService.addTransaction(user.id, transaction);
-        console.log('✅ [TransactionContext] Firestore returned ID:', firestoreId);
-        
-        // Update the ID with the Firestore ID
-        setRawTransactions((prev) => {
-          const updated = prev.map((t) => 
-            t.id === tempId ? { ...t, id: firestoreId } : t
-          );
-          saveLocalTransactions(user.id, updated);
-          return updated;
-        });
-      } catch (err) {
-        console.error('❌ [TransactionContext] Firestore sync failed:', err);
-      }
-    } else {
-      console.warn('⚠️ [TransactionContext] Firestore offline, using localStorage only');
-    }
+    // NOT awaited, deliberately. Offline this promise does not settle until reconnect
+    // (it resolves on the server's ack), while the write itself is already durable in
+    // the SDK's IndexedDB cache. Awaiting would freeze the form for the length of an
+    // outage and buy nothing.
+    firestoreService.addTransaction(user.id, transaction, id).catch((err) => {
+      console.warn('Transaction write queued or failed:', err);
+    });
   };
 
   // `id` is optional: the CSV importer supplies deterministic ids so re-importing the
@@ -283,18 +282,24 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    // Local-only rows keep a `local_` id so syncFromFirestore preserves them until
-    // they are written. Caller-supplied import ids are NOT used here: an `imp_` id in
-    // the mirror would look already-synced and be dropped on the next read.
-    const transactionsWithIds: Transaction[] = newTransactions.map((t, i) => ({
+    // #71: real ids here too, and the write is re-fired rather than abandoned. The old
+    // code minted `local_` ids and stopped, so a bulk import that failed once lived in
+    // localStorage forever. Any caller-supplied import id is preserved — it is
+    // deterministic, so re-importing overwrites instead of duplicating.
+    const transactionsWithIds: Transaction[] = newTransactions.map((t) => ({
       ...t,
-      id: `local_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 9)}`,
+      id: t.id ?? firestoreService.newDocId(user.id, 'transactions'),
     }));
 
     setRawTransactions((prev) => {
       const updated = [...transactionsWithIds, ...prev];
       saveLocalTransactions(user.id, updated);
       return updated;
+    });
+
+    // Hand it back to the SDK unawaited: it queues durably and replays on reconnect.
+    firestoreService.addBulkTransactions(user.id, transactionsWithIds).catch((err) => {
+      console.warn('Bulk write queued or failed:', err);
     });
 
     return { persisted: false };
@@ -310,13 +315,14 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
       return updated;
     });
 
-    // Try to sync with Firestore
-    if (isFirestoreOnline && !id.startsWith('local_')) {
-      try {
-        await firestoreService.updateTransaction(user.id, id, updates);
-      } catch (err) {
-        console.warn('Firestore update failed, using localStorage:', err);
-      }
+    // #71: no connectivity branch and no `local_` guard. Both existed to skip writes
+    // that would "fail" offline; the SDK queues them instead, and skipping is what
+    // stranded the rows. An id that is still `local_` belongs to an orphan from an
+    // older version — syncFromFirestore rescues those, so nothing is written under one.
+    if (!isUnsyncedId(id)) {
+      firestoreService.updateTransaction(user.id, id, updates).catch((err) => {
+        console.warn('Transaction update queued or failed:', err);
+      });
     }
   };
 
@@ -330,13 +336,12 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
       return updated;
     });
 
-    // Try to sync with Firestore
-    if (isFirestoreOnline && !id.startsWith('local_')) {
-      try {
-        await firestoreService.deleteTransaction(user.id, id);
-      } catch (err) {
-        console.warn('Firestore delete failed, using localStorage:', err);
-      }
+    // #71: same as update — queue it, do not skip it. A `local_` id has no server
+    // document to delete, so there is nothing to send for one.
+    if (!isUnsyncedId(id)) {
+      firestoreService.deleteTransaction(user.id, id).catch((err) => {
+        console.warn('Transaction delete queued or failed:', err);
+      });
     }
   };
 
