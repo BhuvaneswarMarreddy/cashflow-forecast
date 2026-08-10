@@ -4,12 +4,47 @@
     "module": "commonjs",
     "moduleResolution": "node",
     "outDir": "lib",
-    "rootDir": "src",
+    // The web app's money logic (src/lib/**) is compiled INTO this bundle rather
+    // than reimplemented here, so `homeSnapshot` and the browser agree on every
+    // figure by construction. That requires a rootDir above `functions/`, which
+    // is why emitted paths gained a `functions/src/` prefix — see `main`.
+    "rootDir": "..",
+    "baseUrl": ".",
+    "paths": { "@/*": ["../src/*"] },
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "sourceMap": true
   },
-  "include": ["src"],
-  "exclude": ["src/__tests__"]
+  // The shared files are listed ONE BY ONE, not globbed. `src/lib` also holds
+  // modules built on the *client* Firebase SDK (firestore.ts, sync-client.ts);
+  // a glob compiled those into the deploy bundle, where their `firebase/*`
+  // requires do not resolve. An explicit list turns "someone imported the
+  // client SDK into a Cloud Function" into a build error instead of a 500.
+  //
+  // This is the transitive closure of what `snapshot.ts` imports. Adding an
+  // import may mean adding a line here — tsc will say so.
+  "include": [
+    "src",
+    "../src/types/index.ts",
+    "../src/lib/accounts.ts",
+    "../src/lib/behavior.ts",
+    "../src/lib/bills.ts",
+    "../src/lib/classify.ts",
+    "../src/lib/csv-import.ts",
+    "../src/lib/fingerprint.ts",
+    "../src/lib/counterparty.ts",
+    "../src/lib/flow-lanes.ts",
+    "../src/lib/flows.ts",
+    "../src/lib/flow-simple.ts",
+    "../src/lib/forecast.ts",
+    "../src/lib/home.ts",
+    "../src/lib/money.ts",
+    "../src/lib/palette.ts",
+    "../src/lib/transfers.ts",
+    "../src/lib/obs/events.ts",
+    "../src/lib/obs/redact.ts",
+    "../src/lib/obs/trace.ts"
+  ],
+  "exclude": ["src/__tests__", "../src/**/__tests__"]
 }

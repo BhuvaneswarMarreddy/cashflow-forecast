@@ -29,7 +29,14 @@ const appFiles = walk('src').filter((f) => !f.includes('__tests__'));
  * of them is pulled in. Anything else importing xlsx has re-attached it to the eager
  * graph, which is the regression this file exists to catch.
  */
-const LAZY_BOUNDARY = ['src/components/CSVImportModal.tsx', 'src/lib/export-xlsx.ts'];
+const LAZY_BOUNDARY = [
+  'src/components/CSVImportModal.tsx',
+  'src/lib/export-xlsx.ts',
+  // The parser extracted out of CSVImportModal so the Cloud Function can share
+  // it. Safe only because nothing EAGER reaches it — pinned by the third test
+  // below, which is what keeps this entry from being a hole in the rule.
+  'src/lib/csv-import.ts',
+];
 const norm = (f: string) => f.split(/[\\/]/).join('/');
 
 describe('xlsx stays lazy', () => {
@@ -39,6 +46,21 @@ describe('xlsx stays lazy', () => {
       const src = readFileSync(f, 'utf8');
       // `await import('xlsx')` is fine — a top-level `import ... from` is not.
       return /^\s*import\s[^\n]*\sfrom\s+['"]xlsx['"]/m.test(src);
+    });
+    expect(offenders).toEqual([]);
+  });
+
+  /**
+   * `csv-import.ts` carries the 400KB xlsx dependency. It is allowed to, because
+   * the only thing that imports it is the lazily-loaded modal. The moment an
+   * eagerly-rendered screen imports the parser directly, the weight is back and
+   * the allowlist entry above would have hidden it.
+   */
+  it('keeps the shared CSV parser reachable only from the lazy boundary', () => {
+    const offenders = appFiles.filter((f) => {
+      if (LAZY_BOUNDARY.includes(norm(f))) return false;
+      const src = readFileSync(f, 'utf8');
+      return /^\s*import\s[^\n]*\sfrom\s+['"]@\/lib\/csv-import['"]/m.test(src);
     });
     expect(offenders).toEqual([]);
   });
