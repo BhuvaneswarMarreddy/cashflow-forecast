@@ -93,3 +93,122 @@ existing" / "current recurring payment monthly") are both answerable from
 BILLS REGISTER + DETECTED RECURRING MERCHANTS alone, so this gap does not block the
 reported bug. Flagging it here in case a future "what's due next" web question surfaces
 the same way.
+
+---
+
+## Review-findings follow-up (2026-08-22)
+
+A full review of the #22 PR raised 2 IMPORTANT + 5 MINOR findings. All 7 fixed on this
+branch, 4 commits, `counterparty.ts`/`flow-lanes.ts`/`flow-simple.ts` untouched.
+
+### IMPORTANT 1 — `bills` state never refreshed after a chat-recorded save
+
+`DataChatSheet.tsx`'s `bills` state was fetched once via `getBills()` on mount and never
+again. Recording a bill through `applyBill` wrote it to Firestore but never updated local
+state, so within the same session `buildChatContext` kept building from the pre-write
+list — the owner could record a bill, then ask "is it existing?" in the same session and
+get told no. Fixed by appending the just-created row to `bills` state right after
+`addBill()` resolves (`id` from the write, `createdAt`/`updatedAt` stamped locally with
+`new Date().toISOString()`), the exact pattern `BillsTab.tsx`'s `handleSave` already uses
+for the same "server timestamp isn't known client-side yet" situation — no new pattern
+introduced. Test: `src/__tests__/data-chat-sheet.test.tsx` — record a bill via Apply, then
+send a second turn, and assert the second `aiChat` call's `context.bills` contains the new
+row, with `getBills` still called exactly once (proving it's a state update, not a
+re-fetch).
+
+### IMPORTANT 2 — web's absent UPCOMING read as "you have none"
+
+`functions/src/prompts.ts` rendered a UPCOMING section (falling back to `"(none)"`)
+whenever `ctx.upcoming` was falsy, collapsing two different claims: `undefined` (this
+client never computed it — web) and `[]` (computed, and there are genuinely none —
+mobile). The prompt then told the model all three sections were "computed by the
+application" and complete, so a web chat could confidently answer "you have no upcoming
+payments" having never actually looked. Fixed honestly: `buildChatMessages` now omits the
+UPCOMING section entirely when `ctx.upcoming === undefined`, and the ANSWERING QUESTIONS
+ABOUT MONEY block explains what an absent section means ("I can't see upcoming payments
+on this client") versus a present-but-empty one (genuinely none — answer directly).
+Mobile, which always supplies `upcoming`, renders identically to before. Tests (both
+shapes): `functions/src/__tests__/chat.test.ts` — a new `describe` block asserts (a) the
+web shape (no `upcoming` key) omits the section header entirely and surfaces the
+"can't see it on this client" teaching text, (b) the mobile shape with `upcoming: []`
+renders the header reading `"(none)"`, (c) the mobile shape with real rows renders them.
+One pre-existing test (`teaches the model to answer bills/upcoming/recurring questions...`)
+was updated to pass a context that supplies `upcoming`, since it specifically asserts the
+UPCOMING header appears — that's a real behavioural change (an absent section no longer
+appears at all), not a loosened assertion.
+
+### MINOR 3 — DOUBLE-COUNT GUARD test didn't actually cover `lockedMonthlyCents`
+
+Added exact-value assertions to the existing test in `bill-upcoming.test.ts`:
+`lockedMonthlyCents` is `0` with no bills, and equals `nonNegotiableMonthly([installmentBill])`
+in cents with the fixture bill — replacing reliance on the separate BILLS-003 test's
+`toBeGreaterThan(0)`, which a mutation test showed would not catch a wrong formula.
+
+### MINOR 4 — `chat-actions.ts`'s `recurring` ignored the owner's Forecast overrides
+
+`buildChatContext` called `buildAssumptions(transactions, accounts)` with no
+`AssumptionOverrides`, so a merchant the owner disabled or amount-corrected on the
+Forecast page (`forecast/page.tsx:150` passes `loadOverrides()`) still showed in the
+chat's DETECTED RECURRING MERCHANTS with its raw detected amount — the chat could
+contradict the Forecast page for the identical merchant. Fixed by passing
+`loadOverrides()` the same way. On the safety question: `loadOverrides()`
+(`src/lib/assumption-overrides.ts`) already wraps `localStorage` access in try/catch,
+returning `{}` on SSR/private-mode/corrupt JSON, and `chat-actions.ts` is never imported
+outside the browser — only `DataChatSheet.tsx` (`'use client'`) pulls in its runtime code,
+and `functions/tsconfig.json`'s explicit file list does not include it — so no additional
+guard was needed; confirmed no new `localStorage`-related warnings in `next build` (the
+one `ExperimentalWarning: localStorage is not available...` line was already present
+before this change, from the pre-existing `railWidth` `window.localStorage` read). Tests:
+`src/__tests__/chat-actions.test.ts` — a merchant disabled via a saved override is
+omitted from `ctx.recurring`; a merchant with an overridden amount shows that amount, not
+the raw detected one.
+
+### MINOR 5 — worst-case bound excluded the new sections
+
+The existing `bounds a hand-rolled oversized request` test supplies no
+bills/upcoming/recurring, so its measured worst case only ever covered the new sections'
+fixed headers/placeholders — never an actual maxed-out payload. Added a new test that
+feeds bills/upcoming/recurring over their caps (200 rows each, max-length fields)
+alongside everything else already maxed: measured **40346** chars, bound set to **41000**
+(modest headroom). The pre-existing no-bills/upcoming/recurring bound also moved,
+honestly, from 18000 to **18700** (measured **18455**) — the ANSWERING QUESTIONS ABOUT
+MONEY rewrite (IMPORTANT 2) and the fuzzy-match sentence (MINOR 7) are constant text
+present on every prompt regardless of context.
+
+### MINOR 6 — 5 unawaited-act warnings in `data-chat-sheet.test.tsx`
+
+All 5 traced to renders of `<DataChatSheet>` that fired the mount-time `getBills` effect
+but never awaited its resolution before the test ended: the "portals the rail to body"
+test, all 3 rail-resize tests (drag/keyboard/double-click — all fully synchronous `it`
+bodies), and the second, independent `render()` inside the "rejects corrupt values" test.
+Fixed by making each `it` async and adding `await waitFor(() => expect(getBills)...)`
+right after `render()`, the same flush pattern the pre-existing "fetches the Bills
+register" tests already used (which is why those never warned). Verified 0 occurrences of
+"not wrapped in act" in the suite's output after the fix.
+
+### MINOR 7 — dedupe guidance had no fuzzy-match instruction
+
+Added one sentence to the RECORD A BILL block in `functions/src/prompts.ts`: a
+vendor/merchant that plainly refers to the same service counts as a match even when
+spelled differently, and the model should ASK rather than propose a duplicate when
+unsure. Test: `functions/src/__tests__/chat.test.ts` asserts both halves of the sentence
+are present in the system prompt.
+
+### Verification (final, on the committed state)
+
+- `cd functions && npx jest` — **108 passed** (baseline 103, +5), 7 suites, 0 failures.
+- `npx jest` (web) — **1517 passed** (baseline 1514, +3), 9 skipped, 1 pre-existing skipped
+  suite unchanged, 0 failures.
+- `cd functions && npm run build` (tsc + tsc-alias) — clean.
+- `npx tsc --noEmit` (root) — clean.
+- `npm run build` (next build) — clean, all routes generated (the one `localStorage`
+  `ExperimentalWarning` is pre-existing, confirmed via `git stash` against the same build).
+- `git status --porcelain` — clean after 4 commits; `counterparty.ts`, `flow-lanes.ts`,
+  `flow-simple.ts` untouched throughout.
+
+### Commits
+
+1. `fix(data-chat-sheet): refresh bills state after a chat-recorded save` — IMPORTANT 1 + MINOR 6.
+2. `fix(chat-actions): thread the owner's forecast overrides into recurring` — MINOR 4.
+3. `fix(prompts): distinguish an absent UPCOMING section from a genuinely empty one` — IMPORTANT 2 + MINOR 5 + MINOR 7 (same two files).
+4. `test(bill-upcoming): pin the lockedMonthlyCents double-count guard` — MINOR 3.
