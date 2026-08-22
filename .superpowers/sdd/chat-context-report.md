@@ -212,3 +212,67 @@ are present in the system prompt.
 2. `fix(chat-actions): thread the owner's forecast overrides into recurring` — MINOR 4.
 3. `fix(prompts): distinguish an absent UPCOMING section from a genuinely empty one` — IMPORTANT 2 + MINOR 5 + MINOR 7 (same two files).
 4. `test(bill-upcoming): pin the lockedMonthlyCents double-count guard` — MINOR 3.
+
+---
+
+## CI follow-up: lazy bills fetch (2026-08-22)
+
+The merged fix wave (`8df82f6`, PR #137) blocked deploy: CI's Playwright suite,
+`e2e/accounts-observability.spec.ts`, failed at line 109 —
+`expect(liveHits, 'requests to live Firebase/SimpleFIN endpoints').toEqual([])`.
+
+### Root cause
+
+`Navbar.tsx` renders `<DataChatSheet open={isChatOpen} seed={chatSeed}
+onClose={...} />` **unconditionally**, on every page. Inside `DataChatSheet`,
+`open` only gates the component's final `if (!open) return null;` — every hook
+above that line, including IMPORTANT 1's `bills` fetch effect, runs regardless
+of whether the sheet is open. So the `getBills(profile.id)` effect (deps:
+`[profile?.id]`) fired on **every page mount**, whether or not the owner ever
+opened the chat. `e2e/accounts-observability.spec.ts` opens the fixture-backed
+`/dev/accounts-fixture` route (which renders the real `Navbar`) and asserts
+zero requests to `firestore.googleapis.com` et al. before the user acts — it
+correctly caught a real behavioural regression, not a flaky test.
+
+Reproduced directly: ran the spec against the pre-fix tree (`git stash`) and
+got a real `firestore.googleapis.com/.../Listen/channel?...` hit in `liveHits`;
+re-ran against the fixed tree and got 0 hits, 2/2 tests green.
+
+### Fix
+
+`src/components/DataChatSheet.tsx` — the bills-fetch effect now gates on
+`open` (`if (!open || !profile?.id || ...) return;`) instead of firing
+unconditionally on mount. A `billsFetchedFor` ref (keyed by `profile.id`) skips
+re-fetching on a later close/reopen for the same profile — IMPORTANT 1's
+Apply-time local append already keeps `bills` current within a session, so a
+reopen has nothing stale to correct and doesn't need a second read.
+
+Tests added, `src/__tests__/data-chat-sheet.test.tsx` (new describe block,
+"the bills fetch is LAZY"):
+- mounted with `open={false}` (the exact shape Navbar always renders) never
+  calls `getBills`, even after a microtask flush.
+- flipping `open` from `false` to `true` (via `rerender`) triggers exactly one
+  `getBills` call.
+- closing and reopening again does NOT trigger a second `getBills` call — the
+  already-loaded list is kept.
+
+All pre-existing tests render with `open` (shorthand for `true`), so none
+needed changes — they already exercised the "open" path.
+
+### Verification
+
+- `npx jest src/__tests__/data-chat-sheet.test.tsx` — **47 passed** (was 44,
+  +3), 0 "not wrapped in act" warnings.
+- `npx jest` (web, full suite) — **1520 passed** (was 1517, +3), 9 skipped, 1
+  pre-existing skipped suite unchanged, 0 failures.
+- `cd functions && npx jest` — 108 passed, unaffected (this fix touches no
+  functions/ code).
+- `npx tsc --noEmit` (root) — clean.
+- `npm run build` (next build) — clean, all routes generated.
+- `npx playwright test e2e/accounts-observability.spec.ts --project=chromium`
+  — **2 passed** (was 1 failed / 1 passed on the pre-fix tree, reproduced via
+  `git stash`), 0 live-endpoint hits.
+
+### Commit
+
+- `1e59c93` `fix(data-chat-sheet): fetch bills lazily, gated on open, not on mount`
