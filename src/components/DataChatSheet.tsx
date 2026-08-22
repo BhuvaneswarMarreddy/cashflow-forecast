@@ -179,7 +179,7 @@ export default function DataChatSheet({ open, onClose, seed }: {
   /** A question to ask on open — set when the owner clicked a specific node or group. */
   seed?: string;
 }) {
-  const { transactions, addRule, rules, updateTransaction, updateRuleCategory } = useTransactions();
+  const { transactions, addRule, rules, updateTransactionAwaited, updateRuleCategoryAwaited } = useTransactions();
   const { profile, reconcileAccount, addIncomeSource, incomeContext, updateProfile } = useUserProfile();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -591,28 +591,71 @@ export default function DataChatSheet({ open, onClose, seed }: {
       } else {
         const { value, reassignTo } = m.category;
         const plan = planCategoryRemoval(value, transactions, rules, bills);
-        await Promise.all([
-          ...plan.transactionIds.map((id) => updateTransaction(id, { category: reassignTo as ExpenseCategory })),
-          ...plan.ruleIds.map((id) => updateRuleCategory(id, reassignTo)),
-          ...plan.billIds.map((id) => updateBill(profile.id, id, { category: reassignTo })),
-        ]);
-        if (plan.billIds.length) {
-          setBills((prev) => prev.map((b) => (plan.billIds.includes(b.id) ? { ...b, category: reassignTo } : b)));
+
+        // Each write is genuinely awaited and its real outcome kept — never
+        // assumed. updateTransaction/updateRuleCategory (TransactionContext)
+        // fire the Firestore write with `.catch(console.warn)` and never await
+        // it, so their promises always resolve regardless of what actually
+        // landed; updateTransactionAwaited/updateRuleCategoryAwaited exist
+        // ONLY for this sweep, for exactly that reason. updateBill (below)
+        // already throws on a real failure, so it needs no awaited twin.
+        const txOutcomes = await Promise.all(
+          plan.transactionIds.map((id) => updateTransactionAwaited(id, { category: reassignTo as ExpenseCategory }))
+        );
+        const ruleOutcomes = await Promise.all(
+          plan.ruleIds.map((id) => updateRuleCategoryAwaited(id, reassignTo))
+        );
+        const billOutcomes = await Promise.all(
+          plan.billIds.map((id) =>
+            updateBill(profile.id, id, { category: reassignTo })
+              .then(() => true)
+              .catch((err) => { console.warn('Bill category update failed:', err); return false; })
+          )
+        );
+
+        // Local `bills` state (this component's own, not context-managed) only
+        // moves for bills that actually confirmed — a bill whose write failed
+        // must keep showing the removed category, or planCategoryRemoval would
+        // never find it again on a repeat sweep.
+        const movedBillIds = plan.billIds.filter((_, i) => billOutcomes[i]);
+        if (movedBillIds.length) {
+          setBills((prev) => prev.map((b) => (movedBillIds.includes(b.id) ? { ...b, category: reassignTo } : b)));
         }
+
+        const txMoved = txOutcomes.filter(Boolean).length;
+        const ruleMoved = ruleOutcomes.filter(Boolean).length;
+        const billMoved = billOutcomes.filter(Boolean).length;
+        const totalPlanned = plan.transactionIds.length + plan.ruleIds.length + plan.billIds.length;
+        const totalMoved = txMoved + ruleMoved + billMoved;
+        const allMoved = totalMoved === totalPlanned;
+
         // Archived, not deleted — the value stays resolvable for any row still
         // showing it mid-reassignment, same reasoning resolveCategories documents.
+        // This proceeds even on a partial failure above: archiving only touches
+        // settings.categories, never the transactions/rules/bills themselves, and
+        // planCategoryRemoval matches on THEIR stored `category`/`set.category`
+        // field, not on whether the settings entry is archived — so a straggler
+        // stays targetable and a repeat of this same proposal (the Apply button
+        // stays live below when anything failed) sweeps it up.
         const next = current.map((c) => (c.value === value ? { ...c, archived: true } : c));
         await updateProfile({ settings: { categories: next } });
 
         const reassignLabel = resolvedCategories.find((c) => c.value === reassignTo)?.label ?? reassignTo;
         const parts = [
-          `${plan.transactionIds.length} transaction${plan.transactionIds.length === 1 ? '' : 's'}`,
-          `${plan.ruleIds.length} rule${plan.ruleIds.length === 1 ? '' : 's'}`,
-          `${plan.billIds.length} bill${plan.billIds.length === 1 ? '' : 's'}`,
+          `${txMoved} transaction${txMoved === 1 ? '' : 's'}`,
+          `${ruleMoved} rule${ruleMoved === 1 ? '' : 's'}`,
+          `${billMoved} bill${billMoved === 1 ? '' : 's'}`,
         ];
         setMessages((prev) => [
-          ...prev.map((x) => (x.id === m.id ? { ...x, status: 'applied' as const } : x)),
-          mk('assistant', `Saved — ${parts.join(', ')} moved to ${reassignLabel}.`),
+          // Only marked 'applied' — which hides the Apply button — once every
+          // planned write actually confirmed. A partial failure leaves the card
+          // pending so the SAME Apply button re-runs this path: plan is
+          // recomputed fresh from current state next time, which by now only
+          // still shows the rows that never moved.
+          ...prev.map((x) => (x.id === m.id ? { ...x, status: allMoved ? ('applied' as const) : x.status } : x)),
+          mk('assistant', allMoved
+            ? `Saved — ${parts.join(', ')} moved to ${reassignLabel}.`
+            : `${parts.join(', ')} moved to ${reassignLabel}; ${totalPlanned - totalMoved} could not be saved. Press Apply again to move the rest.`),
         ]);
       }
     } catch {

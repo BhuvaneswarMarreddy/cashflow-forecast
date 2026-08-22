@@ -25,11 +25,27 @@ export interface TransactionContextType {
    *  rule untouched. Same direct-write shape as toggleRule (local state first,
    *  Firestore queued) — not the applyDecision callable, which is for NEW rules. */
   updateRuleCategory: (id: string, category: string) => Promise<void>;
+  /** cashflow-mobile#24. Awaited twin of updateRuleCategory, used ONLY by
+   *  remove_category's reassignment sweep — see updateTransactionAwaited below
+   *  for why a genuinely-awaited path exists alongside the optimistic one. */
+  updateRuleCategoryAwaited: (id: string, category: string) => Promise<boolean>;
   addTransaction: (transaction: Omit<Transaction, 'id'>) => Promise<void>;
   addBulkTransactions: (
     transactions: (Omit<Transaction, 'id'> & { id?: string })[]
   ) => Promise<{ persisted: boolean } | undefined>;
   updateTransaction: (id: string, updates: Partial<Transaction>) => Promise<void>;
+  /**
+   * cashflow-mobile#24. Awaited twin of updateTransaction, used ONLY by
+   * remove_category's reassignment sweep (DataChatSheet.applyCategory).
+   * updateTransaction's own promise ALWAYS resolves — the Firestore write is
+   * fired with `.catch(console.warn)` and never awaited by the caller — so it
+   * cannot tell remove_category whether a row genuinely moved. This variant
+   * awaits the real write and reports true/false, and — unlike the optimistic
+   * sibling — only updates local state once the write is CONFIRMED, so a
+   * failed row is left exactly as it was and a repeat sweep (planCategoryRemoval
+   * re-run against current state) finds it again.
+   */
+  updateTransactionAwaited: (id: string, updates: Partial<Transaction>) => Promise<boolean>;
   deleteTransaction: (id: string) => Promise<void>;
   refreshTransactions: () => Promise<void>;
   getTransactionsByDate: (date: Date) => Transaction[];
@@ -276,6 +292,26 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
     [user?.id]
   );
 
+  // cashflow-mobile#24. Write FIRST, local state SECOND — the reverse of every
+  // other write in this file, deliberately: this is the one path that must be
+  // able to tell a caller the truth about whether a row moved.
+  const updateRuleCategoryAwaited = useCallback(
+    async (id: string, category: string): Promise<boolean> => {
+      if (!user?.id) return false;
+      try {
+        await updateDoc(doc(db, 'users', user.id, 'rules', id), { 'set.category': category });
+      } catch (err) {
+        console.warn('Mapping rule category update (awaited) failed:', err);
+        return false;
+      }
+      setRules((prev) =>
+        prev.map((r) => (r.id === id ? { ...r, set: { ...r.set, category: category as ExpenseCategory } } : r))
+      );
+      return true;
+    },
+    [user?.id]
+  );
+
   const addTransaction = async (transaction: Omit<Transaction, 'id'>) => {
     console.log('📝 [TransactionContext] addTransaction called:', transaction);
     
@@ -370,6 +406,30 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
         console.warn('Transaction update queued or failed:', err);
       });
     }
+  };
+
+  // cashflow-mobile#24. See updateTransactionAwaited's doc comment on the
+  // interface above: write FIRST, local state SECOND (the reverse of
+  // updateTransaction just above), so a failed write leaves nothing behind for
+  // a subsequent planCategoryRemoval to miss. An unsynced local id has no
+  // remote document to confirm — same skip updateTransaction makes — and
+  // counts as success since the local write already carries the change.
+  const updateTransactionAwaited = async (id: string, updates: Partial<Transaction>): Promise<boolean> => {
+    if (!user?.id) return false;
+    if (!isUnsyncedId(id)) {
+      try {
+        await firestoreService.updateTransaction(user.id, id, updates);
+      } catch (err) {
+        console.warn('Transaction update (awaited) failed:', err);
+        return false;
+      }
+    }
+    setRawTransactions((prev) => {
+      const updated = prev.map((t) => (t.id === id ? { ...t, ...updates } : t));
+      saveLocalTransactions(user.id, updated);
+      return updated;
+    });
+    return true;
   };
 
   const deleteTransaction = async (id: string) => {
@@ -533,9 +593,11 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
         deleteRule,
         toggleRule,
         updateRuleCategory,
+        updateRuleCategoryAwaited,
         addTransaction,
         addBulkTransactions,
         updateTransaction,
+        updateTransactionAwaited,
         deleteTransaction,
         refreshTransactions,
         getTransactionsByDate,

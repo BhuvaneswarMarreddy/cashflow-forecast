@@ -16,8 +16,8 @@ const addRule = jest.fn();
 const addBill = jest.fn();
 const getBills = jest.fn();
 const updateBill = jest.fn();
-const updateTransaction = jest.fn();
-const updateRuleCategory = jest.fn();
+const updateTransactionAwaited = jest.fn();
+const updateRuleCategoryAwaited = jest.fn();
 
 jest.mock('@/lib/callables', () => ({
   aiChat: (...args: unknown[]) => aiChat(...args),
@@ -61,8 +61,8 @@ jest.mock('@/context/TransactionContext', () => ({
     transactions: [...TRANSACTIONS, ...EXTRA_TRANSACTIONS],
     addRule,
     rules: RULES,
-    updateTransaction: (...args: unknown[]) => updateTransaction(...args),
-    updateRuleCategory: (...args: unknown[]) => updateRuleCategory(...args),
+    updateTransactionAwaited: (...args: unknown[]) => updateTransactionAwaited(...args),
+    updateRuleCategoryAwaited: (...args: unknown[]) => updateRuleCategoryAwaited(...args),
   }),
 }));
 
@@ -106,8 +106,8 @@ beforeEach(() => {
   addBill.mockReset().mockResolvedValue('new-bill-id');
   getBills.mockReset().mockResolvedValue([]);
   updateBill.mockReset().mockResolvedValue(undefined);
-  updateTransaction.mockReset().mockResolvedValue(undefined);
-  updateRuleCategory.mockReset().mockResolvedValue(undefined);
+  updateTransactionAwaited.mockReset().mockResolvedValue(true);
+  updateRuleCategoryAwaited.mockReset().mockResolvedValue(true);
   updateProfile.mockReset().mockResolvedValue(undefined);
   PROFILE_SETTINGS = {};
   RULES = [];
@@ -940,8 +940,8 @@ describe('the remove_category proposal card', () => {
     send('remove the Vacations category');
 
     expect(await screen.findByText('Remove "Vacations" — 1 transaction, 1 rule, 1 bill will move to Other')).toBeInTheDocument();
-    expect(updateTransaction).not.toHaveBeenCalled();
-    expect(updateRuleCategory).not.toHaveBeenCalled();
+    expect(updateTransactionAwaited).not.toHaveBeenCalled();
+    expect(updateRuleCategoryAwaited).not.toHaveBeenCalled();
     expect(updateBill).not.toHaveBeenCalled();
     expect(updateProfile).not.toHaveBeenCalled();
   });
@@ -955,8 +955,8 @@ describe('the remove_category proposal card', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 
-    await waitFor(() => expect(updateTransaction).toHaveBeenCalledWith('vac-1', { category: 'other' }));
-    expect(updateRuleCategory).toHaveBeenCalledWith('rule-vac', 'other');
+    await waitFor(() => expect(updateTransactionAwaited).toHaveBeenCalledWith('vac-1', { category: 'other' }));
+    expect(updateRuleCategoryAwaited).toHaveBeenCalledWith('rule-vac', 'other');
     expect(updateBill).toHaveBeenCalledWith('user-1', 'bill-vac', { category: 'other' });
     // Archived, not deleted — never orphaning the value for a row still mid-flight.
     expect(updateProfile).toHaveBeenCalledWith({
@@ -974,7 +974,7 @@ describe('the remove_category proposal card', () => {
 
     expect(await screen.findByText(/will move to Shopping/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
-    await waitFor(() => expect(updateTransaction).toHaveBeenCalledWith('vac-1', { category: 'shopping' }));
+    await waitFor(() => expect(updateTransactionAwaited).toHaveBeenCalledWith('vac-1', { category: 'shopping' }));
   });
 
   it('Cancel drops the proposal without writing anything', async () => {
@@ -986,7 +986,7 @@ describe('the remove_category proposal card', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(updateProfile).not.toHaveBeenCalled();
-    expect(updateTransaction).not.toHaveBeenCalled();
+    expect(updateTransactionAwaited).not.toHaveBeenCalled();
   });
 
   it('a category with nothing filed under it still previews and applies cleanly — zero everywhere', async () => {
@@ -1001,6 +1001,61 @@ describe('the remove_category proposal card', () => {
     expect(await screen.findByText('Remove "Vacations" — 0 transactions, 0 rules, 0 bills will move to Other')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     await waitFor(() => expect(updateProfile).toHaveBeenCalledTimes(1));
-    expect(updateTransaction).not.toHaveBeenCalled();
+    expect(updateTransactionAwaited).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The reviewed finding: updateTransaction/updateRuleCategory's promises always
+   * resolve (fire-and-forget with .catch(console.warn)), and updateProfile
+   * swallows too, so "Saved — N moved" used to be printed whether or not
+   * anything actually reached Firestore. These three prove the honest version:
+   * full success only when every write confirmed; a partial failure reports the
+   * true counts and leaves Apply live for a genuine retry; a failed write is
+   * never counted as moved.
+   */
+  it('reports partial failure honestly when a write does not confirm, and leaves Apply live to retry', async () => {
+    updateTransactionAwaited.mockResolvedValue(false); // the write "failed" — never counted as moved
+    aiChat.mockResolvedValue(proposal());
+    render(<DataChatSheet open onClose={() => {}} />);
+    await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+    send('remove the Vacations category');
+    await screen.findByText(/will move to Other/);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    expect(await screen.findByText(
+      '0 transactions, 1 rule, 1 bill moved to Other; 1 could not be saved. Press Apply again to move the rest.'
+    )).toBeInTheDocument();
+    // The category is still archived — a straggler stays targetable by its own
+    // stored `category` value regardless, so archiving does not orphan it.
+    expect(updateProfile).toHaveBeenCalledWith({
+      settings: { categories: [{ value: 'vacations', label: 'Vacations', archived: true }] },
+    });
+    // Not marked applied: the same Apply button is still there to retry.
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeInTheDocument();
+  });
+
+  it('a bill that failed to move stays out of local state, so a retry does not skip it', async () => {
+    // This component's own `bills` state (unlike the mocked transactions/rules
+    // context) only advances for a CONFIRMED write — the same guarantee
+    // planCategoryRemoval's retry sweep depends on for every write channel.
+    updateBill.mockRejectedValueOnce(new Error('permission-denied'));
+    aiChat.mockResolvedValue(proposal());
+    render(<DataChatSheet open onClose={() => {}} />);
+    await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+    send('remove the Vacations category');
+    await screen.findByText(/will move to Other/);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    expect(await screen.findByText(
+      '1 transaction, 1 rule, 0 bills moved to Other; 1 could not be saved. Press Apply again to move the rest.'
+    )).toBeInTheDocument();
+
+    updateBill.mockClear().mockResolvedValue(undefined);
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    // The bill still shows 'vacations' locally (the failed write never advanced
+    // it), so it is still in the retried plan and gets attempted again.
+    await waitFor(() => expect(updateBill).toHaveBeenCalledWith('user-1', 'bill-vac', { category: 'other' }));
   });
 });
