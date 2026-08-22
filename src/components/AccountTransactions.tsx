@@ -16,10 +16,11 @@ import {
   ArrowUpRight,
   ArrowDownRight,
 } from 'lucide-react';
-import { Transaction, PaymentAccount, EXPENSE_CATEGORIES, getMerchantColor } from '@/types';
+import { Transaction, PaymentAccount, getMerchantColor, resolveCategories } from '@/types';
 import { isPositive } from '@/lib/classify';
 import { format, parseISO, startOfMonth, endOfMonth, isWithinInterval } from 'date-fns';
 import { currentOf } from '@/lib/accounts';
+import { useUserProfile } from '@/context/UserProfileContext';
 
 interface AccountTransactionsProps {
   account: PaymentAccount;
@@ -27,6 +28,14 @@ interface AccountTransactionsProps {
 }
 
 export default function AccountTransactions({ account, transactions }: AccountTransactionsProps) {
+  const { profile } = useUserProfile();
+  // cashflow-mobile#24. A DISPLAY lookup, not a picker — the full resolved set,
+  // archived included, so a row still carrying a custom or since-archived
+  // category resolves to its real label/icon instead of the generic fallback.
+  const resolvedCategories = useMemo(
+    () => resolveCategories(profile?.settings),
+    [profile?.settings]
+  );
   const [isExpanded, setIsExpanded] = useState(false);
   const [showAll, setShowAll] = useState(false);
 
@@ -197,7 +206,7 @@ export default function AccountTransactions({ account, transactions }: AccountTr
           {/* Transaction List */}
           <div className="divide-y divide-[var(--border-color)]">
             {displayTransactions.map((txn) => {
-              const category = EXPENSE_CATEGORIES.find(c => c.value === txn.category);
+              const category = resolvedCategories.find(c => c.value === txn.category);
               const merchantColor = txn.merchant ? getMerchantColor(txn.merchant) : null;
               
               return (
