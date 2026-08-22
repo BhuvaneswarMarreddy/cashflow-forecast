@@ -20,7 +20,7 @@ import { PaymentAccount, Transaction, displayCategory } from '@/types';
 import { classifyTransaction } from './classify';
 
 /** Breadth caps. Totals are never sampled — these bound the LIST length only. */
-const MAX = { merchants: 40, months: 24, categories: 25, str: 60 };
+const MAX = { merchants: 40, months: 24, categories: 25, categoriesMonth: 15, str: 60 };
 
 export interface PeriodTotals {
   /** 'YYYY' or 'YYYY-MM' */
@@ -65,6 +65,15 @@ export interface LedgerSummary {
   monthsOmitted: number;
   byCategoryThisYear: CategoryTotal[];
   categoriesOmitted: number;
+  /**
+   * cashflow-mobile#25: "what did I spend this month, and on what" needs a month-scoped
+   * breakdown — byCategoryThisYear is a whole year, too coarse to answer it precisely.
+   * Same shape and rules as byCategoryThisYear: expense rows only, top ~15, omitted count.
+   */
+  byCategoryThisMonth: CategoryTotal[];
+  categoriesThisMonthOmitted: number;
+  byCategoryLastMonth: CategoryTotal[];
+  categoriesLastMonthOmitted: number;
   topMerchants: MerchantTotal[];
   merchantsOmitted: number;
 }
@@ -104,14 +113,26 @@ export function buildLedgerSummary(
       span: { from: '', to: '', transactions: 0 },
       byYear: [], byMonth: [], monthsOmitted: 0,
       byCategoryThisYear: [], categoriesOmitted: 0,
+      byCategoryThisMonth: [], categoriesThisMonthOmitted: 0,
+      byCategoryLastMonth: [], categoriesLastMonthOmitted: 0,
       topMerchants: [], merchantsOmitted: 0,
     };
   }
 
   const thisYear = today.slice(0, 4);
+  const thisMonthKey = today.slice(0, 7);
+  // Previous calendar month, correct across a year boundary (Jan -> prior Dec).
+  // UTC throughout — `today`/`date` are plain yyyy-MM-dd strings with no timezone
+  // of their own, so this must not let the machine's local zone shift the day.
+  const [ty, tm] = thisMonthKey.split('-').map(Number);
+  const prevMonthDate = new Date(Date.UTC(ty, tm - 2, 1));
+  const lastMonthKey = `${prevMonthDate.getUTCFullYear()}-${String(prevMonthDate.getUTCMonth() + 1).padStart(2, '0')}`;
+
   const years = new Map<string, Acc>();
   const months = new Map<string, Acc>();
   const cats = new Map<string, { spending: number; count: number }>();
+  const catsThisMonth = new Map<string, { spending: number; count: number }>();
+  const catsLastMonth = new Map<string, { spending: number; count: number }>();
   const merchants = new Map<string, {
     spending: number; income: number; transferred: number; count: number;
     cats: Map<string, number>; first: string; last: string;
@@ -142,6 +163,18 @@ export function buildLedgerSummary(
         c.count += 1;
         cats.set(label, c);
       }
+
+      if (kind === 'expense') {
+        const monthKey = date.slice(0, 7);
+        const bucket = monthKey === thisMonthKey ? catsThisMonth : monthKey === lastMonthKey ? catsLastMonth : null;
+        if (bucket) {
+          const label = displayCategory(t);
+          const c = bucket.get(label) ?? { spending: 0, count: 0 };
+          c.spending += t.amount;
+          c.count += 1;
+          bucket.set(label, c);
+        }
+      }
     }
 
     const name = clip(t.merchant || t.title || '');
@@ -162,9 +195,13 @@ export function buildLedgerSummary(
   }
 
   const allMonths = toPeriods(months);
-  const allCats = [...cats.entries()]
-    .sort((a, b) => b[1].spending - a[1].spending)
-    .map(([category, c]) => ({ category, spending: r2(c.spending), count: c.count }));
+  const toCatTotals = (m: Map<string, { spending: number; count: number }>): CategoryTotal[] =>
+    [...m.entries()]
+      .sort((a, b) => b[1].spending - a[1].spending)
+      .map(([category, c]) => ({ category, spending: r2(c.spending), count: c.count }));
+  const allCats = toCatTotals(cats);
+  const allCatsThisMonth = toCatTotals(catsThisMonth);
+  const allCatsLastMonth = toCatTotals(catsLastMonth);
   // Rank by total money moved — INCLUDING transfers, or a merchant the owner sends
   // six figures through ranks below a coffee shop and falls off the list entirely.
   const moved = (m: { spending: number; income: number; transferred: number }) =>
@@ -178,6 +215,10 @@ export function buildLedgerSummary(
     monthsOmitted: Math.max(0, allMonths.length - MAX.months),
     byCategoryThisYear: allCats.slice(0, MAX.categories),
     categoriesOmitted: Math.max(0, allCats.length - MAX.categories),
+    byCategoryThisMonth: allCatsThisMonth.slice(0, MAX.categoriesMonth),
+    categoriesThisMonthOmitted: Math.max(0, allCatsThisMonth.length - MAX.categoriesMonth),
+    byCategoryLastMonth: allCatsLastMonth.slice(0, MAX.categoriesMonth),
+    categoriesLastMonthOmitted: Math.max(0, allCatsLastMonth.length - MAX.categoriesMonth),
     topMerchants: rankedMerchants.slice(0, MAX.merchants).map(([name, m]) => ({
       name,
       spending: r2(m.spending),
