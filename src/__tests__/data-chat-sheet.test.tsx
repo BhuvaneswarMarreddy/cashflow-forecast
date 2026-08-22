@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import DataChatSheet from '@/components/DataChatSheet';
+import DataChatSheet, { resolveBillPaymentMethod } from '@/components/DataChatSheet';
 import { applyMappingRules, rulePreview, MappingRule } from '@/lib/mapping-rules';
 import { Transaction } from '@/types';
 
@@ -12,10 +12,15 @@ import { Transaction } from '@/types';
 
 const aiChat = jest.fn();
 const addRule = jest.fn();
+const addBill = jest.fn();
 
 jest.mock('@/lib/callables', () => ({
   aiChat: (...args: unknown[]) => aiChat(...args),
   callableErrorMessage: () => 'AI request failed. Please try again.',
+}));
+
+jest.mock('@/lib/firestore', () => ({
+  addBill: (...args: unknown[]) => addBill(...args),
 }));
 
 const txn = (id: string, title: string, merchant: string): Transaction => ({
@@ -64,7 +69,7 @@ const updateProfile = jest.fn().mockResolvedValue(undefined);
 let PROFILE_SETTINGS: { assumedMonthlySpend?: number | null } = {};
 jest.mock('@/context/UserProfileContext', () => ({
   useUserProfile: () => ({
-    profile: { currency: 'USD', paymentAccounts: MOCK_ACCOUNTS, settings: PROFILE_SETTINGS },
+    profile: { id: 'user-1', currency: 'USD', paymentAccounts: MOCK_ACCOUNTS, settings: PROFILE_SETTINGS },
     reconcileAccount,
     incomeContext: MOCK_INCOME_CONTEXT,
     updateProfile: (...args: unknown[]) => updateProfile(...args),
@@ -79,6 +84,7 @@ beforeAll(() => {
 beforeEach(() => {
   aiChat.mockReset();
   addRule.mockReset();
+  addBill.mockReset().mockResolvedValue('new-bill-id');
   updateProfile.mockReset().mockResolvedValue(undefined);
   PROFILE_SETTINGS = {};
 });
@@ -394,5 +400,112 @@ describe('the monthly-spend override proposal card', () => {
     PROFILE_SETTINGS = { assumedMonthlySpend: -500 };
     const { rerender } = render(<DataChatSheet open onClose={() => {}} />);
     expect(screen.getByText(/\(derived\) → \$3,000\.00 \(your assumption\)/)).toBeInTheDocument();
+  });
+});
+
+/**
+ * record_bill (#10/#14). The scene this fixes: an owner attached an Apple Card
+ * installment screenshot, asked to record it, and the model said "This will be
+ * recorded" with NOTHING written. This card is the actual write path.
+ */
+describe('resolveBillPaymentMethod — accountName -> paymentMethodId', () => {
+  it('resolves an exact (case-insensitive) label match', () => {
+    expect(resolveBillPaymentMethod('Apple Card')).toBe('apple-card');
+    expect(resolveBillPaymentMethod('apple card')).toBe('apple-card');
+  });
+
+  it('resolves a unique substring match', () => {
+    expect(resolveBillPaymentMethod('Apple')).toBe('apple-card');
+  });
+
+  it('no name at all defaults to "manual" — the model just did not say', () => {
+    expect(resolveBillPaymentMethod(undefined)).toBe('manual');
+  });
+
+  it('a name that matches nothing resolves to null — unresolvable, not a guess', () => {
+    expect(resolveBillPaymentMethod('Chase Sapphire')).toBeNull();
+  });
+});
+
+describe('the record_bill proposal card', () => {
+  const proposal = (over: Record<string, unknown> = {}) => ({
+    success: true,
+    result: {
+      action: 'record_bill',
+      vendor: 'Apple Card installment - iPhone',
+      amount: 45.79,
+      frequency: 'monthly',
+      dueDay: 15,
+      accountName: 'Apple Card',
+      installmentsRemaining: 13,
+      nonNegotiable: true,
+      reason: 'You said $45.79/mo on the Apple Card, 13 payments left.',
+      ...over,
+    },
+  });
+
+  it('shows the proposal and writes NOTHING until Apply', async () => {
+    aiChat.mockResolvedValue(proposal());
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('record my iPhone installment, $45.79 monthly on Apple Card, $595.31 remaining');
+
+    expect(await screen.findByText('Record Apple Card installment - iPhone — $45.79 monthly (day 15)')).toBeInTheDocument();
+    expect(addBill).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    await waitFor(() => expect(addBill).toHaveBeenCalledTimes(1));
+    expect(addBill).toHaveBeenCalledWith('user-1', expect.objectContaining({
+      vendor: 'Apple Card installment - iPhone',
+      amount: 45.79,
+      frequency: 'monthly',
+      autopayDay: 15,
+      paymentMethodId: 'apple-card',
+      installmentsRemaining: 13,
+      nonNegotiable: true,
+      lifecycleStatus: 'active',
+    }));
+    expect(await screen.findByText(/Saved/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+  });
+
+  it('Cancel drops the proposal without saving it', async () => {
+    aiChat.mockResolvedValue(proposal());
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('record my iPhone installment');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+    expect(addBill).not.toHaveBeenCalled();
+  });
+
+  it('an accountName that matches nothing gets words and NO button — the model never picks the method', async () => {
+    aiChat.mockResolvedValue(proposal({ accountName: 'Chase Sapphire' }));
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('record it on my chase sapphire');
+
+    expect(await screen.findByText(/couldn't match .Chase Sapphire./)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+  });
+
+  it('no accountName at all still offers Apply, defaulting to "Manual / other"', async () => {
+    const { accountName, ...withoutAccount } = proposal().result;
+    aiChat.mockResolvedValue({ success: true, result: withoutAccount });
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('record my netflix subscription');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(addBill).toHaveBeenCalledTimes(1));
+    expect(addBill).toHaveBeenCalledWith('user-1', expect.objectContaining({ paymentMethodId: 'manual' }));
+  });
+
+  it('never claims a save happened before Apply is pressed — the live overpromise bug', async () => {
+    aiChat.mockResolvedValue(proposal());
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('record my iPhone installment');
+
+    await screen.findByText(/Apple Card installment - iPhone/);
+    expect(screen.queryByText(/Saved/)).not.toBeInTheDocument();
+    expect(addBill).not.toHaveBeenCalled();
   });
 });

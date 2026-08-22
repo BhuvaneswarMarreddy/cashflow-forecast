@@ -12,6 +12,8 @@ import { formatMoney } from '@/lib/money';
 import { sanitizeAssumedSpend } from '@/lib/profile-settings';
 import { matchIncomeDeposits } from '@/lib/ask';
 import { deriveAccountBalance, monthlyAverages } from '@/lib/forecast';
+import { addBill } from '@/lib/firestore';
+import { BillFrequency, PAYMENT_METHODS } from '@/lib/bills';
 import type { IncomeContext } from '@/lib/classify';
 import { PaymentAccount, Transaction, displayCategory } from '@/types';
 
@@ -44,6 +46,17 @@ interface ChatMessage {
   income?: { name: string; matchText: string[] };
   /** FIN-SPEND-001 (#133): set when the assistant proposed a runway spend override. */
   spend?: { amount: number };
+  /** #10/#14: set when the assistant proposed recording a bill. */
+  bill?: {
+    vendor: string;
+    amount: number;
+    frequency: BillFrequency;
+    dueDay?: number;
+    accountName?: string;
+    endDate?: string;
+    installmentsRemaining?: number;
+    nonNegotiable?: boolean;
+  };
   status?: 'pending' | 'applied';
 }
 
@@ -60,6 +73,28 @@ export function resolveAccount(name: string, accounts: readonly PaymentAccount[]
   if (exact.length === 1) return exact[0];
   const contains = accounts.filter((a) => a.name.toLowerCase().includes(n));
   return contains.length === 1 ? contains[0] : null;
+}
+
+/**
+ * accountName -> paymentMethodId, same exact-then-unique-substring algorithm as
+ * resolveAccount, run against the bundled PAYMENT_METHODS registry (bills.ts)
+ * instead of the owner's live account list — the register is a fixed set of
+ * institutions, not accounts.
+ *
+ * No name given at all (the model never mentioned one) is NOT the same as an
+ * unresolvable name: recording a bill still needs SOME paymentMethodId (the
+ * schema requires it), so an absent name defaults to 'manual' rather than
+ * blocking the whole proposal. A name that WAS given and matches nothing still
+ * resolves to null — unresolvable, not a guess — exactly resolveAccount's contract.
+ */
+export function resolveBillPaymentMethod(name: string | undefined): string | null {
+  if (!name || !name.trim()) return 'manual';
+  const n = name.trim().toLowerCase();
+  const entries = Object.entries(PAYMENT_METHODS);
+  const exact = entries.filter(([, m]) => m.label.trim().toLowerCase() === n);
+  if (exact.length === 1) return exact[0][0];
+  const contains = entries.filter(([, m]) => m.label.toLowerCase().includes(n));
+  return contains.length === 1 ? contains[0][0] : null;
 }
 
 export default function DataChatSheet({ open, onClose, seed }: {
@@ -200,6 +235,20 @@ export default function DataChatSheet({ open, onClose, seed }: {
                 spend: { amount: reply.amount },
                 status: 'pending',
               })
+          : reply?.action === 'record_bill'
+            ? mk('assistant', reply.reason, {
+                bill: {
+                  vendor: reply.vendor,
+                  amount: reply.amount,
+                  frequency: reply.frequency,
+                  dueDay: reply.dueDay,
+                  accountName: reply.accountName,
+                  endDate: reply.endDate,
+                  installmentsRemaining: reply.installmentsRemaining,
+                  nonNegotiable: reply.nonNegotiable,
+                },
+                status: 'pending',
+              })
             : mk('assistant', explanation
               || "I got a reply I couldn't read. Try saying it as a rule — for example “Turo is Travel”."),
       ]);
@@ -236,7 +285,7 @@ export default function DataChatSheet({ open, onClose, seed }: {
   };
 
   const dismiss = (id: string) =>
-    setMessages((prev) => prev.map((x) => (x.id === id ? { ...x, rule: undefined, balance: undefined, income: undefined, spend: undefined, status: undefined } : x)));
+    setMessages((prev) => prev.map((x) => (x.id === id ? { ...x, rule: undefined, balance: undefined, income: undefined, spend: undefined, bill: undefined, status: undefined } : x)));
 
   /** THE one path from a balance proposal to the store — a button press, same
    *  reconcile() the accounts screen used before its manual knob was removed. */
@@ -306,6 +355,44 @@ export default function DataChatSheet({ open, onClose, seed }: {
       setMessages((prev) => [
         ...prev.map((x) => (x.id === m.id ? { ...x, status: 'applied' as const } : x)),
         mk('assistant', `Saved — runway now assumes ${formatMoney(m.spend!.amount, profile?.currency, 2)} a month, until you clear it.`),
+      ]);
+    } catch {
+      setMessages((prev) => [...prev, mk('assistant', 'That could not be saved. Please try again.')]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * #10/#14. record_bill -> a Bill row (src/lib/bills.ts) via addBill(). accountName
+   * resolves to a paymentMethodId CLIENT-side (resolveBillPaymentMethod) exactly like
+   * applyBalance resolves an account — an unresolvable name renders no button, so this
+   * never fires with a null paymentMethodId. migrationStatus/lifecycleStatus mirror
+   * BillForm's own "Add manually" defaults (BillsTab.tsx) — this is a manually
+   * recorded row, not an audited-migration one.
+   */
+  const applyBill = async (m: ChatMessage) => {
+    if (!m.bill || busy || !profile?.id) return;
+    const paymentMethodId = resolveBillPaymentMethod(m.bill.accountName);
+    if (!paymentMethodId) return;
+    setBusy(true);
+    try {
+      await addBill(profile.id, {
+        vendor: m.bill.vendor,
+        amount: m.bill.amount,
+        frequency: m.bill.frequency,
+        autopayDay: m.bill.dueDay,
+        paymentMethodId,
+        migrationStatus: 'to-review',
+        lifecycleStatus: 'active',
+        nonNegotiable: m.bill.nonNegotiable,
+        endDate: m.bill.endDate,
+        installmentsRemaining: m.bill.installmentsRemaining,
+        source: 'manual',
+      });
+      setMessages((prev) => [
+        ...prev.map((x) => (x.id === m.id ? { ...x, status: 'applied' as const } : x)),
+        mk('assistant', `Saved — ${m.bill!.vendor} now shows in Upcoming and Bills, ${formatMoney(m.bill!.amount, profile?.currency, 2)} ${m.bill!.frequency}.`),
       ]);
     } catch {
       setMessages((prev) => [...prev, mk('assistant', 'That could not be saved. Please try again.')]);
@@ -446,6 +533,16 @@ export default function DataChatSheet({ open, onClose, seed }: {
                   busy={busy}
                   onApply={() => applySpend(m)}
                   onClear={() => clearSpend(m)}
+                  onCancel={() => dismiss(m.id)}
+                />
+              )}
+              {m.bill && (
+                <BillProposalCard
+                  proposal={m.bill}
+                  currency={profile?.currency}
+                  pending={m.status === 'pending'}
+                  busy={busy}
+                  onApply={() => applyBill(m)}
                   onCancel={() => dismiss(m.id)}
                 />
               )}
@@ -695,6 +792,71 @@ function SpendProposalCard({ proposal, currentAmount, currentIsOverride, currenc
         <div className="flex gap-2 flex-wrap mt-3">
           <button type="button" onClick={onApply} disabled={busy} className="btn-primary min-h-[44px] px-4 text-sm disabled:opacity-50">Apply</button>
           <button type="button" onClick={onClear} disabled={busy} className="min-h-[44px] px-4 text-sm rounded-card border border-[var(--border-color)] text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] transition-colors disabled:opacity-50">Back to derived</button>
+          <button type="button" onClick={onCancel} disabled={busy} className="min-h-[44px] px-4 text-sm rounded-card border border-[var(--border-color)] text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] transition-colors disabled:opacity-50">Cancel</button>
+        </div>
+      ) : (
+        <p className="mt-3 text-xs text-[var(--accent-success)]">Applied</p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * #10/#14. What's about to be recorded: vendor, per-payment amount, cadence, the
+ * resolved payment method (or the "couldn't match" text + no button, same contract
+ * as BalanceProposalCard), and the end condition if any. DISPLAY ONLY is not this
+ * card's job to say — it is Bills/Upcoming's, everywhere those numbers are shown.
+ */
+function BillProposalCard({ proposal, currency, pending, busy, onApply, onCancel }: {
+  proposal: {
+    vendor: string;
+    amount: number;
+    frequency: BillFrequency;
+    dueDay?: number;
+    accountName?: string;
+    endDate?: string;
+    installmentsRemaining?: number;
+    nonNegotiable?: boolean;
+  };
+  currency?: string;
+  pending: boolean;
+  busy: boolean;
+  onApply: () => void;
+  onCancel: () => void;
+}) {
+  // Always 2 decimals — a figure the owner is confirming, same convention as
+  // BalanceProposalCard/SpendProposalCard's m2.
+  const m2 = (n: number) => formatMoney(n, currency, 2);
+  const paymentMethodId = resolveBillPaymentMethod(proposal.accountName);
+
+  if (!paymentMethodId) {
+    return (
+      <p className="mt-3 text-xs text-[var(--foreground-muted)]">
+        I couldn&apos;t match &ldquo;{proposal.accountName}&rdquo; to one of your payment methods, so nothing is offered.
+      </p>
+    );
+  }
+  const methodLabel = PAYMENT_METHODS[paymentMethodId]?.label;
+
+  const end = proposal.endDate
+    ? `ends ${proposal.endDate}`
+    : proposal.installmentsRemaining
+      ? `${proposal.installmentsRemaining} payment${proposal.installmentsRemaining === 1 ? '' : 's'} left`
+      : null;
+
+  return (
+    <div className="mt-3 rounded-card border border-[var(--border-color)] bg-[var(--background)] p-3">
+      <p className="font-medium text-[var(--foreground)]">
+        {`Record ${proposal.vendor} — ${m2(proposal.amount)} ${proposal.frequency}${proposal.dueDay ? ` (day ${proposal.dueDay})` : ''}`}
+      </p>
+      <p className="text-xs text-[var(--foreground-muted)] mt-1">
+        {[methodLabel, end, proposal.nonNegotiable ? 'locked — reserved first in every plan' : null]
+          .filter(Boolean)
+          .join(' · ')}
+      </p>
+      {pending ? (
+        <div className="flex gap-2 mt-3">
+          <button type="button" onClick={onApply} disabled={busy} className="btn-primary min-h-[44px] px-4 text-sm disabled:opacity-50">Apply</button>
           <button type="button" onClick={onCancel} disabled={busy} className="min-h-[44px] px-4 text-sm rounded-card border border-[var(--border-color)] text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] transition-colors disabled:opacity-50">Cancel</button>
         </div>
       ) : (
