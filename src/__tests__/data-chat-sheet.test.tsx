@@ -106,10 +106,15 @@ describe('DataChatSheet', () => {
 
   it('previews a proposed rule with a match count and writes NOTHING until Apply', async () => {
     aiChat.mockResolvedValue(RULE_REPLY);
+    // #130: addRule now goes through applyDecision and resolves { rule, changed } —
+    // the server's ChangeSummary, not a bare MappingRule.
     addRule.mockResolvedValue({
-      id: 'r1', createdAt: '2026-08-01T00:00:00.000Z', enabled: true,
-      match: { field: 'merchant', op: 'contains', value: 'Instacart' },
-      set: { category: 'food', sourceCategory: 'Groceries' },
+      rule: {
+        id: 'r1', createdAt: '2026-08-01T00:00:00.000Z', enabled: true,
+        match: { field: 'merchant', op: 'contains', value: 'Instacart' },
+        set: { category: 'food', sourceCategory: 'Groceries' },
+      },
+      changed: { transactionsMatched: 2, monthsAffected: ['2026-07'] },
     });
 
     render(<DataChatSheet open onClose={() => {}} />);
@@ -130,7 +135,8 @@ describe('DataChatSheet', () => {
       set: { category: 'food', sourceCategory: 'Groceries' },
       enabled: true,
     });
-    expect(await screen.findByText(/^Saved —/)).toBeInTheDocument();
+    // #130: the applied message includes the server's change count, not just "Saved".
+    expect(await screen.findByText(/^Saved —.*2 existing transactions changed/)).toBeInTheDocument();
     expect(screen.queryByText('Apply')).not.toBeInTheDocument();
   });
 

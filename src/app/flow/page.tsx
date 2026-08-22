@@ -1301,7 +1301,21 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
           setAnnouncement('That answer could not be saved. Please try again.')
         );
       }
-      if (decision.rule) void addRule(decision.rule).catch(() => {});
+      // #130: addRule now goes through applyDecision — the write can genuinely
+      // fail (not just queue offline), so this needs the same catch-and-announce
+      // parity the review-write loop above already has, instead of the silent
+      // .catch(() => {}) that used to swallow it. On success the server's
+      // ChangeSummary (a real count, not the client-side preview) supersedes the
+      // "Saved for N rows" announcement below with what the rule actually did.
+      if (decision.rule) {
+        void addRule(decision.rule)
+          .then((result) => {
+            if (!result) return;
+            const n = result.changed.transactionsMatched;
+            setAnnouncement(`Rule saved — ${n} transaction${n === 1 ? '' : 's'} re-categorised.`);
+          })
+          .catch(() => setAnnouncement('That rule could not be saved. Please try again.'));
+      }
       // MAP-002 — the derived income source, present only when the owner ticked the offer.
       if (decision.incomeSourceOffer) {
         void addIncomeSource(decision.incomeSourceOffer).catch(() =>
