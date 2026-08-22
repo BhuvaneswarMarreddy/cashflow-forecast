@@ -18,6 +18,7 @@ import {
   Transaction,
   TransactionType,
 } from '@/types';
+import type { BillFrequency } from './bills';
 import { buildLedgerSummary, LedgerSummary } from './chat-summary';
 import { describeRule, MappingRule, NewMappingRule } from './mapping-rules';
 import { MAX_PROPOSED_LINKS, ReviewCandidate } from './candidates';
@@ -91,6 +92,23 @@ export type ChatAction =
    *  that drives runway. amount is DOLLARS, > 0, capped at 1,000,000 — a model
    *  typo here would relabel the owner's own runway deadline, not just a rule. */
   | { action: 'set_monthly_spend'; amount: number; reason: string }
+  /** #10/#14. Proposes a Bill row — a recurring/installment obligation that then
+   *  shows in Upcoming and the Bills register. DISPLAY ONLY: this never reaches
+   *  forecast/runway math (see billUpcomingEvents in bills.ts). accountName, if
+   *  given, resolves CLIENT-side against the payment-method registry, same
+   *  unresolvable-means-no-button contract as set_account_balance's accountName. */
+  | {
+      action: 'record_bill';
+      vendor: string;
+      amount: number;
+      frequency: BillFrequency;
+      dueDay?: number;
+      accountName?: string;
+      endDate?: string;
+      installmentsRemaining?: number;
+      nonNegotiable?: boolean;
+      reason: string;
+    }
   | RecoveryAction;
 
 /**
@@ -136,12 +154,16 @@ const MAX = {
   explanation: 500,
   candidateId: 400,
   transactionId: 128,
+  // firestore.rules' isValidString(vendor, 1, 200) — the same ceiling the write itself enforces.
+  vendor: 200,
 } as const;
 
 const CATEGORIES: readonly string[] = EXPENSE_CATEGORIES.map((c) => c.value);
 const FIELDS: readonly string[] = ['merchant', 'title', 'description'];
 const OPS: readonly string[] = ['contains', 'equals'];
 const TYPES: readonly string[] = ['expense', 'income', 'transfer'];
+// Mirrors bills.ts's BillFrequency exactly — a closed set, not income's ('yearly' vs 'annual').
+const BILL_FREQUENCIES: readonly string[] = ['weekly', 'biweekly', 'monthly', 'quarterly', 'semiannual', 'annual'];
 
 const clip = (s: string, max: number = MAX.str) => s.trim().slice(0, max);
 
@@ -510,6 +532,77 @@ export function parseChatAction(raw: unknown, ctx?: RecoveryContext): ChatAction
     )].slice(0, 12);
     if (!matchText.length) return null;
     return { action: 'set_income_source', name, matchText, reason };
+  }
+
+  if (action === 'record_bill') {
+    const o = record(raw, [
+      'action', 'vendor', 'amount', 'frequency', 'dueDay', 'accountName',
+      'endDate', 'installmentsRemaining', 'nonNegotiable', 'reason',
+    ]);
+    if (!o) return null;
+
+    const vendor = str(o.vendor, MAX.vendor);
+    const reason = str(o.reason, MAX.explanation);
+    if (!vendor || !reason) return null;
+
+    const amount = o.amount;
+    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0 || amount > 100_000) return null;
+
+    if (typeof o.frequency !== 'string' || !BILL_FREQUENCIES.includes(o.frequency)) return null;
+    const frequency = o.frequency as BillFrequency;
+
+    let dueDay: number | undefined;
+    if (o.dueDay !== undefined) {
+      if (typeof o.dueDay !== 'number' || !Number.isInteger(o.dueDay) || o.dueDay < 1 || o.dueDay > 31) return null;
+      dueDay = o.dueDay;
+    }
+
+    let accountName: string | undefined;
+    if (o.accountName !== undefined) {
+      const a = str(o.accountName, MAX.str);
+      if (!a) return null; // present but empty — the model said nothing, don't pretend it did
+      accountName = a;
+    }
+
+    let endDate: string | undefined;
+    if (o.endDate !== undefined) {
+      if (typeof o.endDate !== 'string' || !isIsoDate(o.endDate)) return null;
+      endDate = o.endDate;
+    }
+
+    let installmentsRemaining: number | undefined;
+    if (o.installmentsRemaining !== undefined) {
+      if (
+        typeof o.installmentsRemaining !== 'number' ||
+        !Number.isInteger(o.installmentsRemaining) ||
+        o.installmentsRemaining < 1 ||
+        o.installmentsRemaining > 480
+      ) return null;
+      installmentsRemaining = o.installmentsRemaining;
+    }
+
+    // Either an end date or a payment count, never both — two answers to "when does
+    // this stop" is worse than one, and the model can always ask instead of guessing.
+    if (endDate !== undefined && installmentsRemaining !== undefined) return null;
+
+    let nonNegotiable: boolean | undefined;
+    if (o.nonNegotiable !== undefined) {
+      if (typeof o.nonNegotiable !== 'boolean') return null;
+      nonNegotiable = o.nonNegotiable;
+    }
+
+    return {
+      action: 'record_bill',
+      vendor,
+      amount: Math.round(amount * 100) / 100,
+      frequency,
+      ...(dueDay !== undefined ? { dueDay } : {}),
+      ...(accountName !== undefined ? { accountName } : {}),
+      ...(endDate !== undefined ? { endDate } : {}),
+      ...(installmentsRemaining !== undefined ? { installmentsRemaining } : {}),
+      ...(nonNegotiable !== undefined ? { nonNegotiable } : {}),
+      reason,
+    };
   }
 
   if (action in CANDIDATE_ACTIONS || action in TRANSACTION_ACTIONS) {

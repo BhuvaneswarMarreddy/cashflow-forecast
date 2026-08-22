@@ -274,3 +274,118 @@ describe('set_monthly_spend — FIN-SPEND-001, the owner\'s runway assumption', 
     expect(parseChatAction({ ...valid, amount: 1_000_000 })).toEqual({ ...valid, amount: 1_000_000 });
   });
 });
+
+describe('record_bill — the chat verb this task adds (issues #10/#14)', () => {
+  const valid = {
+    action: 'record_bill',
+    vendor: 'Apple Card installment - iPhone',
+    amount: 45.79,
+    frequency: 'monthly',
+    dueDay: 15,
+    accountName: 'Apple Card',
+    installmentsRemaining: 13,
+    nonNegotiable: true,
+    reason: 'You said $45.79/mo on the Apple Card, 13 payments left.',
+  };
+
+  it('accepts the full well-formed proposal verbatim', () => {
+    expect(parseChatAction(valid)).toEqual(valid);
+  });
+
+  it('accepts the minimal shape — only vendor/amount/frequency/reason required', () => {
+    const minimal = { action: 'record_bill', vendor: 'Netflix', amount: 15.49, frequency: 'monthly', reason: 'Netflix, $15.49/mo.' };
+    expect(parseChatAction(minimal)).toEqual(minimal);
+  });
+
+  it('rounds amount to cents precision like every other money amount here', () => {
+    expect(parseChatAction({ ...valid, amount: 45.786 })).toEqual({ ...valid, amount: 45.79 });
+  });
+
+  it('rejects an unknown/invented frequency rather than coercing it', () => {
+    expect(parseChatAction({ ...valid, frequency: 'daily' })).toBeNull();
+    expect(parseChatAction({ ...valid, frequency: 'yearly' })).toBeNull(); // income's spelling, not bills'
+  });
+
+  it('accepts every closed BillFrequency value', () => {
+    for (const frequency of ['weekly', 'biweekly', 'monthly', 'quarterly', 'semiannual', 'annual']) {
+      const minimal = { action: 'record_bill', vendor: 'X', amount: 10, frequency, reason: 'r' };
+      expect(parseChatAction(minimal)).toEqual(minimal);
+    }
+  });
+
+  it('rejects a bad amount rather than coercing it', () => {
+    expect(parseChatAction({ ...valid, amount: 'a lot' })).toBeNull();
+    expect(parseChatAction({ ...valid, amount: Infinity })).toBeNull();
+    expect(parseChatAction({ ...valid, amount: NaN })).toBeNull();
+    expect(parseChatAction({ ...valid, amount: 0 })).toBeNull();
+    expect(parseChatAction({ ...valid, amount: -5 })).toBeNull();
+    expect(parseChatAction({ ...valid, amount: 100_001 })).toBeNull(); // over the ceiling
+  });
+
+  it('accepts exactly the amount ceiling', () => {
+    expect(parseChatAction({ ...valid, amount: 100_000 })).toEqual({ ...valid, amount: 100_000 });
+  });
+
+  it('rejects a dueDay outside 1-31, or non-integer', () => {
+    expect(parseChatAction({ ...valid, dueDay: 0 })).toBeNull();
+    expect(parseChatAction({ ...valid, dueDay: 32 })).toBeNull();
+    expect(parseChatAction({ ...valid, dueDay: 15.5 })).toBeNull();
+    expect(parseChatAction({ ...valid, dueDay: '15' })).toBeNull();
+  });
+
+  it('accepts dueDay at both boundaries', () => {
+    expect(parseChatAction({ ...valid, dueDay: 1 })).toEqual({ ...valid, dueDay: 1 });
+    expect(parseChatAction({ ...valid, dueDay: 31 })).toEqual({ ...valid, dueDay: 31 });
+  });
+
+  it('rejects a malformed endDate', () => {
+    const { installmentsRemaining, ...withoutInstallments } = valid;
+    expect(parseChatAction({ ...withoutInstallments, endDate: '2027-1-1' })).toBeNull();
+    expect(parseChatAction({ ...withoutInstallments, endDate: 'not a date' })).toBeNull();
+  });
+
+  it('accepts a well-formed endDate when installmentsRemaining is absent', () => {
+    const { installmentsRemaining, ...withoutInstallments } = valid;
+    expect(parseChatAction({ ...withoutInstallments, endDate: '2027-09-15' }))
+      .toEqual({ ...withoutInstallments, endDate: '2027-09-15' });
+  });
+
+  it('rejects installmentsRemaining outside 1-480, or non-integer', () => {
+    expect(parseChatAction({ ...valid, installmentsRemaining: 0 })).toBeNull();
+    expect(parseChatAction({ ...valid, installmentsRemaining: 481 })).toBeNull();
+    expect(parseChatAction({ ...valid, installmentsRemaining: 3.5 })).toBeNull();
+  });
+
+  it('rejects BOTH endDate and installmentsRemaining together — pick one', () => {
+    expect(parseChatAction({ ...valid, endDate: '2027-09-15', installmentsRemaining: 13 })).toBeNull();
+  });
+
+  it('accepts neither endDate nor installmentsRemaining (an open-ended bill)', () => {
+    const { installmentsRemaining, ...rest } = valid;
+    expect(parseChatAction(rest)).toEqual(rest);
+  });
+
+  it('rejects a non-boolean nonNegotiable rather than coercing it', () => {
+    expect(parseChatAction({ ...valid, nonNegotiable: 'yes' })).toBeNull();
+    expect(parseChatAction({ ...valid, nonNegotiable: 1 })).toBeNull();
+  });
+
+  it('rejects an empty vendor or reason — a silent action', () => {
+    expect(parseChatAction({ ...valid, vendor: '' })).toBeNull();
+    expect(parseChatAction({ ...valid, vendor: '   ' })).toBeNull();
+    expect(parseChatAction({ ...valid, reason: '' })).toBeNull();
+  });
+
+  it('rejects an unknown top-level key rather than dropping it silently', () => {
+    expect(parseChatAction({ ...valid, extra: 1 })).toBeNull();
+  });
+
+  it('accountName is optional — a bill can be recorded with no card named', () => {
+    const { accountName, ...rest } = valid;
+    expect(parseChatAction(rest)).toEqual(rest);
+  });
+
+  it('rejects an empty accountName rather than treating it as absent', () => {
+    expect(parseChatAction({ ...valid, accountName: '' })).toBeNull();
+  });
+});
