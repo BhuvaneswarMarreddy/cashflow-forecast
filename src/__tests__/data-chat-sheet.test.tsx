@@ -4,7 +4,7 @@ import '@testing-library/jest-dom';
 import DataChatSheet, { resolveBillPaymentMethod, resolveBillAnchor } from '@/components/DataChatSheet';
 import { applyMappingRules, rulePreview, MappingRule } from '@/lib/mapping-rules';
 import { billUpcomingEvents, Bill } from '@/lib/bills';
-import { Transaction } from '@/types';
+import { ExpenseCategory, Transaction } from '@/types';
 
 /**
  * The one thing this UI must never get wrong: a proposed rule is a PREVIEW.
@@ -15,6 +15,9 @@ const aiChat = jest.fn();
 const addRule = jest.fn();
 const addBill = jest.fn();
 const getBills = jest.fn();
+const updateBill = jest.fn();
+const updateTransaction = jest.fn();
+const updateRuleCategory = jest.fn();
 
 jest.mock('@/lib/callables', () => ({
   aiChat: (...args: unknown[]) => aiChat(...args),
@@ -24,6 +27,7 @@ jest.mock('@/lib/callables', () => ({
 jest.mock('@/lib/firestore', () => ({
   addBill: (...args: unknown[]) => addBill(...args),
   getBills: (...args: unknown[]) => getBills(...args),
+  updateBill: (...args: unknown[]) => updateBill(...args),
 }));
 
 const txn = (id: string, title: string, merchant: string): Transaction => ({
@@ -47,8 +51,19 @@ const TRANSACTIONS = [
   } as Transaction,
 ];
 
+// cashflow-mobile#24: mutable so remove_category tests can put a rule/extra
+// transaction in play without disturbing the fixed TRANSACTIONS every other
+// test in this file already asserts exact counts against.
+let RULES: MappingRule[] = [];
+let EXTRA_TRANSACTIONS: Transaction[] = [];
 jest.mock('@/context/TransactionContext', () => ({
-  useTransactions: () => ({ transactions: TRANSACTIONS, addRule }),
+  useTransactions: () => ({
+    transactions: [...TRANSACTIONS, ...EXTRA_TRANSACTIONS],
+    addRule,
+    rules: RULES,
+    updateTransaction: (...args: unknown[]) => updateTransaction(...args),
+    updateRuleCategory: (...args: unknown[]) => updateRuleCategory(...args),
+  }),
 }));
 
 const reconcileAccount = jest.fn().mockResolvedValue(0);
@@ -68,8 +83,9 @@ const MOCK_ACCOUNTS = [
 const MOCK_INCOME_CONTEXT = { sources: [], reviews: {} };
 const updateProfile = jest.fn().mockResolvedValue(undefined);
 // Mutable so individual tests can put the owner in either state — no override
-// (derived) vs an existing override — before rendering.
-let PROFILE_SETTINGS: { assumedMonthlySpend?: number | null } = {};
+// (derived) vs an existing override — before rendering. `categories` is
+// cashflow-mobile#24's owner-added set.
+let PROFILE_SETTINGS: { assumedMonthlySpend?: number | null; categories?: { value: string; label: string; icon?: string; archived?: boolean }[] } = {};
 jest.mock('@/context/UserProfileContext', () => ({
   useUserProfile: () => ({
     profile: { id: 'user-1', currency: 'USD', paymentAccounts: MOCK_ACCOUNTS, settings: PROFILE_SETTINGS },
@@ -89,8 +105,13 @@ beforeEach(() => {
   addRule.mockReset();
   addBill.mockReset().mockResolvedValue('new-bill-id');
   getBills.mockReset().mockResolvedValue([]);
+  updateBill.mockReset().mockResolvedValue(undefined);
+  updateTransaction.mockReset().mockResolvedValue(undefined);
+  updateRuleCategory.mockReset().mockResolvedValue(undefined);
   updateProfile.mockReset().mockResolvedValue(undefined);
   PROFILE_SETTINGS = {};
+  RULES = [];
+  EXTRA_TRANSACTIONS = [];
 });
 
 const RULE_REPLY = {
@@ -760,5 +781,226 @@ describe('DataChatSheet — the bills fetch is LAZY (gated on open, never on mou
     rerender(<DataChatSheet open onClose={() => {}} />);
 
     expect(getBills).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * cashflow-mobile#24 — add_category. Never fails to resolve (nothing to look up
+ * against real data), so it always offers Apply. The value/slug is derived by
+ * the APP, never the model — see slugForCategoryLabel.
+ */
+describe('the add_category proposal card', () => {
+  const proposal = (over: Record<string, unknown> = {}) => ({
+    success: true,
+    result: { action: 'add_category', label: 'Vacations', icon: '🏖️', reason: 'You asked for a Vacations category.', ...over },
+  });
+
+  it('shows the proposal and writes NOTHING until Apply', async () => {
+    aiChat.mockResolvedValue(proposal());
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('add a Vacations category');
+
+    expect(await screen.findByText('Add category "Vacations" 🏖️')).toBeInTheDocument();
+    expect(updateProfile).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    await waitFor(() => expect(updateProfile).toHaveBeenCalledTimes(1));
+    expect(updateProfile).toHaveBeenCalledWith({
+      settings: { categories: [{ value: 'vacations', label: 'Vacations', icon: '🏖️' }] },
+    });
+    expect(await screen.findByText('Saved — added "Vacations" as a category.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+  });
+
+  it('omits the icon key entirely when the model gave none — never writes it as undefined', async () => {
+    const { icon: _icon, ...withoutIcon } = proposal().result;
+    aiChat.mockResolvedValue({ success: true, result: withoutIcon });
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('add a Vacations category');
+
+    expect(await screen.findByText('Add category "Vacations"')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(updateProfile).toHaveBeenCalledTimes(1));
+    expect(updateProfile).toHaveBeenCalledWith({ settings: { categories: [{ value: 'vacations', label: 'Vacations' }] } });
+  });
+
+  it('derives a collision-safe slug when the label would collide with an existing one', async () => {
+    PROFILE_SETTINGS = { categories: [{ value: 'vacations', label: 'Vacations' }] };
+    aiChat.mockResolvedValue(proposal());
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('add another Vacations category');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(updateProfile).toHaveBeenCalledTimes(1));
+    expect(updateProfile).toHaveBeenCalledWith({
+      settings: {
+        categories: [
+          { value: 'vacations', label: 'Vacations' },
+          { value: 'vacations-2', label: 'Vacations', icon: '🏖️' },
+        ],
+      },
+    });
+  });
+
+  it('Cancel drops the proposal without writing anything', async () => {
+    aiChat.mockResolvedValue(proposal());
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('add a Vacations category');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+    expect(updateProfile).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * cashflow-mobile#24 — rename_category. Only ever targets a CUSTOM category the
+ * owner already has (parseChatAction refuses a built-in default before this
+ * card ever renders — see chat-actions.test.ts).
+ */
+describe('the rename_category proposal card', () => {
+  beforeEach(() => {
+    PROFILE_SETTINGS = { categories: [{ value: 'vacations', label: 'Vacations' }] };
+  });
+
+  const proposal = {
+    success: true,
+    result: { action: 'rename_category', value: 'vacations', label: 'Trips', reason: 'You asked to rename it.' },
+  };
+
+  it('shows current -> new and writes ONLY on Apply', async () => {
+    aiChat.mockResolvedValue(proposal);
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('rename Vacations to Trips');
+
+    expect(await screen.findByText('Rename "Vacations" → "Trips"')).toBeInTheDocument();
+    expect(updateProfile).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(updateProfile).toHaveBeenCalledTimes(1));
+    expect(updateProfile).toHaveBeenCalledWith({ settings: { categories: [{ value: 'vacations', label: 'Trips' }] } });
+    expect(await screen.findByText('Saved — renamed to "Trips".')).toBeInTheDocument();
+  });
+
+  it('Cancel drops the proposal without writing anything', async () => {
+    aiChat.mockResolvedValue(proposal);
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('rename Vacations to Trips');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+    expect(updateProfile).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * cashflow-mobile#24 — remove_category. The one card with real stakes: it MUST
+ * show the exact counts (transactions/rules/bills) BEFORE applying, and the
+ * apply path must move exactly what was previewed, then archive the category —
+ * never orphaning a value. Fixture below carries one live row of each kind.
+ */
+describe('the remove_category proposal card', () => {
+  // 'vacations' is a CUSTOM category — not a member of the closed ExpenseCategory
+  // union, exactly like a real custom slug wouldn't be. Same `as` idiom the rest
+  // of this codebase uses for a runtime-valid, compile-time-foreign value.
+  const vacationRule: MappingRule = {
+    id: 'rule-vac', createdAt: '', enabled: true,
+    match: { field: 'merchant', op: 'contains', value: 'Cabo' }, set: { category: 'vacations' as ExpenseCategory },
+  };
+  const vacationTxn = {
+    id: 'vac-1', title: 'CABO RESORT', merchant: 'Cabo Resort', amount: 300,
+    type: 'expense', category: 'vacations' as ExpenseCategory, paymentMethod: 'visa', date: '2026-07-10',
+  } as Transaction;
+  const vacationBill: Bill = {
+    id: 'bill-vac', vendor: 'Airbnb', amount: 200, frequency: 'monthly', category: 'vacations',
+    paymentMethodId: 'manual', migrationStatus: 'to-review', lifecycleStatus: 'active',
+    createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+
+  const proposal = (reassignTo?: string) => ({
+    success: true,
+    result: {
+      action: 'remove_category', value: 'vacations',
+      ...(reassignTo ? { reassignTo } : {}),
+      reason: 'You asked to remove Vacations.',
+    },
+  });
+
+  beforeEach(async () => {
+    PROFILE_SETTINGS = { categories: [{ value: 'vacations', label: 'Vacations' }] };
+    RULES = [vacationRule];
+    EXTRA_TRANSACTIONS = [vacationTxn];
+    getBills.mockResolvedValue([vacationBill]);
+  });
+
+  it('shows the exact counts BEFORE applying, and writes NOTHING until Apply', async () => {
+    aiChat.mockResolvedValue(proposal());
+    render(<DataChatSheet open onClose={() => {}} />);
+    await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+    send('remove the Vacations category');
+
+    expect(await screen.findByText('Remove "Vacations" — 1 transaction, 1 rule, 1 bill will move to Other')).toBeInTheDocument();
+    expect(updateTransaction).not.toHaveBeenCalled();
+    expect(updateRuleCategory).not.toHaveBeenCalled();
+    expect(updateBill).not.toHaveBeenCalled();
+    expect(updateProfile).not.toHaveBeenCalled();
+  });
+
+  it('Apply moves exactly what was previewed, archives the category, and reports what moved', async () => {
+    aiChat.mockResolvedValue(proposal());
+    render(<DataChatSheet open onClose={() => {}} />);
+    await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+    send('remove the Vacations category');
+    await screen.findByText(/will move to Other/);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    await waitFor(() => expect(updateTransaction).toHaveBeenCalledWith('vac-1', { category: 'other' }));
+    expect(updateRuleCategory).toHaveBeenCalledWith('rule-vac', 'other');
+    expect(updateBill).toHaveBeenCalledWith('user-1', 'bill-vac', { category: 'other' });
+    // Archived, not deleted — never orphaning the value for a row still mid-flight.
+    expect(updateProfile).toHaveBeenCalledWith({
+      settings: { categories: [{ value: 'vacations', label: 'Vacations', archived: true }] },
+    });
+    expect(await screen.findByText('Saved — 1 transaction, 1 rule, 1 bill moved to Other.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+  });
+
+  it('reassigns to an explicit target when the model named one, instead of the "other" default', async () => {
+    aiChat.mockResolvedValue(proposal('shopping'));
+    render(<DataChatSheet open onClose={() => {}} />);
+    await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+    send('remove Vacations, move everything to Shopping');
+
+    expect(await screen.findByText(/will move to Shopping/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(updateTransaction).toHaveBeenCalledWith('vac-1', { category: 'shopping' }));
+  });
+
+  it('Cancel drops the proposal without writing anything', async () => {
+    aiChat.mockResolvedValue(proposal());
+    render(<DataChatSheet open onClose={() => {}} />);
+    await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+    send('remove the Vacations category');
+    await screen.findByText(/will move to Other/);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(updateProfile).not.toHaveBeenCalled();
+    expect(updateTransaction).not.toHaveBeenCalled();
+  });
+
+  it('a category with nothing filed under it still previews and applies cleanly — zero everywhere', async () => {
+    RULES = [];
+    EXTRA_TRANSACTIONS = [];
+    getBills.mockResolvedValue([]);
+    aiChat.mockResolvedValue(proposal());
+    render(<DataChatSheet open onClose={() => {}} />);
+    await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+    send('remove the Vacations category');
+
+    expect(await screen.findByText('Remove "Vacations" — 0 transactions, 0 rules, 0 bills will move to Other')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(updateProfile).toHaveBeenCalledTimes(1));
+    expect(updateTransaction).not.toHaveBeenCalled();
   });
 });

@@ -12,10 +12,18 @@ import { formatMoney } from '@/lib/money';
 import { sanitizeAssumedSpend } from '@/lib/profile-settings';
 import { matchIncomeDeposits } from '@/lib/ask';
 import { deriveAccountBalance, monthlyAverages } from '@/lib/forecast';
-import { addBill, getBills } from '@/lib/firestore';
+import { addBill, getBills, updateBill } from '@/lib/firestore';
 import { Bill, BillFrequency, PAYMENT_METHODS } from '@/lib/bills';
 import type { IncomeContext } from '@/lib/classify';
-import { PaymentAccount, Transaction, displayCategory } from '@/types';
+import {
+  ExpenseCategory,
+  PaymentAccount,
+  resolveCategories,
+  ResolvedCategory,
+  slugForCategoryLabel,
+  Transaction,
+  displayCategory,
+} from '@/types';
 
 /**
  * "Ask about your data" — the owner types plain English ("anything from Instacart is
@@ -60,6 +68,12 @@ interface ChatMessage {
     installmentsRemaining?: number;
     nonNegotiable?: boolean;
   };
+  /** cashflow-mobile#24: set when the assistant proposed adding, renaming or
+   *  removing one of the owner's own categories. */
+  category?:
+    | { kind: 'add'; label: string; icon?: string }
+    | { kind: 'rename'; value: string; label: string }
+    | { kind: 'remove'; value: string; reassignTo: string };
   status?: 'pending' | 'applied';
 }
 
@@ -133,13 +147,39 @@ export function resolveBillAnchor(proposal: {
   return proposal.nextDueDate ? { autopayDay, anchorDate: proposal.nextDueDate } : null;
 }
 
+/**
+ * cashflow-mobile#24. remove_category: everything currently filed under `value` —
+ * every transaction, every mapping rule, every bill — so the card can show the
+ * exact counts BEFORE applying, and the apply path can write to exactly these
+ * rows and nothing else. Pure: no Firestore, so both the preview and the write
+ * are provably looking at the same set.
+ */
+export interface CategoryRemovalPlan {
+  transactionIds: string[];
+  ruleIds: string[];
+  billIds: string[];
+}
+
+export function planCategoryRemoval(
+  value: string,
+  transactions: readonly Transaction[],
+  rules: readonly MappingRule[],
+  bills: readonly Bill[]
+): CategoryRemovalPlan {
+  return {
+    transactionIds: transactions.filter((t) => t.category === value).map((t) => t.id),
+    ruleIds: rules.filter((r) => r.set.category === value).map((r) => r.id),
+    billIds: bills.filter((b) => b.category === value).map((b) => b.id),
+  };
+}
+
 export default function DataChatSheet({ open, onClose, seed }: {
   open: boolean;
   onClose: () => void;
   /** A question to ask on open — set when the owner clicked a specific node or group. */
   seed?: string;
 }) {
-  const { transactions, addRule } = useTransactions();
+  const { transactions, addRule, rules, updateTransaction, updateRuleCategory } = useTransactions();
   const { profile, reconcileAccount, addIncomeSource, incomeContext, updateProfile } = useUserProfile();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -210,11 +250,17 @@ export default function DataChatSheet({ open, onClose, seed }: {
     e.preventDefault();
   };
 
+  // cashflow-mobile#24: the owner's resolved category set — defaults + custom,
+  // archived kept for display but never assignable. ONE derivation, read by the
+  // chat context below, the parser's create_rule/category-verb checks, and the
+  // category proposal cards.
+  const resolvedCategories = useMemo(() => resolveCategories(profile?.settings), [profile?.settings]);
+
   // Compact context — never the whole ledger. buildChatContext owns the size caps,
   // so the prompt can't quietly grow into every row the owner has ever had.
   const context = useMemo(
-    () => buildChatContext(transactions, profile?.paymentAccounts ?? [], bills),
-    [transactions, profile?.paymentAccounts, bills]
+    () => buildChatContext(transactions, profile?.paymentAccounts ?? [], bills, resolvedCategories),
+    [transactions, profile?.paymentAccounts, bills, resolvedCategories]
   );
 
   // FIN-SPEND-001 (#133): the derived 6-month average — the SAME basis Home and
@@ -268,7 +314,9 @@ export default function DataChatSheet({ open, onClose, seed }: {
       // `result` is raw model output — parseChatAction is the trust boundary, and
       // returns null for anything it can't vouch for (never a half-valid rule).
       const data = await aiChat({ message, history, context });
-      const reply = parseChatAction(data?.result);
+      // cashflow-mobile#24: the owner's resolved set, so create_rule and the
+      // three category verbs validate against what the owner actually has.
+      const reply = parseChatAction(data?.result, undefined, resolvedCategories);
       // The recovery actions (FIN-RELATION-001 §7.3) carry `reason`, not `explanation`,
       // and have no card here yet — FIN-RECOVERY-UI-001 owns that surface. Until then
       // they fall through to the same "couldn't turn that into a change" line.
@@ -308,6 +356,21 @@ export default function DataChatSheet({ open, onClose, seed }: {
                 },
                 status: 'pending',
               })
+          : reply?.action === 'add_category'
+            ? mk('assistant', reply.reason, {
+                category: { kind: 'add', label: reply.label, icon: reply.icon },
+                status: 'pending',
+              })
+          : reply?.action === 'rename_category'
+            ? mk('assistant', reply.reason, {
+                category: { kind: 'rename', value: reply.value, label: reply.label },
+                status: 'pending',
+              })
+          : reply?.action === 'remove_category'
+            ? mk('assistant', reply.reason, {
+                category: { kind: 'remove', value: reply.value, reassignTo: reply.reassignTo },
+                status: 'pending',
+              })
             : mk('assistant', explanation
               || "I got a reply I couldn't read. Try saying it as a rule — for example “Turo is Travel”."),
       ]);
@@ -344,7 +407,7 @@ export default function DataChatSheet({ open, onClose, seed }: {
   };
 
   const dismiss = (id: string) =>
-    setMessages((prev) => prev.map((x) => (x.id === id ? { ...x, rule: undefined, balance: undefined, income: undefined, spend: undefined, bill: undefined, status: undefined } : x)));
+    setMessages((prev) => prev.map((x) => (x.id === id ? { ...x, rule: undefined, balance: undefined, income: undefined, spend: undefined, bill: undefined, category: undefined, status: undefined } : x)));
 
   /** THE one path from a balance proposal to the store — a button press, same
    *  reconcile() the accounts screen used before its manual knob was removed. */
@@ -492,6 +555,73 @@ export default function DataChatSheet({ open, onClose, seed }: {
     }
   };
 
+  /**
+   * cashflow-mobile#24. The one path from add_category/rename_category/
+   * remove_category to the store — settings.categories via the SAME
+   * updateProfile round trip FIN-SPEND-001 uses, no new write path.
+   *
+   * remove_category additionally reassigns every transaction, rule and bill
+   * currently filed under the removed value BEFORE archiving it, using the
+   * exact same planCategoryRemoval() the card previewed — never orphaning a
+   * category value.
+   */
+  const applyCategory = async (m: ChatMessage) => {
+    if (!m.category || busy || !profile?.id) return;
+    setBusy(true);
+    const current = profile.settings?.categories ?? [];
+    try {
+      if (m.category.kind === 'add') {
+        const { label, icon } = m.category;
+        const taken = new Set(resolvedCategories.map((c) => c.value));
+        const value = slugForCategoryLabel(label, taken);
+        const next = [...current, { value, label, ...(icon ? { icon } : {}) }];
+        await updateProfile({ settings: { categories: next } });
+        setMessages((prev) => [
+          ...prev.map((x) => (x.id === m.id ? { ...x, status: 'applied' as const } : x)),
+          mk('assistant', `Saved — added "${label}" as a category.`),
+        ]);
+      } else if (m.category.kind === 'rename') {
+        const { value, label } = m.category;
+        const next = current.map((c) => (c.value === value ? { ...c, label } : c));
+        await updateProfile({ settings: { categories: next } });
+        setMessages((prev) => [
+          ...prev.map((x) => (x.id === m.id ? { ...x, status: 'applied' as const } : x)),
+          mk('assistant', `Saved — renamed to "${label}".`),
+        ]);
+      } else {
+        const { value, reassignTo } = m.category;
+        const plan = planCategoryRemoval(value, transactions, rules, bills);
+        await Promise.all([
+          ...plan.transactionIds.map((id) => updateTransaction(id, { category: reassignTo as ExpenseCategory })),
+          ...plan.ruleIds.map((id) => updateRuleCategory(id, reassignTo)),
+          ...plan.billIds.map((id) => updateBill(profile.id, id, { category: reassignTo })),
+        ]);
+        if (plan.billIds.length) {
+          setBills((prev) => prev.map((b) => (plan.billIds.includes(b.id) ? { ...b, category: reassignTo } : b)));
+        }
+        // Archived, not deleted — the value stays resolvable for any row still
+        // showing it mid-reassignment, same reasoning resolveCategories documents.
+        const next = current.map((c) => (c.value === value ? { ...c, archived: true } : c));
+        await updateProfile({ settings: { categories: next } });
+
+        const reassignLabel = resolvedCategories.find((c) => c.value === reassignTo)?.label ?? reassignTo;
+        const parts = [
+          `${plan.transactionIds.length} transaction${plan.transactionIds.length === 1 ? '' : 's'}`,
+          `${plan.ruleIds.length} rule${plan.ruleIds.length === 1 ? '' : 's'}`,
+          `${plan.billIds.length} bill${plan.billIds.length === 1 ? '' : 's'}`,
+        ];
+        setMessages((prev) => [
+          ...prev.map((x) => (x.id === m.id ? { ...x, status: 'applied' as const } : x)),
+          mk('assistant', `Saved — ${parts.join(', ')} moved to ${reassignLabel}.`),
+        ]);
+      }
+    } catch {
+      setMessages((prev) => [...prev, mk('assistant', 'That could not be saved. Please try again.')]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (!open) return null;
 
   return createPortal(
@@ -616,6 +746,19 @@ export default function DataChatSheet({ open, onClose, seed }: {
                   pending={m.status === 'pending'}
                   busy={busy}
                   onApply={() => applyBill(m)}
+                  onCancel={() => dismiss(m.id)}
+                />
+              )}
+              {m.category && (
+                <CategoryProposalCard
+                  proposal={m.category}
+                  resolvedCategories={resolvedCategories}
+                  transactions={transactions}
+                  rules={rules}
+                  bills={bills}
+                  pending={m.status === 'pending'}
+                  busy={busy}
+                  onApply={() => applyCategory(m)}
                   onCancel={() => dismiss(m.id)}
                 />
               )}
@@ -950,6 +1093,90 @@ function BillProposalCard({ proposal, currency, pending, busy, onApply, onCancel
       ) : (
         <p className="mt-3 text-xs text-[var(--accent-success)]">Applied</p>
       )}
+    </div>
+  );
+}
+
+/**
+ * cashflow-mobile#24. One card, three kinds — add/rename never fail to resolve
+ * (there is nothing to look up against real data), so they always offer Apply.
+ * remove_category is the one with real stakes: it MUST show the exact counts
+ * BEFORE applying, same contract as RulePreviewCard's "matches N transactions".
+ * A `value` that no longer resolves (already removed in another tab/session)
+ * renders words and no button — the same unresolvable-means-no-button contract
+ * every other card here uses.
+ */
+function CategoryProposalCard({
+  proposal, resolvedCategories, transactions, rules, bills, pending, busy, onApply, onCancel,
+}: {
+  proposal: NonNullable<ChatMessage['category']>;
+  resolvedCategories: ResolvedCategory[];
+  transactions: Transaction[];
+  rules: MappingRule[];
+  bills: Bill[];
+  pending: boolean;
+  busy: boolean;
+  onApply: () => void;
+  onCancel: () => void;
+}) {
+  const buttons = pending ? (
+    <div className="flex gap-2 mt-3">
+      <button type="button" onClick={onApply} disabled={busy} className="btn-primary min-h-[44px] px-4 text-sm disabled:opacity-50">Apply</button>
+      <button type="button" onClick={onCancel} disabled={busy} className="min-h-[44px] px-4 text-sm rounded-card border border-[var(--border-color)] text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] transition-colors disabled:opacity-50">Cancel</button>
+    </div>
+  ) : (
+    <p className="mt-3 text-xs text-[var(--accent-success)]">Applied</p>
+  );
+
+  if (proposal.kind === 'add') {
+    return (
+      <div className="mt-3 rounded-card border border-[var(--border-color)] bg-[var(--background)] p-3">
+        <p className="font-medium text-[var(--foreground)]">
+          {`Add category "${proposal.label}"${proposal.icon ? ` ${proposal.icon}` : ''}`}
+        </p>
+        {buttons}
+      </div>
+    );
+  }
+
+  const current = resolvedCategories.find((c) => c.value === proposal.value);
+  if (!current) {
+    return (
+      <p className="mt-3 text-xs text-[var(--foreground-muted)]">
+        &ldquo;{proposal.value}&rdquo; is not one of your categories anymore, so nothing is offered.
+      </p>
+    );
+  }
+
+  if (proposal.kind === 'rename') {
+    return (
+      <div className="mt-3 rounded-card border border-[var(--border-color)] bg-[var(--background)] p-3">
+        <p className="font-medium text-[var(--foreground)]">
+          {`Rename "${current.label}" → "${proposal.label}"`}
+        </p>
+        {buttons}
+      </div>
+    );
+  }
+
+  // remove: the live preview — exact counts, computed the same way the apply
+  // path will move them, BEFORE anything is written.
+  const plan = planCategoryRemoval(proposal.value, transactions, rules, bills);
+  const reassignLabel = resolvedCategories.find((c) => c.value === proposal.reassignTo)?.label ?? proposal.reassignTo;
+  const parts = [
+    `${plan.transactionIds.length} transaction${plan.transactionIds.length === 1 ? '' : 's'}`,
+    `${plan.ruleIds.length} rule${plan.ruleIds.length === 1 ? '' : 's'}`,
+    `${plan.billIds.length} bill${plan.billIds.length === 1 ? '' : 's'}`,
+  ];
+  return (
+    <div className="mt-3 rounded-card border border-[var(--border-color)] bg-[var(--background)] p-3">
+      <p className="font-medium text-[var(--foreground)]">
+        {`Remove "${current.label}" — ${parts.join(', ')} will move to ${reassignLabel}`}
+      </p>
+      <p className="text-xs text-[var(--foreground-muted)] mt-1">
+        Nothing is left pointing at the removed category.
+      </p>
+      {buttons}
     </div>
   );
 }
