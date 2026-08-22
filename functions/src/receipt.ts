@@ -8,7 +8,18 @@
  */
 
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
+import { validateImageBase64 } from './prompts';
 import { checkRateLimit, LIMITS } from './rate-limit';
+
+/**
+ * Receipt image caps: same size as chat, but includes PDF for document import.
+ * Client-side allowlist: ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf']
+ * (see ReceiptScannerModal.tsx validTypes).
+ */
+const RECEIPT_IMAGE_CAPS = {
+  maxBytes: 10 * 1024 * 1024,
+  mimeTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf'] as readonly string[],
+};
 
 const EXTRACTION_PROMPT = `You are an expert financial document parser. Analyze this image and extract ALL transaction/purchase information.
 
@@ -126,10 +137,11 @@ export const parseReceipt = onCall(
       imageBase64?: string;
       mimeType?: string;
     };
-    if (!imageBase64 || typeof imageBase64 !== 'string') {
+    if (!imageBase64) {
       throw new HttpsError('invalid-argument', 'No file provided');
     }
-    const mime = typeof mimeType === 'string' && mimeType ? mimeType : 'image/jpeg';
+    // Validate imageBase64 and mime type, preserving existing error message style for covered cases
+    const mime = validateImageBase64(imageBase64, mimeType, RECEIPT_IMAGE_CAPS.mimeTypes, RECEIPT_IMAGE_CAPS.maxBytes);
     const dataUrl = `data:${mime};base64,${imageBase64}`;
 
     const openaiKey = process.env.OPENAI_API_KEY;

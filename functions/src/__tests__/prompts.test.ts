@@ -1,4 +1,5 @@
-import { buildPrompt } from '../prompts';
+import { buildPrompt, validateImageBase64 } from '../prompts';
+import { HttpsError } from 'firebase-functions/v2/https';
 
 describe('buildPrompt', () => {
   it('decision_check: substitutes all placeholders', () => {
@@ -199,5 +200,110 @@ describe('buildPrompt', () => {
     expect(buildPrompt('tight_period', {})).toBeNull();
     expect(buildPrompt(undefined, {})).toBeNull();
     expect(buildPrompt('', {})).toBeNull();
+  });
+});
+
+describe('validateImageBase64', () => {
+  // Default caps for chat images
+  const defaultMimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+  const defaultSize = 10 * 1024 * 1024; // 10MB
+
+  it('(a) rejects wide-character emoji string under naive byteLength cap but over real byte size', () => {
+    // Emoji string: each emoji is ~4 bytes in UTF-8 but byteLength on the string gives wrong count
+    // Create a string of emojis that under naive counting looks small but in real bytes is large
+    const emojiString = '😀'.repeat(2700000); // ~2.7M chars * ~4 bytes each = ~10.8MB
+    // byteLength of the emoji string when counted as 'base64' would underestimate
+    expect(() => {
+      validateImageBase64(emojiString, 'image/jpeg', defaultMimes, defaultSize);
+    }).toThrow(HttpsError);
+    // Should throw 'invalid-argument', not 'internal'
+    try {
+      validateImageBase64(emojiString, 'image/jpeg', defaultMimes, defaultSize);
+    } catch (e) {
+      if (e instanceof HttpsError) {
+        expect(e.code).toBe('invalid-argument');
+      }
+    }
+  });
+
+  it('(b) rejects non-string imageBase64 with invalid-argument, not internal', () => {
+    expect(() => {
+      validateImageBase64(12345 as any, 'image/jpeg', defaultMimes, defaultSize);
+    }).toThrow(HttpsError);
+    try {
+      validateImageBase64(12345 as any, 'image/jpeg', defaultMimes, defaultSize);
+    } catch (e) {
+      if (e instanceof HttpsError) {
+        expect(e.code).toBe('invalid-argument');
+      }
+    }
+  });
+
+  it('(c) rejects invalid base64 alphabet characters', () => {
+    // Invalid base64: contains characters outside [A-Za-z0-9+/=]
+    const invalidBase64 = 'SGVsbG8gV29ybGQ=!!!invalid';
+    expect(() => {
+      validateImageBase64(invalidBase64, 'image/jpeg', defaultMimes, defaultSize);
+    }).toThrow(HttpsError);
+    try {
+      validateImageBase64(invalidBase64, 'image/jpeg', defaultMimes, defaultSize);
+    } catch (e) {
+      if (e instanceof HttpsError) {
+        expect(e.code).toBe('invalid-argument');
+      }
+    }
+  });
+
+  it('accepts valid base64 string with correct mime type', () => {
+    // Valid base64: "Hello World"
+    const validBase64 = 'SGVsbG8gV29ybGQ=';
+    const mime = validateImageBase64(validBase64, 'image/jpeg', defaultMimes, defaultSize);
+    expect(mime).toBe('image/jpeg');
+  });
+
+  it('accepts valid base64 without padding', () => {
+    // Valid base64 without padding: "Hi"
+    const validBase64 = 'SGk';
+    const mime = validateImageBase64(validBase64, 'image/png', defaultMimes, defaultSize);
+    expect(mime).toBe('image/png');
+  });
+
+  it('rejects oversized images', () => {
+    // Create a valid base64 string that exceeds size limit
+    // Buffer.byteLength('A', 'base64') for a string of A's
+    // 4 base64 chars = 3 bytes when decoded, so we need more base64 to exceed the limit
+    // To exceed 10MB decoded, we need base64 string of size ~13.3MB (10MB * 4/3)
+    const sizeToExceed = Math.floor((defaultSize * 4) / 3) + 1000;
+    const oversizedBase64 = 'A'.repeat(sizeToExceed);
+    expect(() => {
+      validateImageBase64(oversizedBase64, 'image/jpeg', defaultMimes, defaultSize);
+    }).toThrow(HttpsError);
+    try {
+      validateImageBase64(oversizedBase64, 'image/jpeg', defaultMimes, defaultSize);
+    } catch (e) {
+      if (e instanceof HttpsError) {
+        expect(e.code).toBe('invalid-argument');
+      }
+    }
+  });
+
+  it('rejects unsupported mime types', () => {
+    const validBase64 = 'SGVsbG8gV29ybGQ=';
+    expect(() => {
+      validateImageBase64(validBase64, 'application/pdf', defaultMimes, defaultSize);
+    }).toThrow(HttpsError);
+    try {
+      validateImageBase64(validBase64, 'application/pdf', defaultMimes, defaultSize);
+    } catch (e) {
+      if (e instanceof HttpsError) {
+        expect(e.code).toBe('invalid-argument');
+      }
+    }
+  });
+
+  it('uses default mime type when not provided', () => {
+    const validBase64 = 'SGVsbG8gV29ybGQ=';
+    const mime = validateImageBase64(validBase64, undefined, defaultMimes, defaultSize);
+    expect(mime).toBe('image/jpeg'); // default
   });
 });
