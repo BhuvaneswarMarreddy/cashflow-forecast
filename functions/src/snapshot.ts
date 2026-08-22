@@ -32,13 +32,16 @@ import {
 import { RESERVE_TARGET_MONTHS, homeSummary, runwayLabel } from '@/lib/home';
 import { interpretLedgerRows, type MappingRule } from '@/lib/mapping-rules';
 import { sanitizeAssumedSpend } from '@/lib/profile-settings';
-import type {
-  ForecastEvent,
-  InflowReview,
-  IncomeSource,
-  PaymentAccount,
-  SavingsGoal,
-  Transaction,
+import {
+  resolveCategories,
+  type CustomCategory,
+  type ForecastEvent,
+  type InflowReview,
+  type IncomeSource,
+  type PaymentAccount,
+  type ResolvedCategory,
+  type SavingsGoal,
+  type Transaction,
 } from '@/types';
 
 /** How far ahead "upcoming" reaches. A bill past this is not actionable today. */
@@ -82,6 +85,14 @@ export interface Ledger {
    *  TransactionContext. Exposed on the ledger (not just applied and dropped)
    *  so a later derivation can explain WHY a row looks the way it does. */
   rules: MappingRule[];
+  /**
+   * cashflow-mobile#24. The owner's resolved category set (defaults + custom),
+   * from `resolveCategories(settings)`. OPTIONAL so every existing test fixture
+   * that builds a `Ledger` literal without one keeps compiling unchanged — both
+   * `assignableCategoryValues` (decisions.ts) and `buildSnapshot` below treat an
+   * absent value as "defaults only", never as "no categories at all".
+   */
+  categories?: ResolvedCategory[];
 }
 
 // `interpretLedgerRows` moved to `@/lib/mapping-rules` — one derivation, one
@@ -122,6 +133,7 @@ export async function readLedger(uid: string): Promise<Ledger> {
     safetyThreshold?: number;
     includePendingInCalculations?: boolean;
     assumedMonthlySpend?: number | null;
+    categories?: CustomCategory[];
   };
 
   const rules = rulesDocs.docs
@@ -166,6 +178,9 @@ export async function readLedger(uid: string): Promise<Ledger> {
     // on both web and mobile so they never diverge on corrupt input.
     assumedMonthlySpend: sanitizeAssumedSpend(settings.assumedMonthlySpend),
     rules,
+    // cashflow-mobile#24. Resolved ONCE here — the single home both validateOp
+    // (via applyDecisionCore) and buildSnapshot's payload below read from.
+    categories: resolveCategories(settings),
   };
 }
 
@@ -404,6 +419,15 @@ export function buildSnapshot(ledger: Ledger) {
     },
 
     accounts: accounts.map(mapAccount),
+    // cashflow-mobile#24. The owner's resolved category set — mobile stops
+    // hardcoding its own mirror of the 13 defaults and reads this instead. Pure
+    // addition: every figure above is computed the same way whether or not the
+    // owner has any custom categories. `ledger.categories` is always populated
+    // by readLedger in production; the `?? resolveCategories()` fallback only
+    // matters for a hand-built test Ledger that omits it (defaults only, then).
+    categories: (ledger.categories ?? resolveCategories()).map((c) => ({
+      value: c.value, label: c.label, icon: c.icon, archived: c.archived,
+    })),
     upcoming,
     // #22: the register itself, DISPLAY ONLY — same isCharging "current" filter
     // billUpcomingEvents (above) already applies. Never read by any figure in
