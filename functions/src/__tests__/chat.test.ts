@@ -118,7 +118,12 @@ describe('buildChatMessages', () => {
     // Bumped again from 18700 (cashflow-mobile#24): the CATEGORIES block (prompts.ts)
     // teaches add_category/rename_category/remove_category — constant text on every
     // system prompt. Measured worst-case went 18455 -> 20450 (+1995 chars).
-    expect(system.length).toBeLessThan(20700);
+    // Bumped again from 20700 (cashflow-mobile#25): the REPORTS (tables) block teaches
+    // the new `report` action, plus two new LEDGER TOTALS subsections (SPENDING BY
+    // CATEGORY, THIS MONTH / LAST MONTH) — this fixture supplies no `summary`, so those
+    // render as empty-list headers only, not maxed rows. Measured worst-case went
+    // 20450 -> 22245 (+1795 chars).
+    expect(system.length).toBeLessThan(22500);
   });
 
   it('survives a garbage context without throwing', () => {
@@ -317,7 +322,10 @@ describe('ChatContext — bills/upcoming/recurring sections (#22)', () => {
     // modest headroom over the measured figure, not a round number picked in advance.
     // Bumped again (cashflow-mobile#24): the CATEGORIES block adds the same constant
     // ~1995 chars as the test above. Measured 42341.
-    expect(system.length).toBeLessThan(42600);
+    // Bumped again (cashflow-mobile#25): the same +1795 chars as the test above — this
+    // fixture supplies no `summary` either, so the new sections are still headers only.
+    // Measured 44136.
+    expect(system.length).toBeLessThan(44400);
   });
 
   it('caps bills/upcoming/recurring and reports what was left out, same convention as merchants/months', () => {
@@ -362,6 +370,86 @@ describe('ChatContext — bills/upcoming/recurring sections (#22)', () => {
     const system = buildChatMessages({ message: 'record my iPhone installment' })[0].content;
     expect(system).toMatch(/plainly refers to the same service.*spelled differently/i);
     expect(system).toMatch(/unsure whether it is the same.*ASK/i);
+  });
+});
+
+/**
+ * cashflow-mobile#25. "what did I spend this month, and on what" needs a month-scoped
+ * category breakdown — byCategoryThisYear alone is a whole year, too coarse to answer
+ * it precisely. These two sections are the fix.
+ */
+describe('ChatContext — SPENDING BY CATEGORY, THIS MONTH / LAST MONTH (cashflow-mobile#25)', () => {
+  const summaryCtx = {
+    ...ctx,
+    summary: {
+      span: { from: '2026-01-01', to: '2026-08-21', transactions: 40 },
+      byCategoryThisYear: [{ category: 'Food & Dining', spending: 900, count: 20 }],
+      byCategoryThisMonth: [{ category: 'Food & Dining', spending: 300, count: 8 }],
+      byCategoryLastMonth: [{ category: 'Shopping', spending: 150, count: 3 }],
+    },
+  };
+
+  it('renders both month-scoped category breakdowns from LEDGER TOTALS, computed not sampled', () => {
+    const system = asText(buildChatMessages({
+      message: 'what did I spend this month, and on what', context: summaryCtx,
+    })[0].content);
+    expect(system).toMatch(/SPENDING BY CATEGORY, THIS MONTH:\n- Food & Dining \| 300\.00 \| 8 txns/);
+    expect(system).toMatch(/SPENDING BY CATEGORY, LAST MONTH:\n- Shopping \| 150\.00 \| 3 txns/);
+  });
+
+  it('says so explicitly when no summary was supplied at all', () => {
+    const system = asText(buildChatMessages({ message: 'what did I spend this month' })[0].content);
+    expect(system).toContain('(no totals available)');
+  });
+
+  it('reports what each monthly cap dropped, same convention as the year breakdown', () => {
+    const system = asText(buildChatMessages({
+      message: 'what did I spend this month',
+      context: {
+        ...ctx,
+        summary: {
+          span: { from: '2026-01-01', to: '2026-08-21', transactions: 20 },
+          byCategoryThisMonth: [{ category: 'Food', spending: 10, count: 1 }],
+          categoriesThisMonthOmitted: 5,
+          byCategoryLastMonth: [{ category: 'Food', spending: 10, count: 1 }],
+          categoriesLastMonthOmitted: 3,
+        },
+      },
+    })[0].content);
+    expect(system).toMatch(/and 5 more categories not listed/);
+    expect(system).toMatch(/and 3 more categories not listed/);
+  });
+});
+
+/**
+ * cashflow-mobile#25. The chat used to answer every "what did I spend on, and on
+ * what" question with a paragraph. This teaches the model to reply with a table
+ * instead — a DISPLAY action that never becomes a write and never gets an Apply
+ * button, with figures that must come from CONTEXT, never estimated.
+ */
+describe('the report action travels with the contract (cashflow-mobile#25)', () => {
+  it('teaches the shape, when to use it over answer, and that it is display only', () => {
+    const system = asText(buildChatMessages({ message: 'what did I spend on this month, and on what' })[0].content);
+    expect(system).toContain('"action":"report"');
+    expect(system).toMatch(/BREAKDOWN or a COMPARISON/);
+    expect(system).toMatch(/Keep "answer" for a single number or a conversational reply/);
+    expect(system).toMatch(/DISPLAY ONLY/);
+    expect(system).toMatch(/never gets an Apply button/);
+  });
+
+  it('teaches the size limits: title/columns/rows/cell caps', () => {
+    const system = asText(buildChatMessages({ message: 'compare July to August' })[0].content);
+    expect(system).toMatch(/1-80 characters/);
+    expect(system).toMatch(/1-6 column headers, each 1-24 characters/);
+    expect(system).toMatch(/at most 30 rows/);
+    expect(system).toMatch(/at most 40 characters/);
+  });
+
+  it('teaches that report figures must come from CONTEXT, never estimated beyond simple arithmetic', () => {
+    const system = asText(buildChatMessages({ message: 'compare July to August' })[0].content);
+    expect(system).toMatch(/copied from the CONTEXT below/);
+    expect(system).toMatch(/never estimate and never invent a row/);
+    expect(system).toMatch(/say so with "answer" instead of guessing a table/);
   });
 });
 
