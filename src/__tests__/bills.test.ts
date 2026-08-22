@@ -14,6 +14,7 @@ import {
   totalMonthlyCost,
   migrationSummary,
   billsOnRetiredMethods,
+  billUpcomingEvents,
   PAYMENT_METHODS,
 } from '@/lib/bills';
 import starter from '@/data/bills-starter.json';
@@ -269,5 +270,121 @@ describe('nonNegotiableMonthly', () => {
 
   test('zero when nothing is locked', () => {
     expect(nonNegotiableMonthly([mk(100, 'monthly')])).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// record-bill epic (#10/#14) — endDate stops charging
+// ---------------------------------------------------------------------------
+
+describe('isCharging honours endDate (totalMonthlyCost / nonNegotiableMonthly)', () => {
+  test('an endDate before today stops both totals', () => {
+    const bill = mk(45.79, 'monthly', { endDate: '2020-01-01', nonNegotiable: true });
+    expect(totalMonthlyCost([bill], '2026-08-22')).toBe(0);
+    expect(nonNegotiableMonthly([bill], '2026-08-22')).toBe(0);
+  });
+
+  test('boundary: endDate === today still charges; the day after it does not', () => {
+    const bill = mk(45.79, 'monthly', { endDate: '2026-08-22' });
+    expect(totalMonthlyCost([bill], '2026-08-22')).toBe(45.79);
+    expect(totalMonthlyCost([bill], '2026-08-23')).toBe(0);
+  });
+
+  test('no endDate never stops charging', () => {
+    expect(totalMonthlyCost([mk(10, 'monthly')], '2026-08-22')).toBe(10);
+  });
+
+  test('cancelled still beats an unexpired endDate', () => {
+    const bill = mk(10, 'monthly', { endDate: '2099-01-01', lifecycleStatus: 'cancelled' });
+    expect(totalMonthlyCost([bill], '2026-08-22')).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// record-bill epic (#10/#14) — billUpcomingEvents projection
+// ---------------------------------------------------------------------------
+
+describe('billUpcomingEvents', () => {
+  test('monthly with a dueDay projects the next occurrence inside the horizon', () => {
+    const bill = mk(45.79, 'monthly', { autopayDay: 15 });
+    // today is PAST this month's 15th — next occurrence is next month's.
+    const events = billUpcomingEvents([bill], '2026-08-20', 45);
+    expect(events).toEqual([{ billId: 'x', vendor: 'Test Vendor', dueDate: '2026-09-15', amount: 45.79 }]);
+  });
+
+  test('a due date exactly on "today" counts; the horizon end is inclusive', () => {
+    const bill = mk(20, 'monthly', { autopayDay: 1 });
+    const events = billUpcomingEvents([bill], '2026-08-01', 10);
+    // Aug 1 (== today) is IN; the next occurrence (Sep 1) is past the 10-day horizon.
+    expect(events.map(e => e.dueDate)).toEqual(['2026-08-01']);
+  });
+
+  test('horizon clip: a due date past the horizon end is excluded entirely', () => {
+    const bill = mk(20, 'monthly', { autopayDay: 15 });
+    const events = billUpcomingEvents([bill], '2026-08-01', 10); // horizon ends Aug 11
+    expect(events).toEqual([]);
+  });
+
+  test('installmentsRemaining caps the number of projected occurrences', () => {
+    const bill = mk(45.79, 'monthly', { autopayDay: 1, installmentsRemaining: 2 });
+    // A long horizon would otherwise project 6+ monthly occurrences.
+    const events = billUpcomingEvents([bill], '2026-08-01', 200);
+    expect(events.map(e => e.dueDate)).toEqual(['2026-08-01', '2026-09-01']);
+  });
+
+  test('endDate clips projected occurrences mid-horizon, not just the charging gate', () => {
+    const bill = mk(20, 'monthly', { autopayDay: 1, endDate: '2026-09-01' });
+    const events = billUpcomingEvents([bill], '2026-08-01', 200);
+    // Oct 1 would otherwise appear; endDate stops it after Sep 1.
+    expect(events.map(e => e.dueDate)).toEqual(['2026-08-01', '2026-09-01']);
+  });
+
+  test('weekly steps from anchorDate', () => {
+    const bill = mk(15, 'weekly', { anchorDate: '2026-08-05' });
+    const events = billUpcomingEvents([bill], '2026-08-20', 14); // horizon ends Sep 3
+    expect(events.map(e => e.dueDate)).toEqual(['2026-08-26', '2026-09-02']);
+  });
+
+  test('biweekly steps from anchorDate at a 14-day cadence', () => {
+    const bill = mk(15, 'biweekly', { anchorDate: '2026-08-05' });
+    const events = billUpcomingEvents([bill], '2026-08-20', 21); // horizon ends Sep 10
+    expect(events.map(e => e.dueDate)).toEqual(['2026-09-02']);
+  });
+
+  test('quarterly needs BOTH autopayDay and anchorDate to pin the month cycle', () => {
+    const bill = mk(129, 'quarterly', { autopayDay: 10, anchorDate: '2026-01-10' });
+    const events = billUpcomingEvents([bill], '2026-09-01', 45); // horizon ends Oct 16
+    expect(events).toEqual([{ billId: 'x', vendor: 'Test Vendor', dueDate: '2026-10-10', amount: 129 }]);
+  });
+
+  test('a monthly bill with no autopayDay "varies" and projects nothing', () => {
+    const bill = mk(20, 'monthly');
+    expect(billUpcomingEvents([bill], '2026-08-01', 45)).toEqual([]);
+  });
+
+  test('a weekly bill with no anchorDate projects nothing', () => {
+    const bill = mk(15, 'weekly');
+    expect(billUpcomingEvents([bill], '2026-08-01', 45)).toEqual([]);
+  });
+
+  test('a quarterly bill with autopayDay but no anchorDate projects nothing (cycle unknown)', () => {
+    const bill = mk(129, 'quarterly', { autopayDay: 10 });
+    expect(billUpcomingEvents([bill], '2026-08-01', 45)).toEqual([]);
+  });
+
+  test('a cancelled or ended bill is excluded even if its due date is inside the horizon', () => {
+    const cancelled = mk(20, 'monthly', { id: 'c', autopayDay: 5, lifecycleStatus: 'cancelled' });
+    const ended = mk(20, 'monthly', { id: 'e', autopayDay: 5, endDate: '2026-07-01' });
+    expect(billUpcomingEvents([cancelled, ended], '2026-08-01', 45)).toEqual([]);
+  });
+
+  test('multiple bills come back sorted by dueDate', () => {
+    // A short 10-day horizon from Aug 20 (ends Aug 30) keeps each bill to ONE
+    // occurrence — both due-days sit inside Aug, their September repeats do not.
+    const late = mk(20, 'monthly', { id: 'late', vendor: 'Late Vendor', autopayDay: 28 });
+    const early = mk(10, 'monthly', { id: 'early', vendor: 'Early Vendor', autopayDay: 25 });
+    const events = billUpcomingEvents([late, early], '2026-08-20', 10);
+    expect(events.map(e => e.dueDate)).toEqual(['2026-08-25', '2026-08-28']);
+    expect(events.map(e => e.vendor)).toEqual(['Early Vendor', 'Late Vendor']);
   });
 });
