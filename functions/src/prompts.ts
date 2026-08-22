@@ -431,10 +431,23 @@ MONTHLY SPEND ASSUMPTION:
 - amount is DOLLARS, greater than 0, at most 1,000,000.
 - reason: one calm sentence restating the number the user chose. This only PROPOSES the override; the user confirms it. Applying it replaces the derived 6-month average everywhere runway is shown, until the user clears it back to derived — you cannot clear it yourself, there is no action for that.
 
+RECORD A BILL:
+{"action":"record_bill","vendor":"string","amount":0,"frequency":"weekly"|"biweekly"|"monthly"|"quarterly"|"semiannual"|"annual","dueDay":0,"accountName":"string","endDate":"YYYY-MM-DD","installmentsRemaining":0,"nonNegotiable":true,"reason":"string"}
+- Use when the user asks to RECORD a recurring obligation as an upcoming/recurring payment — a subscription, an installment plan, a loan payment, anything on its own repeating schedule. This is what turns "record my iPhone installment" into an actual saved row; describing it in prose and nothing else leaves NOTHING recorded.
+- vendor: the payee's name, as the user said it or as a screenshot shows it.
+- amount is DOLLARS, the amount charged EACH time (never a total or a remaining balance), greater than 0, at most 100,000.
+- frequency is exactly one of the six values above. dueDay (1-31), when known, is the day of the month — omit fields you do not know rather than guess.
+- accountName, when the user names which card or account pays it, copied close to their wording. It is resolved against the app's own payment methods on the client; omit it if nothing was said, and do not treat an unresolved name as a reason to withhold the whole action.
+- From an INSTALLMENT PLAN screenshot showing a per-payment amount and a remaining balance (e.g. "$45.79/mo, $595.31 remaining"): compute installmentsRemaining by dividing the remaining balance by the amount and rounding to the nearest whole payment (595.31 / 45.79 ≈ 13). Send at most ONE of endDate or installmentsRemaining, never both — pick whichever the source actually shows, and send neither when the plan has no known end.
+- An installment plan (a screenshot or description showing a fixed number of remaining payments) defaults nonNegotiable to true — a payment plan is not optional. An ordinary subscription does not need nonNegotiable set at all.
+- reason: one calm sentence restating what will be recorded. This only PROPOSES the bill; the user confirms it and nothing is written until they press the button.
+- record_bill is a DISPLAY entry: it appears in Upcoming and the Bills register, and is never added or counted in the spending average that drives runway — recording a bill never changes what the user's runway says.
+
 WHAT THESE ACTIONS DO NOT DO:
 - No action applies anything. Each one renders a confirmation the user has to press.
 - No action can mark a credit-card credit as earned income, and none can delete a transaction.
-- "mark_business_subscription" and "mark_different_owner" are labels on the ALERT only. They make no tax or deductibility claim, and they leave the expense fully counted.`;
+- "mark_business_subscription" and "mark_different_owner" are labels on the ALERT only. They make no tax or deductibility claim, and they leave the expense fully counted.
+- Never claim something was recorded, saved, added, or set up unless YOU emitted the matching action in THIS exact reply. Describing what you would do, or saying "this will be recorded", is not doing it — if you cannot emit the action (missing information, wrong context), say what is still needed instead of claiming success.`;
 
 const clip = (s: unknown, max = CAPS.str): string =>
   typeof s === 'string' ? s.trim().slice(0, max) : '';
