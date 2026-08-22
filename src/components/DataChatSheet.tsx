@@ -52,6 +52,9 @@ interface ChatMessage {
     amount: number;
     frequency: BillFrequency;
     dueDay?: number;
+    /** Defect 1 fix: the anchor that lets billUpcomingEvents actually project this
+     *  bill — see resolveBillAnchor below. */
+    nextDueDate?: string;
     accountName?: string;
     endDate?: string;
     installmentsRemaining?: number;
@@ -95,6 +98,39 @@ export function resolveBillPaymentMethod(name: string | undefined): string | nul
   if (exact.length === 1) return exact[0][0];
   const contains = entries.filter(([, m]) => m.label.toLowerCase().includes(n));
   return contains.length === 1 ? contains[0][0] : null;
+}
+
+/**
+ * Defect 1: a chat-recorded bill never got a Bill.anchorDate, so `billUpcomingEvents`
+ * (bills.ts) silently produced ZERO Upcoming events for weekly/biweekly
+ * (`projectWeeklyish` requires anchorDate outright) and quarterly/semiannual/annual
+ * (`projectMonthlyish`'s periodMonths>1 branch requires anchorDate too, to pin WHICH
+ * months in the cycle qualify — an autopayDay alone, even an explicit one, can never
+ * say that). `nextDueDate` is the fix's input: it becomes anchorDate directly, and its
+ * day-of-month becomes autopayDay whenever dueDay itself is absent.
+ *
+ * Returns null exactly when the cadence needs an anchor `billUpcomingEvents` can use
+ * and nothing supplies one — the card then renders words, not a broken Apply, same
+ * contract as resolveAccount/resolveBillPaymentMethod. monthly is the one cadence that
+ * never blocks: no autopayDay at all is "varies" (see Bill.autopayDay's doc comment),
+ * an existing, intentional state — not something this defect needs to newly forbid.
+ */
+export function resolveBillAnchor(proposal: {
+  frequency: BillFrequency;
+  dueDay?: number;
+  nextDueDate?: string;
+}): { autopayDay?: number; anchorDate?: string } | null {
+  const dayFromNextDueDate = proposal.nextDueDate ? Number(proposal.nextDueDate.slice(8, 10)) : undefined;
+  const autopayDay = proposal.dueDay ?? dayFromNextDueDate;
+
+  if (proposal.frequency === 'weekly' || proposal.frequency === 'biweekly') {
+    return proposal.nextDueDate ? { anchorDate: proposal.nextDueDate } : null;
+  }
+  if (proposal.frequency === 'monthly') {
+    return { autopayDay };
+  }
+  // quarterly/semiannual/annual: nextDueDate is the ONLY source of anchorDate.
+  return proposal.nextDueDate ? { autopayDay, anchorDate: proposal.nextDueDate } : null;
 }
 
 export default function DataChatSheet({ open, onClose, seed }: {
@@ -242,6 +278,7 @@ export default function DataChatSheet({ open, onClose, seed }: {
                   amount: reply.amount,
                   frequency: reply.frequency,
                   dueDay: reply.dueDay,
+                  nextDueDate: reply.nextDueDate,
                   accountName: reply.accountName,
                   endDate: reply.endDate,
                   installmentsRemaining: reply.installmentsRemaining,
@@ -375,13 +412,18 @@ export default function DataChatSheet({ open, onClose, seed }: {
     if (!m.bill || busy || !profile?.id) return;
     const paymentMethodId = resolveBillPaymentMethod(m.bill.accountName);
     if (!paymentMethodId) return;
+    // Defect 1: mirrors the card's own gate (BillProposalCard, below) — the Apply
+    // button is never rendered without an anchor, so this is unreachable in practice.
+    const anchor = resolveBillAnchor(m.bill);
+    if (!anchor) return;
     setBusy(true);
     try {
       await addBill(profile.id, {
         vendor: m.bill.vendor,
         amount: m.bill.amount,
         frequency: m.bill.frequency,
-        autopayDay: m.bill.dueDay,
+        autopayDay: anchor.autopayDay,
+        anchorDate: anchor.anchorDate,
         paymentMethodId,
         migrationStatus: 'to-review',
         lifecycleStatus: 'active',
@@ -813,6 +855,7 @@ function BillProposalCard({ proposal, currency, pending, busy, onApply, onCancel
     amount: number;
     frequency: BillFrequency;
     dueDay?: number;
+    nextDueDate?: string;
     accountName?: string;
     endDate?: string;
     installmentsRemaining?: number;
@@ -836,6 +879,20 @@ function BillProposalCard({ proposal, currency, pending, busy, onApply, onCancel
       </p>
     );
   }
+
+  // Defect 1: weekly/biweekly/quarterly/semiannual/annual need an anchor
+  // billUpcomingEvents can use; neither a dueDay nor an absent nextDueDate supplies
+  // one. Same no-button contract as the paymentMethodId check above — never offer
+  // an Apply that would record a bill silently missing from Upcoming.
+  const anchor = resolveBillAnchor(proposal);
+  if (!anchor) {
+    return (
+      <p className="mt-3 text-xs text-[var(--foreground-muted)]">
+        I don&apos;t have a next due date for a {proposal.frequency} bill, so it can&apos;t show a schedule in Upcoming yet — tell me when the next payment is due.
+      </p>
+    );
+  }
+
   const methodLabel = PAYMENT_METHODS[paymentMethodId]?.label;
 
   const end = proposal.endDate
@@ -847,10 +904,10 @@ function BillProposalCard({ proposal, currency, pending, busy, onApply, onCancel
   return (
     <div className="mt-3 rounded-card border border-[var(--border-color)] bg-[var(--background)] p-3">
       <p className="font-medium text-[var(--foreground)]">
-        {`Record ${proposal.vendor} — ${m2(proposal.amount)} ${proposal.frequency}${proposal.dueDay ? ` (day ${proposal.dueDay})` : ''}`}
+        {`Record ${proposal.vendor} — ${m2(proposal.amount)} ${proposal.frequency}${anchor.autopayDay ? ` (day ${anchor.autopayDay})` : ''}`}
       </p>
       <p className="text-xs text-[var(--foreground-muted)] mt-1">
-        {[methodLabel, end, proposal.nonNegotiable ? 'locked — reserved first in every plan' : null]
+        {[methodLabel, anchor.anchorDate ? `next ${anchor.anchorDate}` : null, end, proposal.nonNegotiable ? 'locked — reserved first in every plan' : null]
           .filter(Boolean)
           .join(' · ')}
       </p>

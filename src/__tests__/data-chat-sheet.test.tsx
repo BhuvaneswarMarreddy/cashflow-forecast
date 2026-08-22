@@ -1,8 +1,9 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import DataChatSheet, { resolveBillPaymentMethod } from '@/components/DataChatSheet';
+import DataChatSheet, { resolveBillPaymentMethod, resolveBillAnchor } from '@/components/DataChatSheet';
 import { applyMappingRules, rulePreview, MappingRule } from '@/lib/mapping-rules';
+import { billUpcomingEvents, Bill } from '@/lib/bills';
 import { Transaction } from '@/types';
 
 /**
@@ -507,5 +508,127 @@ describe('the record_bill proposal card', () => {
     await screen.findByText(/Apple Card installment - iPhone/);
     expect(screen.queryByText(/Saved/)).not.toBeInTheDocument();
     expect(addBill).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Defect 1 (record-bill-report.md follow-up, #10/#14): a chat-recorded bill never got
+ * a Bill.anchorDate, so billUpcomingEvents (src/lib/bills.ts) silently produced ZERO
+ * Upcoming events for weekly/biweekly (projectWeeklyish requires anchorDate) and
+ * quarterly/semiannual/annual (projectMonthlyish's periodMonths>1 branch requires it
+ * too, to pin WHICH months in the cycle qualify). record_bill's new nextDueDate field
+ * is the fix's input; resolveBillAnchor turns it into autopayDay/anchorDate exactly
+ * the way billUpcomingEvents needs.
+ */
+describe('resolveBillAnchor — dueDay/nextDueDate -> autopayDay/anchorDate (Defect 1)', () => {
+  it('monthly: an explicit dueDay becomes autopayDay', () => {
+    expect(resolveBillAnchor({ frequency: 'monthly', dueDay: 15 })).toEqual({ autopayDay: 15 });
+  });
+
+  it('monthly: neither dueDay nor nextDueDate still resolves — "varies" is a valid pre-existing state, not broken', () => {
+    expect(resolveBillAnchor({ frequency: 'monthly' })).toEqual({ autopayDay: undefined });
+  });
+
+  it('monthly: derives autopayDay from nextDueDate\'s day-of-month when dueDay is absent', () => {
+    expect(resolveBillAnchor({ frequency: 'monthly', nextDueDate: '2026-09-15' })).toEqual({ autopayDay: 15 });
+  });
+
+  it('weekly/biweekly: nextDueDate becomes anchorDate — dueDay is irrelevant to them', () => {
+    expect(resolveBillAnchor({ frequency: 'weekly', nextDueDate: '2026-09-03' })).toEqual({ anchorDate: '2026-09-03' });
+    expect(resolveBillAnchor({ frequency: 'biweekly', nextDueDate: '2026-09-03' })).toEqual({ anchorDate: '2026-09-03' });
+  });
+
+  it('weekly/biweekly: no nextDueDate resolves to null — a dueDay alone cannot anchor them', () => {
+    expect(resolveBillAnchor({ frequency: 'weekly' })).toBeNull();
+    expect(resolveBillAnchor({ frequency: 'biweekly', dueDay: 15 })).toBeNull();
+  });
+
+  it('quarterly/semiannual/annual: need nextDueDate to pin the cycle, even when dueDay is given', () => {
+    expect(resolveBillAnchor({ frequency: 'quarterly', dueDay: 10 })).toBeNull();
+    expect(resolveBillAnchor({ frequency: 'semiannual', dueDay: 10 })).toBeNull();
+    expect(resolveBillAnchor({ frequency: 'annual', dueDay: 10 })).toBeNull();
+  });
+
+  it('quarterly: resolves from nextDueDate alone, deriving autopayDay from its day-of-month', () => {
+    expect(resolveBillAnchor({ frequency: 'quarterly', nextDueDate: '2026-01-10' }))
+      .toEqual({ autopayDay: 10, anchorDate: '2026-01-10' });
+  });
+
+  it('quarterly: an explicit dueDay wins over the derived one when both are given', () => {
+    expect(resolveBillAnchor({ frequency: 'quarterly', dueDay: 12, nextDueDate: '2026-01-10' }))
+      .toEqual({ autopayDay: 12, anchorDate: '2026-01-10' });
+  });
+});
+
+describe('the record_bill card and Defect 1 — nextDueDate wires anchorDate through to Upcoming', () => {
+  const billReply = (over: Record<string, unknown> = {}) => ({
+    success: true,
+    result: {
+      action: 'record_bill',
+      vendor: 'Test Bill',
+      amount: 45.79,
+      frequency: 'weekly',
+      reason: 'Recording a test bill.',
+      ...over,
+    },
+  });
+
+  it('a weekly bill with no nextDueDate cannot anchor — words, no Apply button', async () => {
+    aiChat.mockResolvedValue(billReply({ frequency: 'weekly' }));
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('record my weekly $45.79 bill');
+
+    expect(await screen.findByText(/next due date for a weekly bill/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+    expect(addBill).not.toHaveBeenCalled();
+  });
+
+  it('a quarterly bill with a dueDay but no nextDueDate STILL cannot anchor — a day-of-month alone cannot pin the cycle', async () => {
+    aiChat.mockResolvedValue(billReply({ frequency: 'quarterly', dueDay: 10 }));
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('record my quarterly $45.79 bill, due the 10th');
+
+    expect(await screen.findByText(/next due date for a quarterly bill/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+    expect(addBill).not.toHaveBeenCalled();
+  });
+
+  it('a weekly bill WITH nextDueDate applies, writes anchorDate, and now produces an Upcoming event', async () => {
+    const nextDueDate = '2026-09-03';
+    aiChat.mockResolvedValue(billReply({ frequency: 'weekly', nextDueDate, accountName: 'Apple Card' }));
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('record my weekly $45.79 on Apple Card, next payment Sep 3');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(addBill).toHaveBeenCalledTimes(1));
+    expect(addBill).toHaveBeenCalledWith('user-1', expect.objectContaining({
+      frequency: 'weekly',
+      anchorDate: nextDueDate,
+      paymentMethodId: 'apple-card',
+    }));
+
+    // The actual proof this defect is fixed: the row addBill just received, run
+    // through the real projection util, now yields an Upcoming event.
+    const saved: Bill = { id: 'b1', createdAt: '', updatedAt: '', ...addBill.mock.calls[0][1] };
+    expect(billUpcomingEvents([saved], '2026-08-25', 45).length).toBeGreaterThan(0);
+  });
+
+  it('a quarterly bill with ONLY nextDueDate applies, derives autopayDay, and now produces an Upcoming event', async () => {
+    const nextDueDate = '2026-09-10';
+    aiChat.mockResolvedValue(billReply({ frequency: 'quarterly', nextDueDate, accountName: 'Apple Card' }));
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('record my quarterly $45.79 on Apple Card, next payment Sep 10');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(addBill).toHaveBeenCalledTimes(1));
+    expect(addBill).toHaveBeenCalledWith('user-1', expect.objectContaining({
+      frequency: 'quarterly',
+      autopayDay: 10,
+      anchorDate: nextDueDate,
+      paymentMethodId: 'apple-card',
+    }));
+
+    const saved: Bill = { id: 'b1', createdAt: '', updatedAt: '', ...addBill.mock.calls[0][1] };
+    expect(billUpcomingEvents([saved], '2026-08-25', 45).length).toBeGreaterThan(0);
   });
 });
