@@ -1,4 +1,13 @@
-import { applyDecisionCore, validateOp } from '../decisions';
+import { getFirestore } from 'firebase-admin/firestore';
+
+import { applyDecisionCore, undoDecision, undoPatch, validateOp } from '../decisions';
+
+// Only undoDecision (the callable) touches Firestore in this file — the mock
+// exists purely for its two tests below, same shape as rate-limit.test.ts.
+jest.mock('firebase-admin/firestore', () => ({
+  getFirestore: jest.fn(),
+  Timestamp: { now: jest.fn(() => 'TS') },
+}));
 
 const ledger = {
   transactions: [
@@ -47,4 +56,62 @@ it('rejects malformed ops with the rules-file constraints', () => {
   expect(() => validateOp({ ...op, match: { ...op.match, value: '' } } as never)).toThrow();
   expect(() => validateOp({ ...op, match: { ...op.match, value: 'a'.repeat(201) } } as never)).toThrow();
   expect(() => validateOp({ ...op, set: {} } as never)).toThrow(); // a rule that sets nothing is noise
+});
+
+describe('undoPatch', () => {
+  it('is exactly {enabled: false} — disable, never delete, never touch other fields', () => {
+    expect(undoPatch()).toEqual({ enabled: false });
+  });
+});
+
+describe('undoDecision', () => {
+  it('raises not-found when the rule doc does not exist', async () => {
+    const fakeDb = {
+      collection: jest.fn(() => ({
+        doc: jest.fn(() => ({
+          collection: jest.fn(() => ({
+            doc: jest.fn(() => ({ get: jest.fn(async () => ({ exists: false })) })),
+          })),
+        })),
+      })),
+    };
+    (getFirestore as jest.Mock).mockReturnValue(fakeDb);
+
+    await expect(
+      undoDecision.run({ auth: { uid: 'u1' }, data: { decisionId: 'missing' } } as never),
+    ).rejects.toMatchObject({ code: 'not-found' });
+  });
+
+  it('updates only enabled:false and writes the decision.undone audit entry', async () => {
+    const updates: unknown[] = [];
+    const audits: unknown[] = [];
+    const fakeDb = {
+      collection: jest.fn(() => ({
+        doc: jest.fn(() => ({
+          collection: jest.fn((name: string) =>
+            name === 'rules'
+              ? {
+                  doc: jest.fn(() => ({
+                    get: jest.fn(async () => ({ exists: true })),
+                    update: jest.fn(async (patch: unknown) => {
+                      updates.push(patch);
+                    }),
+                  })),
+                }
+              : { add: jest.fn(async (entry: unknown) => audits.push(entry)) },
+          ),
+        })),
+      })),
+    };
+    (getFirestore as jest.Mock).mockReturnValue(fakeDb);
+
+    const result = await undoDecision.run({
+      auth: { uid: 'u1' },
+      data: { decisionId: 'r1' },
+    } as never);
+
+    expect(result).toEqual({ ok: true });
+    expect(updates).toEqual([{ enabled: false }]); // rule doc otherwise untouched
+    expect(audits).toEqual([{ at: 'TS', actor: 'user', action: 'decision.undone', target: 'rules/r1' }]);
+  });
 });

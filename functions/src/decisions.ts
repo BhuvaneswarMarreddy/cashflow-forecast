@@ -177,3 +177,56 @@ export const applyDecision = onCall({ cors: true }, async (request) => {
 
   return { decisionId: ruleRef.id, changed: summary };
 });
+
+/**
+ * The patch `undoDecision` applies — a plain function, not a `new Date()`-style
+ * inline literal, so a test can assert its exact shape the same way
+ * `applyDecisionCore` lets a test assert the rule doc's shape without an
+ * emulator. `enabled: false` and nothing else: undo is a toggle, not a
+ * rewrite. Deleting the rule doc would also erase `match`/`set`/`createdAt` —
+ * the only record of what the rule ever did — so disabling is the only
+ * correct undo. A disabled rule simply stops being picked up wherever rules
+ * are read (`applyMappingRules` et al.), same mechanism `firestore.rules:189`
+ * already assumes when it calls enable/disable "an update".
+ */
+export function undoPatch(): { enabled: false } {
+  return { enabled: false };
+}
+
+/**
+ * The callable. Same auth + not-found + audit shape as `resolveReview`'s
+ * `transactionId` lookup: read the doc first so a missing id is a clean
+ * `not-found` instead of `update()`'s own (less clear) failure, then write
+ * the patch and the audit entry beside it.
+ */
+export const undoDecision = onCall({ cors: true }, async (request) => {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Sign in to undo a decision.');
+  }
+
+  const { decisionId } = (request.data ?? {}) as { decisionId?: string };
+  if (!decisionId) {
+    throw new HttpsError('invalid-argument', 'Which decision?');
+  }
+
+  const user = getFirestore().collection('users').doc(request.auth.uid);
+  const ruleRef = user.collection('rules').doc(decisionId);
+
+  const rule = await ruleRef.get();
+  if (!rule.exists) {
+    throw new HttpsError('not-found', 'No such decision.');
+  }
+
+  await ruleRef.update(undoPatch());
+
+  // Same immutable-trail reasoning as applyDecision's own audit write, and
+  // the exact shape `firestore.rules:239-244` requires.
+  await user.collection('audit').add({
+    at: Timestamp.now(),
+    actor: 'user',
+    action: 'decision.undone',
+    target: `rules/${decisionId}`,
+  });
+
+  return { ok: true };
+});
