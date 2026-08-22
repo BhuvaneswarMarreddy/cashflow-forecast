@@ -103,6 +103,12 @@ export type ChatAction =
       amount: number;
       frequency: BillFrequency;
       dueDay?: number;
+      /** ISO date of the NEXT payment. Fixes Defect 1: without this, a chat-recorded
+       *  weekly/biweekly/quarterly/semiannual/annual bill got no Bill.anchorDate and
+       *  billUpcomingEvents silently produced no Upcoming events for it. The card
+       *  (DataChatSheet) turns this into anchorDate, and derives autopayDay from its
+       *  day-of-month when dueDay is absent. */
+      nextDueDate?: string;
       accountName?: string;
       endDate?: string;
       installmentsRemaining?: number;
@@ -329,6 +335,20 @@ const ALLOCATION_ACTIONS = ['confirm_refund_allocation', 'adjust_refund_allocati
 const isIsoDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s));
 
 /**
+ * record_bill's nextDueDate: a few days of slack behind "today" (a payment just missed,
+ * or the model reading a screenshot dated slightly stale), generous room ahead (an
+ * annual bill's next date can be up to a year out), but never a wildly wrong year a
+ * model hallucinated. Plain string comparison is safe — both sides are yyyy-MM-dd.
+ */
+const isNextDueDateInRange = (s: string): boolean => {
+  if (!isIsoDate(s)) return false;
+  const day = 24 * 60 * 60 * 1000;
+  const min = new Date(Date.now() - 7 * day).toISOString().slice(0, 10);
+  const max = new Date(Date.now() + 400 * day).toISOString().slice(0, 10);
+  return s >= min && s <= max;
+};
+
+/**
  * The allocations a refund action proposes, checked against the SAME validator the store
  * and firestore.rules enforce, so "integer cents", "> 0", "Σ ≤ the credit" and "each ≤
  * its purchase" have exactly one definition in this codebase.
@@ -536,7 +556,7 @@ export function parseChatAction(raw: unknown, ctx?: RecoveryContext): ChatAction
 
   if (action === 'record_bill') {
     const o = record(raw, [
-      'action', 'vendor', 'amount', 'frequency', 'dueDay', 'accountName',
+      'action', 'vendor', 'amount', 'frequency', 'dueDay', 'nextDueDate', 'accountName',
       'endDate', 'installmentsRemaining', 'nonNegotiable', 'reason',
     ]);
     if (!o) return null;
@@ -555,6 +575,12 @@ export function parseChatAction(raw: unknown, ctx?: RecoveryContext): ChatAction
     if (o.dueDay !== undefined) {
       if (typeof o.dueDay !== 'number' || !Number.isInteger(o.dueDay) || o.dueDay < 1 || o.dueDay > 31) return null;
       dueDay = o.dueDay;
+    }
+
+    let nextDueDate: string | undefined;
+    if (o.nextDueDate !== undefined) {
+      if (typeof o.nextDueDate !== 'string' || !isNextDueDateInRange(o.nextDueDate)) return null;
+      nextDueDate = o.nextDueDate;
     }
 
     let accountName: string | undefined;
@@ -597,6 +623,7 @@ export function parseChatAction(raw: unknown, ctx?: RecoveryContext): ChatAction
       amount: Math.round(amount * 100) / 100,
       frequency,
       ...(dueDay !== undefined ? { dueDay } : {}),
+      ...(nextDueDate !== undefined ? { nextDueDate } : {}),
       ...(accountName !== undefined ? { accountName } : {}),
       ...(endDate !== undefined ? { endDate } : {}),
       ...(installmentsRemaining !== undefined ? { installmentsRemaining } : {}),

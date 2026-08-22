@@ -90,7 +90,11 @@ describe('buildChatMessages', () => {
     // Bumped again from 13500 (#10/#14): the RECORD A BILL block (prompts.ts) teaches
     // record_bill — another constant addition to every system prompt. Measured worst-case
     // went 13397 -> 15980 (+2583 chars). Still a loose sanity bound, not an exact byte contract.
-    expect(system.length).toBeLessThan(16200);
+    // Bumped again from 16200 (Defect 1 fix): RECORD A BILL grew a nextDueDate field and
+    // the paragraph teaching the model to extract it (an installment screenshot's "Next
+    // installment on <date>"), needed so weekly/quarterly/etc. chat-recorded bills get an
+    // anchorDate. Measured worst-case went 15980 -> 16506 (+526 chars).
+    expect(system.length).toBeLessThan(16700);
   });
 
   it('survives a garbage context without throwing', () => {
@@ -170,6 +174,18 @@ describe('the record_bill action travels with the contract', () => {
   it('never lets the model claim a change happened without emitting the matching action — the live overpromise bug', () => {
     const system = buildChatMessages({ message: 'record my iPhone installment' })[0].content;
     expect(system).toMatch(/never claim.*(recorded|saved|added|set up)/i);
+  });
+
+  /**
+   * Defect 1 (record-bill-report.md follow-up): the model never had a way to say
+   * WHEN a bill's next payment falls, so billUpcomingEvents (bills.ts) had no
+   * anchorDate to project weekly/biweekly/quarterly/semiannual/annual bills from —
+   * they silently never showed up in Upcoming. nextDueDate is the fix's input.
+   */
+  it('teaches the model to extract nextDueDate — an installment screenshot literally shows "Next installment on <date>"', () => {
+    const system = buildChatMessages({ message: 'record my iPhone installment' })[0].content;
+    expect(system).toContain('nextDueDate');
+    expect(system).toMatch(/next installment on/i);
   });
 });
 

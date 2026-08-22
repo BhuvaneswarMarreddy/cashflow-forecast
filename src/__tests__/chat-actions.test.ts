@@ -389,3 +389,54 @@ describe('record_bill — the chat verb this task adds (issues #10/#14)', () => 
     expect(parseChatAction({ ...valid, accountName: '' })).toBeNull();
   });
 });
+
+/**
+ * Defect 1 (record-bill-report.md follow-up): a chat-recorded bill never got an
+ * anchorDate, so billUpcomingEvents silently produced no Upcoming events for
+ * weekly/biweekly/quarterly/semiannual/annual bills. nextDueDate is the fix's
+ * input — the DataChatSheet card turns it into Bill.anchorDate (and, for
+ * monthly-ish cadences missing dueDay, derives autopayDay from its day-of-month).
+ */
+describe('record_bill — nextDueDate (Defect 1: chat bills need an anchor)', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const isoOffset = (days: number): string => new Date(Date.now() + days * DAY).toISOString().slice(0, 10);
+
+  const valid = {
+    action: 'record_bill',
+    vendor: 'Apple Card installment - iPhone',
+    amount: 45.79,
+    frequency: 'monthly',
+    reason: 'Next installment on the 15th.',
+  };
+
+  it('accepts a well-formed nextDueDate', () => {
+    const nextDueDate = isoOffset(10);
+    expect(parseChatAction({ ...valid, nextDueDate })).toEqual({ ...valid, nextDueDate });
+  });
+
+  it('rejects a malformed nextDueDate rather than coercing it', () => {
+    expect(parseChatAction({ ...valid, nextDueDate: '2027-1-1' })).toBeNull();
+    expect(parseChatAction({ ...valid, nextDueDate: 'not a date' })).toBeNull();
+    expect(parseChatAction({ ...valid, nextDueDate: 20270915 })).toBeNull();
+  });
+
+  it('accepts both range boundaries — today-7d and today+400d', () => {
+    expect(parseChatAction({ ...valid, nextDueDate: isoOffset(-7) })).toEqual({ ...valid, nextDueDate: isoOffset(-7) });
+    expect(parseChatAction({ ...valid, nextDueDate: isoOffset(400) })).toEqual({ ...valid, nextDueDate: isoOffset(400) });
+  });
+
+  it('rejects a date one day outside either boundary', () => {
+    expect(parseChatAction({ ...valid, nextDueDate: isoOffset(-8) })).toBeNull();
+    expect(parseChatAction({ ...valid, nextDueDate: isoOffset(401) })).toBeNull();
+  });
+
+  it('coexists with installmentsRemaining — nextDueDate answers "when", not "how many"', () => {
+    const nextDueDate = isoOffset(5);
+    expect(parseChatAction({ ...valid, nextDueDate, installmentsRemaining: 13 }))
+      .toEqual({ ...valid, nextDueDate, installmentsRemaining: 13 });
+  });
+
+  it('is optional — omitting it still accepts the rest of the proposal', () => {
+    expect(parseChatAction(valid)).toEqual(valid);
+  });
+});
