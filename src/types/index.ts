@@ -433,6 +433,17 @@ export interface UserProfile {
      * Absent = off: the app does not count money the bank has not moved.
      */
     includePendingInCalculations?: boolean;
+    /**
+     * FIN-SPEND-001 (#133). The owner's own number for the monthly-spend
+     * assumption that drives runway, in DOLLARS. Settable from chat only.
+     * Absent or null = no override: runway uses the derived 6-month average
+     * (monthlyAverages().spending). `null` — not just "absent" — is a real,
+     * writable value: it is how the chat card's "Back to derived" affordance
+     * clears a previously-set override (Firestore's `updateDoc` drops
+     * `undefined` keys outright, so clearing needs a value that survives the
+     * write, not omission).
+     */
+    assumedMonthlySpend?: number | null;
   };
 }
 
