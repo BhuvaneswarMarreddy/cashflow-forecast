@@ -16,7 +16,7 @@ import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 
 import { applyMappingRules, definedSet, type MappingRule, type RuleMatch } from '@/lib/mapping-rules';
-import { EXPENSE_CATEGORIES, type TransactionType } from '@/types';
+import { EXPENSE_CATEGORIES, type ResolvedCategory, type TransactionType } from '@/types';
 
 import { readLedger, type Ledger } from './snapshot';
 
@@ -43,8 +43,24 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 // Firestore, since the Admin SDK write below is the ONLY gate (firestore.rules
 // does not check `set` at all, see isValidMappingRuleShape).
 const SET_KEYS: (keyof MappingRule['set'])[] = ['category', 'sourceCategory', 'type', 'merchant'];
-const EXPENSE_CATEGORY_VALUES = new Set(EXPENSE_CATEGORIES.map((c) => c.value));
+// cashflow-mobile#24. The fallback used whenever a caller has no owner-resolved set
+// to check against — see validateOp's `categories` param and assignableCategoryValues.
+const DEFAULT_CATEGORY_VALUES: ReadonlySet<string> = new Set(EXPENSE_CATEGORIES.map((c) => c.value));
 const SET_TYPES: TransactionType[] = ['expense', 'income', 'transfer'];
+
+/**
+ * cashflow-mobile#24. The owner's resolved category set (defaults + custom),
+ * narrowed to what a NEW row may be filed under — archived entries are excluded.
+ * `undefined` (no ledger yet) falls back to the 13 defaults, which is what keeps
+ * `validateOp`'s cheap pre-`readLedger` guard in `applyDecision` meaningful: it
+ * cannot know the owner's custom categories without reading their settings, so it
+ * defers the category-membership check specifically (still catches every other
+ * malformed field), and this function is only ever called with the real ledger.
+ */
+function assignableCategoryValues(categories?: readonly ResolvedCategory[]): ReadonlySet<string> {
+  if (!categories) return DEFAULT_CATEGORY_VALUES;
+  return new Set(categories.filter((c) => !c.archived).map((c) => c.value));
+}
 
 const isBoundedString = (v: unknown, max = 200): boolean =>
   typeof v === 'string' && v.length >= 1 && v.length <= max;
@@ -65,8 +81,18 @@ const isBoundedString = (v: unknown, max = 200): boolean =>
  * Every field is read defensively (`op?.match` etc.) because `request.data`
  * on the real callable is attacker-controlled JSON, not a `DecisionOp` —
  * the type only documents the *valid* shape.
+ *
+ * cashflow-mobile#24: `categories` is the owner's resolved, assignable set
+ * (defaults + their own, minus anything archived). OMITTED means "not known
+ * yet" — the category-membership check is skipped (every other check still
+ * runs), which is what lets `applyDecision`'s early, pre-`readLedger` guard
+ * stay cheap without hard-coding the 13 defaults as if they were still the
+ * only valid answer. The one caller that has a resolved set (`applyDecisionCore`,
+ * via `assignableCategoryValues`) always passes it, and that call is the
+ * authoritative gate — a hallucinated or unknown category is still rejected,
+ * just against the OWNER's set instead of a fixed one.
  */
-export function validateOp(op: DecisionOp): void {
+export function validateOp(op: DecisionOp, categories?: ReadonlySet<string>): void {
   if (!op || (op as { kind?: unknown }).kind !== 'merchantRule') {
     throw new HttpsError('invalid-argument', 'Unknown decision kind.');
   }
@@ -99,8 +125,13 @@ export function validateOp(op: DecisionOp): void {
       throw new HttpsError('invalid-argument', `Unknown set field "${key}".`);
     }
   }
-  if (set.category !== undefined && !EXPENSE_CATEGORY_VALUES.has(set.category as never)) {
-    throw new HttpsError('invalid-argument', 'Malformed category.');
+  if (set.category !== undefined) {
+    if (typeof set.category !== 'string') {
+      throw new HttpsError('invalid-argument', 'Malformed category.');
+    }
+    if (categories && !categories.has(set.category)) {
+      throw new HttpsError('invalid-argument', 'Malformed category.');
+    }
   }
   if (set.type !== undefined && !SET_TYPES.includes(set.type as TransactionType)) {
     throw new HttpsError('invalid-argument', 'Malformed type.');
@@ -138,7 +169,11 @@ export function applyDecisionCore(
   op: DecisionOp,
   now: string,
 ): { ruleDoc: Omit<MappingRule, 'id'>; summary: ChangeSummary } {
-  validateOp(op);
+  // cashflow-mobile#24: the authoritative category check — the owner's resolved,
+  // assignable set, not the hardcoded 13. `ledger.categories` is always populated
+  // by readLedger in production; a fixture that omits it (see decisions.test.ts)
+  // falls back to the defaults via assignableCategoryValues.
+  validateOp(op, assignableCategoryValues(ledger.categories));
 
   const ruleDoc: Omit<MappingRule, 'id'> = {
     match: op.match,
@@ -196,6 +231,13 @@ export const applyDecision = onCall({ cors: true }, async (request) => {
   // malformed request should fail cheaply. `applyDecisionCore` validates
   // again as its own precondition (it has no other caller to trust); calling
   // a pure, cheap function twice is not the duplication worth avoiding here.
+  //
+  // cashflow-mobile#24: `categories` is omitted here on purpose — the owner's
+  // resolved set lives in their settings, inside the ledger this guard is
+  // specifically trying to avoid reading yet. Every OTHER malformed field
+  // (kind, match, set keys, type, sourceCategory/merchant bounds) is still
+  // caught cheaply here; only the category-membership check is deferred to
+  // applyDecisionCore's call below, which has the real ledger.
   validateOp(op);
 
   const ledger = await readLedger(request.auth.uid);
