@@ -21,7 +21,7 @@ import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 
 import { currentOf, isUnanchored, sortAccounts } from '@/lib/accounts';
-import { billUpcomingEvents, nonNegotiableMonthly, type Bill } from '@/lib/bills';
+import { billUpcomingEvents, isCharging, nonNegotiableMonthly, PAYMENT_METHODS, type Bill } from '@/lib/bills';
 import { isPositive, type IncomeContext } from '@/lib/classify';
 import {
   calculateCurrentCash,
@@ -237,6 +237,26 @@ export function mapTransaction(transaction: Transaction, accounts: PaymentAccoun
   };
 }
 
+/**
+ * #22: mobile has no bills read path — only `upcoming`'s projected EVENTS, never the
+ * bills themselves. Same field subset as the server ChatContext.bills (prompts.ts),
+ * cents where this payload uses cents. `isCharging` is the SAME "current" rule
+ * `billUpcomingEvents` already applies, so this digest and `upcoming` never disagree
+ * about whether a bill is live.
+ */
+export function mapBill(bill: Bill) {
+  return {
+    id: bill.id,
+    vendor: bill.vendor,
+    amountCents: cents(bill.amount),
+    frequency: bill.frequency,
+    nonNegotiable: bill.nonNegotiable ?? false,
+    endDate: bill.endDate ?? null,
+    installmentsRemaining: bill.installmentsRemaining ?? null,
+    method: PAYMENT_METHODS[bill.paymentMethodId]?.label ?? null,
+  };
+}
+
 const UPCOMING_KIND: Partial<Record<ForecastEvent['type'], 'bill' | 'card-payment'>> = {
   bill: 'bill',
   credit_card_payment: 'card-payment',
@@ -385,6 +405,12 @@ export function buildSnapshot(ledger: Ledger) {
 
     accounts: accounts.map(mapAccount),
     upcoming,
+    // #22: the register itself, DISPLAY ONLY — same isCharging "current" filter
+    // billUpcomingEvents (above) already applies. Never read by any figure in
+    // `snapshot`; a pure addition for mobile chat parity.
+    bills: ledger.bills
+      .filter((b) => isCharging(b, new Date().toISOString().slice(0, 10)))
+      .map(mapBill),
     goals: ledger.goals
       .filter((g) => g.isActive)
       .map((g) => ({
