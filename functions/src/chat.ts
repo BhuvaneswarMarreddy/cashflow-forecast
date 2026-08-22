@@ -36,6 +36,27 @@ export function modelFor(hasImage: boolean): string {
  * The narrow return type is the enforcement: a future field has to fit boolean | number,
  * not free text.
  */
+/**
+ * What the owner sees when the model hit `max_tokens` mid-answer. The raw
+ * fragment would be invalid JSON rendered as a chat bubble; this says what
+ * actually happened and how to get the answer.
+ */
+export function truncatedReply(): {
+  success: true;
+  result: { action: 'answer'; explanation: string };
+  fallback: true;
+} {
+  return {
+    success: true,
+    result: {
+      action: 'answer',
+      explanation:
+        'That answer came out too long to send in one piece — ask for a narrower slice (fewer months or fewer categories) and I can show it.',
+    },
+    fallback: true,
+  };
+}
+
 export function successLogFields(hasImage: boolean, durationMs: number): { hasImage: boolean; durationMs: number } {
   return { hasImage, durationMs };
 }
@@ -77,12 +98,21 @@ export const aiChat = onCall(
       const completion = await openai.chat.completions.create({
         model: modelFor(hasImage),
         temperature: 0,
-        max_tokens: 500,
+        // A `report` table is the biggest reply this endpoint can produce: an
+        // ordinary "compare July to August" breakdown measures 500-740 tokens
+        // and the parser's own caps (30 rows x 6 columns) top out near 1300.
+        // At 500 the JSON truncated mid-table, JSON.parse threw, and the owner
+        // got raw broken JSON in a chat bubble. 1600 clears the measured
+        // ceiling with headroom; output cost at this size is ~$0.001/request.
+        max_tokens: 1600,
         response_format: { type: 'json_object' },
         messages,
       });
 
       const content = completion.choices[0]?.message?.content || '';
+      // A truncated completion is never valid JSON, and echoing the fragment
+      // back as prose shows the owner a broken object. Say what happened.
+      if (completion.choices[0]?.finish_reason === 'length') return truncatedReply();
       // Counts only — never the message, merchant names or base64. See applyDecision's
       // console.log for the same discipline elsewhere in this codebase.
       console.log('aiChat', successLogFields(hasImage, Date.now() - startedAt));

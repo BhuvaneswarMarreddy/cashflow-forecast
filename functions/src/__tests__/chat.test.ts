@@ -16,6 +16,19 @@ const ctx = {
   ],
 };
 
+import { truncatedReply } from '../chat';
+
+describe('a truncated completion', () => {
+  it('says the answer was too long instead of echoing a broken JSON fragment', () => {
+    const reply = truncatedReply();
+    expect(reply.result.action).toBe('answer');
+    expect(reply.result.explanation).toMatch(/too long/i);
+    expect(reply.fallback).toBe(true);
+    // Never a raw fragment: the copy must not look like JSON.
+    expect(reply.result.explanation.trim().startsWith('{')).toBe(false);
+  });
+});
+
 describe('buildChatMessages', () => {
   it('puts the strict-JSON contract, the allowed categories and the context in the system message', () => {
     const [system, user] = buildChatMessages({ message: 'anything from Instacart is Groceries', context: ctx });
