@@ -284,6 +284,35 @@ describe('buildChatContext — bills and recurring merchants (#22)', () => {
     // register does not appear in `recurring` just because it was also passed in.
     expect(ctx.bills).toEqual([]);
   });
+
+  /**
+   * `recurring` reads buildAssumptions().fixedBills, which honours the owner's saved
+   * corrections (forecast/page.tsx's Forecast Assumptions panel) via AssumptionOverrides
+   * in localStorage. Without threading those through, the chat could show a merchant the
+   * owner disabled, or its raw detected amount instead of a corrected one — contradicting
+   * what the Forecast page itself says for the exact same merchant.
+   */
+  describe('recurring merchants honour the owner\'s saved Forecast overrides', () => {
+    afterEach(() => localStorage.clear());
+
+    const netflixTxns = () => {
+      const now = new Date();
+      const m = (back: number) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - back, 14)).toISOString().slice(0, 10);
+      return [1, 2, 3, 4, 5, 6].map((b) => txn({ id: `nf${b}`, merchant: 'NETFLIX', amount: 15.49, date: m(b) }));
+    };
+
+    it('omits a merchant the owner disabled on the Forecast page', () => {
+      localStorage.setItem('assumptionOverrides', JSON.stringify({ bills: { NETFLIX: { disabled: true } } }));
+      const ctx = buildChatContext(netflixTxns(), []);
+      expect(ctx.recurring.some((r) => r.merchant === 'NETFLIX')).toBe(false);
+    });
+
+    it('shows the owner\'s corrected amount, not the raw detected one', () => {
+      localStorage.setItem('assumptionOverrides', JSON.stringify({ bills: { NETFLIX: { amount: 20 } } }));
+      const ctx = buildChatContext(netflixTxns(), []);
+      expect(ctx.recurring).toContainEqual({ merchant: 'NETFLIX', amount: 20, cadence: 'monthly' });
+    });
+  });
 });
 
 describe('a refused payload still shows what the model said', () => {

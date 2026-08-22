@@ -19,6 +19,7 @@ import {
   TransactionType,
 } from '@/types';
 import { buildAssumptions } from './behavior';
+import { loadOverrides } from './assumption-overrides';
 import { isCharging, PAYMENT_METHODS, type Bill, type BillFrequency } from './bills';
 import { buildLedgerSummary, LedgerSummary } from './chat-summary';
 import { describeRule, MappingRule, NewMappingRule } from './mapping-rules';
@@ -249,8 +250,15 @@ export function buildChatContext(
         ...(PAYMENT_METHODS[b.paymentMethodId]?.label ? { method: PAYMENT_METHODS[b.paymentMethodId].label } : {}),
       })),
     // detectRecurring's own active set, via behavior.ts's buildAssumptions — one
-    // derivation, not a second copy of the pattern-matching rules.
-    recurring: buildAssumptions(transactions, accounts).fixedBills
+    // derivation, not a second copy of the pattern-matching rules. loadOverrides()
+    // (the SAME read forecast/page.tsx does before calling buildAssumptions) matters
+    // here: without it, a merchant the owner disabled or corrected on the Forecast
+    // page would still show here with its raw detected amount, contradicting what
+    // the Forecast page itself says. loadOverrides() already try/catches internally
+    // (SSR/private-mode/corrupt JSON all fall back to {}), and this module is never
+    // imported outside the browser (DataChatSheet.tsx is 'use client'; functions/
+    // does not compile chat-actions.ts), so no extra guard is needed here.
+    recurring: buildAssumptions(transactions, accounts, loadOverrides()).fixedBills
       .slice(0, MAX.recurring)
       .map((r) => ({ merchant: clip(r.merchant), amount: r.amount, cadence: r.cadence })),
   };
