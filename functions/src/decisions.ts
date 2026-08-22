@@ -76,10 +76,13 @@ export function validateOp(op: DecisionOp): void {
  * its effect by running it — ONLY it, not the owner's existing rules — over
  * every ledger row. `applyMappingRules` takes one transaction at a time and
  * returns the same reference when the candidate doesn't match (see
- * `@/lib/mapping-rules`), so `mapped !== txn` is exactly "this row is one of
- * the ones the rule would touch." Existing rules are irrelevant to that
- * question — this answers "what does the NEW rule do", not "what does the
- * final precedence chain produce."
+ * `@/lib/mapping-rules`), so `mapped !== txn` means the rule matched. However,
+ * a match is not the same as a change: ledger transactions arrive already
+ * rule-applied, so a row whose values already equal the rule's `set` must not
+ * be counted as changed. We must check that at least one key in the rule's
+ * `set` actually differs from the transaction's current value. Existing rules
+ * are irrelevant to that question — this answers "what does the NEW rule do",
+ * not "what does the final precedence chain produce."
  *
  * `now` is a parameter, not `new Date()` inline, so this stays pure and
  * testable without freezing the clock.
@@ -104,8 +107,16 @@ export function applyDecisionCore(
   for (const txn of ledger.transactions) {
     const mapped = applyMappingRules(txn, [candidate]);
     if (mapped !== txn) {
-      transactionsMatched += 1;
-      monthsAffected.add(txn.date.slice(0, 7)); // yyyy-MM
+      // Rule matched. Now check if any value actually differs from what's
+      // already set on the transaction. Only count it if at least one field
+      // in the rule's `set` differs from the current value.
+      const wouldChange = Object.entries(candidate.set)
+        .filter(([, v]) => v !== undefined)
+        .some(([k, v]) => (txn as unknown as Record<string, unknown>)[k] !== v);
+      if (wouldChange) {
+        transactionsMatched += 1;
+        monthsAffected.add(txn.date.slice(0, 7)); // yyyy-MM
+      }
     }
   }
 
