@@ -230,3 +230,27 @@ compiles and prerenders clean; `npx playwright test e2e/accounts-observability.s
 - `mcp/load-firestore.ts`'s category coercion (flagged in the original report, still not
   fixed) and mobile's own picker mirror remain open, unrelated to this round's three
   findings.
+
+## Gap found in the reviewer's mutation test (2026-08-22)
+
+The reviewer proved that `updateTransactionAwaited` and `updateRuleCategoryAwaited` had
+ZERO direct coverage by mutating both to swallow their catch blocks and reporting success.
+The entire web jest suite (1582 tests) stayed green. Added 4 focused tests that exercise
+the REAL implementations as written:
+
+**Test cases** (added to `src/__tests__/transaction-context-add-rule.test.ts`):
+1. `updateRuleCategoryAwaited`: When Firestore updateDoc rejects, function returns `false` AND local state is left untouched (no optimistic mutation survives a failed write)
+2. `updateRuleCategoryAwaited`: When Firestore updateDoc resolves, function returns `true` AND local state reflects the change
+3. `updateTransactionAwaited`: When Firestore updateTransaction rejects, function returns `false` AND local state is left untouched
+4. `updateTransactionAwaited`: When Firestore updateTransaction resolves, function returns `true` AND local state reflects the change
+
+**Mutation proof** (red-first pattern):
+- Temporarily mutated both functions to swallow the catch (changed `return false` to fall through)
+- Tests went RED (expected `false`, got `true` — exactly as the reviewer's original mutation did)
+- Restored correct implementations
+- Tests went GREEN
+- Full web jest suite: 1586 tests passed (+4 new), all green, zero new act warnings
+
+**Requirement guarantee**: The write-first, local-state-second ordering of these primitives is load-bearing for `remove_category`'s reassignment sweep: a failed write returns false (so the caller knows not to claim "moved") and leaves state unchanged (so a retry sweep finds the row again at its old category). These tests ensure that truthfulness contract is kept.
+
+**Status**: Test coverage complete.
