@@ -99,7 +99,11 @@ describe('buildChatMessages', () => {
     // just the headers/placeholders/omitted-lines) plus the two teaching paragraphs (answer
     // bill/recurring questions from them; check both before proposing record_bill). Measured
     // worst-case went 16506 -> 17775 (+1269 chars).
-    expect(system.length).toBeLessThan(18000);
+    // Bumped again from 17775 (review follow-up): the ANSWERING QUESTIONS ABOUT MONEY
+    // paragraph grew to explain UPCOMING's absent-vs-empty distinction, and RECORD A BILL
+    // gained one sentence on fuzzy vendor matching — both constant text, present on every
+    // system prompt regardless of context. Measured worst-case went 17775 -> 18455 (+680).
+    expect(system.length).toBeLessThan(18700);
   });
 
   it('survives a garbage context without throwing', () => {
@@ -233,6 +237,72 @@ describe('ChatContext — bills/upcoming/recurring sections (#22)', () => {
     expect(system).toMatch(/\(none detected\)/);
   });
 
+  /**
+   * Web never supplies `upcoming` (only mobile's homeSnapshot computes forecast events +
+   * bill events). `context.upcoming` being ABSENT (`undefined` — this client has never
+   * computed it) must read differently from EMPTY (`[]` — computed, and there genuinely
+   * are none): the old behaviour rendered "(none)" for both, and the prompt framed all
+   * three sections as always computed and complete, so a web chat could confidently say
+   * "you have no upcoming payments" when it had simply never been asked to look.
+   */
+  describe('UPCOMING — absent (web) vs empty (mobile) are different claims', () => {
+    it('omits the UPCOMING section entirely when the context has no `upcoming` key at all (web shape)', () => {
+      const system = buildChatMessages({ message: 'what are my upcoming payments', context: ctx })[0].content;
+      expect(system).not.toContain('UPCOMING — bills and forecasted payments');
+      // The teaching text always travels, so the model knows what an absent section means.
+      expect(system).toMatch(/UPCOMING section does not appear.*this client cannot see it/i);
+      expect(system).toMatch(/say exactly that.*I can't see upcoming payments on this client/i);
+    });
+
+    it('renders the UPCOMING section, reading "(none)", when the client supplies an empty array (mobile shape, nothing due)', () => {
+      const system = buildChatMessages({ message: 'what are my upcoming payments', context: { ...ctx, upcoming: [] } })[0].content;
+      expect(system).toMatch(/UPCOMING — bills and forecasted payments[\s\S]*?\(none\)/);
+    });
+
+    it('renders the UPCOMING section with real rows when the client supplies them (mobile shape, populated)', () => {
+      const system = buildChatMessages({
+        message: 'what are my upcoming payments',
+        context: { ...ctx, upcoming: [{ name: 'Verizon Wireless', dueDate: '2026-09-01', amount: 85 }] },
+      })[0].content;
+      expect(system).toContain('UPCOMING — bills and forecasted payments');
+      expect(system).toContain('Verizon Wireless');
+      expect(system).toContain('2026-09-01');
+    });
+  });
+
+  /**
+   * The 'bounds a hand-rolled oversized request' test above (buildChatMessages describe
+   * block) supplies no bills/upcoming/recurring, so its measured worst case only covers
+   * the new sections' fixed headers/placeholders/teaching text, never a maxed-out
+   * BILLS REGISTER/UPCOMING/DETECTED RECURRING MERCHANTS payload itself. This is the
+   * missing case: everything ELSE at the same oversized levels as that test, plus
+   * bills/upcoming/recurring each over their own caps (60/30/40) with maximal per-row
+   * text, so the system prompt this produces is the actual largest one buildChatMessages
+   * can ever emit.
+   */
+  it('bounds the true worst case, with bills/upcoming/recurring also maxed out', () => {
+    const msgs = buildChatMessages({
+      message: 'x'.repeat(5000),
+      history: Array.from({ length: 40 }, (_, i) => ({ role: 'user' as const, content: `turn ${i}` })),
+      context: {
+        categories: ctx.categories,
+        merchants: Array.from({ length: 500 }, (_, i) => `merchant ${i}`),
+        accounts: Array.from({ length: 100 }, (_, i) => `acct ${i}`),
+        recent: Array.from({ length: 500 }, () => ({ title: 'y'.repeat(500), amount: 1 })),
+        bills: Array.from({ length: 200 }, (_, i) => ({
+          vendor: 'v'.repeat(200) + i, amount: 999999.99, frequency: 'semiannual',
+          nonNegotiable: true, endDate: '2030-01-01', installmentsRemaining: 480, method: 'm'.repeat(200),
+        })),
+        upcoming: Array.from({ length: 200 }, (_, i) => ({ name: 'u'.repeat(200) + i, dueDate: '2030-01-01', amount: 999999.99 })),
+        recurring: Array.from({ length: 200 }, (_, i) => ({ merchant: 'r'.repeat(200) + i, amount: 999999.99, cadence: 'semiannual' })),
+      },
+    });
+    const system = asText(msgs[0].content);
+    // Measured 40346 with everything above maxed simultaneously. Bound set to 41000 —
+    // modest headroom over the measured figure, not a round number picked in advance.
+    expect(system.length).toBeLessThan(41000);
+  });
+
   it('caps bills/upcoming/recurring and reports what was left out, same convention as merchants/months', () => {
     const msgs = buildChatMessages({
       message: 'x',
@@ -257,7 +327,9 @@ describe('ChatContext — bills/upcoming/recurring sections (#22)', () => {
   });
 
   it('teaches the model to answer bills/upcoming/recurring questions from these app-computed sections, not claim it has no information', () => {
-    const system = buildChatMessages({ message: 'what are my current recurring payments' })[0].content;
+    // stateCtx supplies `upcoming`, i.e. the mobile shape — see the absent-vs-empty
+    // describe block below for the web shape (no `upcoming` key at all).
+    const system = buildChatMessages({ message: 'what are my current recurring payments', context: stateCtx })[0].content;
     expect(system).toMatch(/BILLS REGISTER[\s\S]*UPCOMING[\s\S]*DETECTED RECURRING MERCHANTS/);
     expect(system).toMatch(/answer questions about current bills.*recurring.*directly from them/i);
   });
@@ -267,6 +339,12 @@ describe('ChatContext — bills/upcoming/recurring sections (#22)', () => {
     expect(system).toMatch(/before proposing record_bill/i);
     expect(system).toMatch(/already (recorded|exists|detected)/i);
     expect(system).toMatch(/instead of proposing (a )?duplicate/i);
+  });
+
+  it('tells the model a fuzzy/differently-spelled name still counts as the same vendor, and to ask rather than guess when unsure', () => {
+    const system = buildChatMessages({ message: 'record my iPhone installment' })[0].content;
+    expect(system).toMatch(/plainly refers to the same service.*spelled differently/i);
+    expect(system).toMatch(/unsure whether it is the same.*ASK/i);
   });
 });
 
