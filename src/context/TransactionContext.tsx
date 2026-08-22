@@ -20,6 +20,11 @@ export interface TransactionContextType {
   addRule: (rule: NewMappingRule) => Promise<{ rule: MappingRule; changed: ChangeSummary } | undefined>;
   deleteRule: (id: string) => Promise<void>;
   toggleRule: (id: string, enabled: boolean) => Promise<void>;
+  /** cashflow-mobile#24. remove_category's reassignment: an EXISTING rule's
+   *  set.category moves to the owner's chosen target, everything else on the
+   *  rule untouched. Same direct-write shape as toggleRule (local state first,
+   *  Firestore queued) — not the applyDecision callable, which is for NEW rules. */
+  updateRuleCategory: (id: string, category: string) => Promise<void>;
   addTransaction: (transaction: Omit<Transaction, 'id'>) => Promise<void>;
   addBulkTransactions: (
     transactions: (Omit<Transaction, 'id'> & { id?: string })[]
@@ -249,6 +254,23 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
       setRules((prev) => prev.map((r) => (r.id === id ? { ...r, enabled } : r)));
       updateDoc(doc(db, 'users', user.id, 'rules', id), { enabled }).catch((err) =>
         console.warn('Mapping rule toggle failed:', err)
+      );
+    },
+    [user?.id]
+  );
+
+  // cashflow-mobile#24: dot-path update — touches ONLY set.category, so match/
+  // sourceCategory/type/merchant on the rule survive untouched. Same shape as
+  // toggleRule: local state first, Firestore write queued (not awaited) the same
+  // way every other direct write in this file behaves.
+  const updateRuleCategory = useCallback(
+    async (id: string, category: string) => {
+      if (!user?.id) return;
+      setRules((prev) =>
+        prev.map((r) => (r.id === id ? { ...r, set: { ...r.set, category: category as ExpenseCategory } } : r))
+      );
+      updateDoc(doc(db, 'users', user.id, 'rules', id), { 'set.category': category }).catch((err) =>
+        console.warn('Mapping rule category update failed:', err)
       );
     },
     [user?.id]
@@ -510,6 +532,7 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
         addRule,
         deleteRule,
         toggleRule,
+        updateRuleCategory,
         addTransaction,
         addBulkTransactions,
         updateTransaction,

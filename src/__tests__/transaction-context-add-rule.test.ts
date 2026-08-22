@@ -30,15 +30,16 @@ let autoId = 0;
 const getDocsMock = jest.fn();
 const RULES_DOCS = Promise.resolve({ docs: [] as { id: string; data: () => unknown }[] });
 getDocsMock.mockReturnValue(RULES_DOCS);
+const updateDocMock = jest.fn().mockResolvedValue(undefined);
 jest.mock('@/lib/firebase', () => ({
   db: {},
   collection: jest.fn(() => ({ __collection: true })),
   doc: jest.fn((...args: unknown[]) => {
     const last = args[args.length - 1];
-    return { id: typeof last === 'string' ? last : `auto-${++autoId}` };
+    return { id: typeof last === 'string' ? last : `auto-${++autoId}`, __path: args };
   }),
   getDocs: (...args: unknown[]) => getDocsMock(...args),
-  updateDoc: jest.fn(),
+  updateDoc: (...args: unknown[]) => updateDocMock(...args),
   deleteDoc: jest.fn(),
 }));
 
@@ -81,6 +82,7 @@ async function mount(): Promise<{ get: () => TransactionContextType }> {
 beforeEach(() => {
   applyDecisionMock.mockReset();
   getDocsMock.mockClear();
+  updateDocMock.mockClear().mockResolvedValue(undefined);
 });
 
 describe('TransactionContext.addRule (#130 — applyDecision write path)', () => {
@@ -153,5 +155,29 @@ describe('TransactionContext.addRule (#130 — applyDecision write path)', () =>
     expect(loggedText).not.toContain('COSTCO');
 
     warn.mockRestore();
+  });
+});
+
+/**
+ * cashflow-mobile#24 — remove_category's rule-reassignment write: an EXISTING
+ * rule's set.category moves to the owner's chosen target, direct-write style
+ * (same as toggleRule), not through applyDecision (that path is for NEW rules).
+ */
+describe('TransactionContext.updateRuleCategory (cashflow-mobile#24)', () => {
+  it('updates local state immediately and writes only set.category via a dot-path update', async () => {
+    applyDecisionMock.mockResolvedValueOnce({
+      decisionId: 'r1',
+      changed: { transactionsMatched: 0, monthsAffected: [] },
+    });
+    const { get } = await mount();
+    await act(async () => { await get().addRule(RULE); });
+    expect(get().rules[0]).toMatchObject({ id: 'r1', set: { category: 'shopping' } });
+
+    await act(async () => { await get().updateRuleCategory('r1', 'other'); });
+
+    // Local state: only `set.category` changed, match untouched.
+    expect(get().rules[0]).toMatchObject({ id: 'r1', match: RULE.match, set: { category: 'other' } });
+    // Firestore: a dot-path update, never a whole-document overwrite.
+    expect(updateDocMock).toHaveBeenCalledWith(expect.anything(), { 'set.category': 'other' });
   });
 });
