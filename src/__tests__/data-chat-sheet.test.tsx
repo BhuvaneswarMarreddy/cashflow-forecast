@@ -378,4 +378,21 @@ describe('the monthly-spend override proposal card', () => {
     expect(screen.queryByText(/your assumption/)).not.toBeInTheDocument();
     expect(updateProfile).not.toHaveBeenCalled();
   });
+
+  it('rejects corrupt values (0, negative, NaN, Infinity, string) as null — falls back to derived (FIN-SPEND-001)', async () => {
+    // A doc edited by hand or by an older client must not corrupt the UI. The sanitization
+    // guard ensures corrupt settings values are treated as null (i.e., use derived average).
+    PROFILE_SETTINGS = { assumedMonthlySpend: 0 };
+    aiChat.mockResolvedValue(proposal(3000));
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('assume I spend 3000 a month');
+
+    // Zero is treated as null, so the before side reads "derived" not "your assumption".
+    expect(await screen.findByText(/\(derived\) → \$3,000\.00 \(your assumption\)/)).toBeInTheDocument();
+
+    // Same for negative — should also treat as derived.
+    PROFILE_SETTINGS = { assumedMonthlySpend: -500 };
+    const { rerender } = render(<DataChatSheet open onClose={() => {}} />);
+    expect(screen.getByText(/\(derived\) → \$3,000\.00 \(your assumption\)/)).toBeInTheDocument();
+  });
 });

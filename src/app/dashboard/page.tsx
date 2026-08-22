@@ -24,6 +24,7 @@ import { generateForecast, calculateCurrentCash, withDerivedBalances, monthlyAve
 import { currentOf, accountsBehindFigure } from '@/lib/accounts';
 import { clampedMonthlyDate } from '@/lib/dates';
 import { homeSummary, runwayLabel, RESERVE_TARGET_MONTHS } from '@/lib/home';
+import { sanitizeAssumedSpend } from '@/lib/profile-settings';
 import { displayName } from '@/lib/merchant';
 import { nonNegotiableMonthly, Bill } from '@/lib/bills';
 import { UnanchoredNote } from '@/components/UnanchoredNote';
@@ -111,7 +112,7 @@ export default function DashboardPage({ initialBills }: { initialBills?: Bill[] 
   // FIN-SPEND-001 (#133): the owner's own number, set from chat, always wins over
   // the derived average — same resolution homeSnapshot uses server-side, so the
   // mobile client and this screen can never disagree about what drives runway.
-  const avgMonthlyExpense = profile?.settings?.assumedMonthlySpend ?? derivedMonthly.spending;
+  const avgMonthlyExpense = sanitizeAssumedSpend(profile?.settings?.assumedMonthlySpend) ?? derivedMonthly.spending;
 
   // UI-102: the hero's numbers — one computation (lib/home.ts), tested there.
   const home = homeSummary({

@@ -9,6 +9,7 @@ import { describeRule, rulePreview, MappingRule, NewMappingRule } from '@/lib/ma
 import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import { formatMoney } from '@/lib/money';
+import { sanitizeAssumedSpend } from '@/lib/profile-settings';
 import { matchIncomeDeposits } from '@/lib/ask';
 import { deriveAccountBalance, monthlyAverages } from '@/lib/forecast';
 import type { IncomeContext } from '@/lib/classify';
@@ -132,7 +133,7 @@ export default function DataChatSheet({ open, onClose, seed }: {
     () => monthlyAverages(transactions, profile?.paymentAccounts ?? [], 6, incomeContext).spending,
     [transactions, profile?.paymentAccounts, incomeContext]
   );
-  const currentMonthlySpend = profile?.settings?.assumedMonthlySpend ?? derivedMonthlySpend;
+  const currentMonthlySpend = sanitizeAssumedSpend(profile?.settings?.assumedMonthlySpend) ?? derivedMonthlySpend;
 
   useEffect(() => {
     endRef.current?.scrollIntoView?.({ block: 'end' });
@@ -439,7 +440,7 @@ export default function DataChatSheet({ open, onClose, seed }: {
                 <SpendProposalCard
                   proposal={m.spend}
                   currentAmount={currentMonthlySpend}
-                  currentIsOverride={profile?.settings?.assumedMonthlySpend != null}
+                  currentIsOverride={sanitizeAssumedSpend(profile?.settings?.assumedMonthlySpend) != null}
                   currency={profile?.currency}
                   pending={m.status === 'pending'}
                   busy={busy}

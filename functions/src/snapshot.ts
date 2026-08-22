@@ -31,6 +31,7 @@ import {
 } from '@/lib/forecast';
 import { RESERVE_TARGET_MONTHS, homeSummary, runwayLabel } from '@/lib/home';
 import { interpretLedgerRows, type MappingRule } from '@/lib/mapping-rules';
+import { sanitizeAssumedSpend } from '@/lib/profile-settings';
 import type {
   ForecastEvent,
   InflowReview,
@@ -161,13 +162,9 @@ export async function readLedger(uid: string): Promise<Ledger> {
     includePending: settings.includePendingInCalculations ?? false,
     // > 0 and finite, or null — the write side (chat-actions.ts) already enforces
     // this, but a doc edited by hand or by an older client must not turn into a
-    // fabricated $0/negative "burn" downstream.
-    assumedMonthlySpend:
-      typeof settings.assumedMonthlySpend === 'number' &&
-      Number.isFinite(settings.assumedMonthlySpend) &&
-      settings.assumedMonthlySpend > 0
-        ? settings.assumedMonthlySpend
-        : null,
+    // fabricated $0/negative "burn" downstream. sanitizeAssumedSpend enforces this
+    // on both web and mobile so they never diverge on corrupt input.
+    assumedMonthlySpend: sanitizeAssumedSpend(settings.assumedMonthlySpend),
     rules,
   };
 }

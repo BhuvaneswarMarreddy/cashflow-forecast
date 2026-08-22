@@ -64,3 +64,23 @@ export function fromFirestoreSettings(
   const { monthlyBudget: _mb, currency: _cur, ...rest } = stored ?? {};
   return rest as ProfileSettings;
 }
+
+/**
+ * Sanitize the `assumedMonthlySpend` setting (FIN-SPEND-001).
+ *
+ * The write side enforces the constraint, but a doc edited by hand or by an older
+ * client must not turn into a fabricated $0/negative "burn" downstream. This guard
+ * ensures the value is numeric, finite, and > 0, or returns null. Called by both
+ * web pages and homeSnapshot (server) so web and mobile never diverge on the same
+ * corrupt input.
+ *
+ * @param value The raw value from settings (unknown type to catch all cases)
+ * @returns The value if it's a positive finite number, else null
+ */
+export function sanitizeAssumedSpend(value: unknown): number | null {
+  return typeof value === 'number' &&
+    Number.isFinite(value) &&
+    value > 0
+    ? value
+    : null;
+}
