@@ -230,6 +230,25 @@ export interface ChatContext {
   accounts?: string[];
   recent?: { title?: string; merchant?: string; amount?: number; category?: string }[];
   summary?: LedgerSummary;
+  /**
+   * #22: the Bills register (src/lib/bills.ts), so the chat can answer "what bills do I
+   * have" / "is X already recorded" instead of claiming it has no information — the app
+   * can WRITE a bill (record_bill below) but was blind to what it had already written.
+   */
+  bills?: {
+    vendor?: string;
+    amount?: number;
+    frequency?: string;
+    nonNegotiable?: boolean;
+    endDate?: string;
+    installmentsRemaining?: number;
+    method?: string;
+  }[];
+  /** #22: bills/payments due within the forecast horizon (mobile's homeSnapshot.upcoming). */
+  upcoming?: { name?: string; dueDate?: string; amount?: number }[];
+  /** #22: detected recurring merchants (behavior.ts's fixedBills), separate from the
+   *  owner-curated Bills register above — both feed the "already exists" dedupe check. */
+  recurring?: { merchant?: string; amount?: number; cadence?: string }[];
 }
 
 interface PeriodTotals {
@@ -330,6 +349,8 @@ function validateChatImage(imageBase64: string, imageMimeType: string | undefine
 const CAPS = {
   merchants: 60, accounts: 25, recent: 20, history: 10, str: 80, message: 1000,
   years: 12, months: 24, cats: 25, topMerchants: 40,
+  // #22
+  bills: 60, upcoming: 30, recurring: 40,
 };
 
 export const CHAT_SYSTEM_PROMPT = `You turn a user's plain-English instruction into ONE durable categorization rule, or answer a short question about their spending.
@@ -349,6 +370,8 @@ REQUIREMENTS:
 - If the message is a question, or too vague to name a merchant, use action "answer" with no "rule" and put the reply in explanation.
 
 ANSWERING QUESTIONS ABOUT MONEY:
+- BILLS REGISTER and DETECTED RECURRING MERCHANTS are computed by the application, not samples, and always appear below. Answer questions about current bills or recurring monthly obligations directly from them — never say you have no information when these sections are present.
+- UPCOMING (bills and forecasted payments due soon) is computed by only some clients. If the UPCOMING section does not appear anywhere below, THIS client cannot see it — say exactly that ("I can't see upcoming payments on this client") rather than "you have no upcoming payments", which is a different, unverified claim. If the UPCOMING section DOES appear, it is complete and computed the same as the other two: answer from it directly, and "(none)" there genuinely means no upcoming payments.
 - The LEDGER TOTALS section is computed by the application over EVERY transaction the user has, not a sample. When it covers the question, it is complete — answer from it directly and give the figure.
 - RECENT TRANSACTIONS is a 20-row sample shown so you can see what raw bank text looks like when writing a rule. It is NEVER evidence for a total, a count, or "you had no X". Never generalise from it.
 - Quote figures from LEDGER TOTALS verbatim. Do not add, subtract, average or re-derive them; arithmetic across periods is the application's job, not yours.
@@ -433,6 +456,8 @@ MONTHLY SPEND ASSUMPTION:
 
 RECORD A BILL:
 {"action":"record_bill","vendor":"string","amount":0,"frequency":"weekly"|"biweekly"|"monthly"|"quarterly"|"semiannual"|"annual","dueDay":0,"nextDueDate":"YYYY-MM-DD","accountName":"string","endDate":"YYYY-MM-DD","installmentsRemaining":0,"nonNegotiable":true,"reason":"string"}
+- BEFORE proposing record_bill, check the BILLS REGISTER and DETECTED RECURRING MERCHANTS sections above for a vendor or merchant that already matches. If one already exists, tell the user it already exists — state its amount and cadence from that section — instead of proposing a duplicate. Only propose record_bill when nothing there matches.
+- A vendor or merchant that plainly refers to the same service counts as a match even when spelled differently ("Netflix" vs "NETFLIX.COM", "Apple Card installment - iPhone" vs "apple card iphone payment") — a match does not require identical spelling. When unsure whether it is the same obligation, ASK the user rather than proposing a duplicate.
 - Use when the user asks to RECORD a recurring obligation as an upcoming/recurring payment — a subscription, an installment plan, a loan payment, anything on its own repeating schedule. This is what turns "record my iPhone installment" into an actual saved row; describing it in prose and nothing else leaves NOTHING recorded.
 - vendor: the payee's name, as the user said it or as a screenshot shows it.
 - amount is DOLLARS, the amount charged EACH time (never a total or a remaining balance), greater than 0, at most 100,000.
@@ -531,6 +556,37 @@ export function buildChatMessages(
     return `- ${clip(r.title) || '(no title)'} | ${clip(r.merchant) || '-'} | ${amount} | ${clip(r.category) || '-'}`;
   });
 
+  // #22 — bills the app has already recorded, so "is X already on my bills" and "what
+  // do I pay monthly" are answerable, and record_bill can check for a duplicate first.
+  const billRows = ctx.bills || [];
+  const bills = billRows.slice(0, CAPS.bills).map((b) => {
+    const flags = [
+      b?.nonNegotiable ? 'non-negotiable' : null,
+      b?.endDate ? `ends ${clip(b.endDate, 10)}` : null,
+      typeof b?.installmentsRemaining === 'number' && isFinite(b.installmentsRemaining)
+        ? `${b.installmentsRemaining} left` : null,
+      b?.method ? clip(b.method) : null,
+    ].filter(Boolean).join(', ');
+    return `- ${clip(b?.vendor) || '(unnamed)'} | ${money(b?.amount)} | ${clip(b?.frequency) || '-'}${flags ? ` | ${flags}` : ''}`;
+  });
+
+  // Web never supplies `upcoming` at all (only mobile's homeSnapshot computes forecast
+  // events + bill events) — `undefined` here means ABSENT ("this client cannot see this"),
+  // which is a different claim from `[]`, EMPTY ("computed, and there are genuinely
+  // none"). Collapsing the two let the model read a client's silence as "you have no
+  // upcoming payments". `upcomingProvided` gates whether the section renders at all,
+  // below, so an absent client omits the section instead of rendering a false "(none)".
+  const upcomingProvided = ctx.upcoming !== undefined;
+  const upcomingRows = ctx.upcoming || [];
+  const upcoming = upcomingRows.slice(0, CAPS.upcoming).map((u) =>
+    `- ${clip(u?.name) || '(unnamed)'} | ${clip(u?.dueDate, 10) || '?'} | ${money(u?.amount)}`
+  );
+
+  const recurringRows = ctx.recurring || [];
+  const recurring = recurringRows.slice(0, CAPS.recurring).map((r) =>
+    `- ${clip(r?.merchant) || '(unnamed)'} | ${money(r?.amount)} | ${clip(r?.cadence) || '-'}`
+  );
+
   const system = [
     CHAT_SYSTEM_PROMPT,
     '',
@@ -544,6 +600,20 @@ export function buildChatMessages(
     '',
     'FREQUENT MERCHANTS AND DESCRIPTIONS:',
     merchants.length ? merchants.join('\n') : '(none)',
+    '',
+    'BILLS REGISTER — recorded recurring obligations, computed by the app (vendor | amount each | frequency | flags). Complete, not a sample.',
+    bills.length ? bills.join('\n') : '(none recorded)',
+    ...omitted(Math.max(0, billRows.length - CAPS.bills), 'bills'),
+    '',
+    ...(upcomingProvided ? [
+      'UPCOMING — bills and forecasted payments due within the horizon (name | due date | amount). Complete, not a sample.',
+      upcoming.length ? upcoming.join('\n') : '(none)',
+      ...omitted(Math.max(0, upcomingRows.length - CAPS.upcoming), 'upcoming items'),
+      '',
+    ] : []),
+    'DETECTED RECURRING MERCHANTS — pattern detection over transaction history, separate from the Bills register above (merchant | amount each | cadence):',
+    recurring.length ? recurring.join('\n') : '(none detected)',
+    ...omitted(Math.max(0, recurringRows.length - CAPS.recurring), 'recurring merchants'),
     '',
     'LEDGER TOTALS — computed by the app over EVERY transaction. Complete, not a sample.',
     ...summaryLines(ctx.summary),

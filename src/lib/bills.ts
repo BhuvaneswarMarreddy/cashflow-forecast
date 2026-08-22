@@ -131,8 +131,12 @@ const TODAY = (): string => new Date().toISOString().slice(0, 10);
  * bare to `Array.prototype.filter` — filter's own (element, INDEX, array) call
  * would otherwise pass the row index as `today` and compare a number to a date
  * string. Every call site below wraps it in an arrow for exactly that reason.
+ *
+ * Exported (#22) so chat-actions.ts (web ChatContext) and snapshot.ts (mobile
+ * bills digest) filter to "current" bills with the SAME rule billUpcomingEvents
+ * already uses, instead of a second definition of "active" drifting from this one.
  */
-const isCharging = (b: Bill, today: string): boolean =>
+export const isCharging = (b: Bill, today: string): boolean =>
   b.lifecycleStatus !== 'cancelled' && !(b.endDate !== undefined && b.endDate < today);
 
 export function monthlyCostRaw(bill: Bill): number {

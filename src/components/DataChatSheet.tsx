@@ -12,8 +12,8 @@ import { formatMoney } from '@/lib/money';
 import { sanitizeAssumedSpend } from '@/lib/profile-settings';
 import { matchIncomeDeposits } from '@/lib/ask';
 import { deriveAccountBalance, monthlyAverages } from '@/lib/forecast';
-import { addBill } from '@/lib/firestore';
-import { BillFrequency, PAYMENT_METHODS } from '@/lib/bills';
+import { addBill, getBills } from '@/lib/firestore';
+import { Bill, BillFrequency, PAYMENT_METHODS } from '@/lib/bills';
 import type { IncomeContext } from '@/lib/classify';
 import { PaymentAccount, Transaction, displayCategory } from '@/types';
 
@@ -147,6 +147,17 @@ export default function DataChatSheet({ open, onClose, seed }: {
   const endRef = useRef<HTMLDivElement>(null);
   const seq = useRef(0);
 
+  // #22: the chat could WRITE bills (record_bill) but couldn't SEE them — "is X already
+  // recorded" got "I have no information". Same read dashboard/page.tsx already does for
+  // the same reason (UI-102's locked chip); DataChatSheet has no other route to bills.
+  const [bills, setBills] = useState<Bill[]>([]);
+  useEffect(() => {
+    if (!profile?.id) return;
+    let alive = true;
+    getBills(profile.id).then((rows) => { if (alive) setBills(rows); });
+    return () => { alive = false; };
+  }, [profile?.id]);
+
   // ---- resizable rail (desktop only; the mobile bottom sheet keeps its CSS) ----
   // `null` = the stylesheet default. A number is the owner's chosen width, persisted so
   // the rail opens at the size they left it. CSS caps mobile with `width:auto !important`,
@@ -191,8 +202,8 @@ export default function DataChatSheet({ open, onClose, seed }: {
   // Compact context — never the whole ledger. buildChatContext owns the size caps,
   // so the prompt can't quietly grow into every row the owner has ever had.
   const context = useMemo(
-    () => buildChatContext(transactions, profile?.paymentAccounts ?? []),
-    [transactions, profile?.paymentAccounts]
+    () => buildChatContext(transactions, profile?.paymentAccounts ?? [], bills),
+    [transactions, profile?.paymentAccounts, bills]
   );
 
   // FIN-SPEND-001 (#133): the derived 6-month average — the SAME basis Home and
@@ -418,20 +429,29 @@ export default function DataChatSheet({ open, onClose, seed }: {
     if (!anchor) return;
     setBusy(true);
     try {
-      await addBill(profile.id, {
+      const draft = {
         vendor: m.bill.vendor,
         amount: m.bill.amount,
         frequency: m.bill.frequency,
         autopayDay: anchor.autopayDay,
         anchorDate: anchor.anchorDate,
         paymentMethodId,
-        migrationStatus: 'to-review',
-        lifecycleStatus: 'active',
+        migrationStatus: 'to-review' as const,
+        lifecycleStatus: 'active' as const,
         nonNegotiable: m.bill.nonNegotiable,
         endDate: m.bill.endDate,
         installmentsRemaining: m.bill.installmentsRemaining,
-        source: 'manual',
-      });
+        source: 'manual' as const,
+      };
+      const id = await addBill(profile.id, draft);
+      // `bills` is fetched once on mount and never re-read from Firestore — without this,
+      // a bill recorded THIS session stayed invisible to buildChatContext (chat-actions.ts)
+      // until the sheet was reopened: recording a bill, then asking "is it existing?" in
+      // the same session, answered wrong. Append what was just written — same pattern
+      // BillsTab.tsx's handleSave uses — rather than a round trip back to Firestore for a
+      // row whose full shape (minus the server timestamp) we already have in hand.
+      const now = new Date().toISOString();
+      setBills((prev) => [...prev, { ...draft, id, createdAt: now, updatedAt: now }]);
       setMessages((prev) => [
         ...prev.map((x) => (x.id === m.id ? { ...x, status: 'applied' as const } : x)),
         mk('assistant', `Saved — ${m.bill!.vendor} now shows in Upcoming and Bills, ${formatMoney(m.bill!.amount, profile?.currency, 2)} ${m.bill!.frequency}.`),

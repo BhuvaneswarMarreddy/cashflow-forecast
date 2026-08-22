@@ -10,7 +10,7 @@
  */
 import { buildSnapshot } from '../snapshot';
 import type { Ledger } from '../snapshot';
-import type { Bill } from '@/lib/bills';
+import { nonNegotiableMonthly, type Bill } from '@/lib/bills';
 import type { PaymentAccount, Transaction } from '@/types';
 
 const checking: PaymentAccount = {
@@ -138,11 +138,72 @@ describe('the Bills register feeds Upcoming (display only)', () => {
     expect(withBill.snapshot.avgMonthlySpendCents).toBe(withoutBill.snapshot.avgMonthlySpendCents);
     expect(withBill.snapshot.runway.days).toBe(withoutBill.snapshot.runway.days);
     expect(withBill.snapshot.runway.hasBurn).toBe(withoutBill.snapshot.runway.hasBurn);
+    // lockedMonthlyCents is a pure function of ledger.bills (nonNegotiableMonthly) — the
+    // same guard extends to it: real transaction history (the `rent` row) must change
+    // nothing here, AND the figure itself must be the bill's own monthly-normalized cost
+    // pinned exactly, not merely "some positive number" — the weaker toBeGreaterThan(0)
+    // assertion below (BILLS-003) would not catch a formula that computed the wrong value.
+    expect(withoutBill.snapshot.lockedMonthlyCents).toBe(0);
+    expect(withBill.snapshot.lockedMonthlyCents).toBe(Math.round(nonNegotiableMonthly([installmentBill]) * 100));
   });
 
   it('a non-negotiable bill still reaches lockedMonthlyCents (BILLS-003, unchanged wiring)', () => {
     const { snapshot } = buildSnapshot({ ...baseLedger, bills: [installmentBill] });
     // weekly $45.79 -> monthly-normalized, same math as nonNegotiableMonthly().
     expect(snapshot.lockedMonthlyCents).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * #22 (cashflow-mobile). Mobile has no bills read path at all — homeSnapshot's `upcoming`
+ * projects bill EVENTS (dates), but never the bills themselves, so a mobile chat asking
+ * "is X already on my bills" or "what do I pay monthly" had nothing to answer from. This
+ * digest mirrors the server ChatContext.bills field subset (functions/src/prompts.ts),
+ * cents where the payload uses cents, same as every other money field in `buildSnapshot`.
+ */
+describe('the Bills register feeds the snapshot bills digest, for mobile chat parity (#22)', () => {
+  it('a charging bill appears in the digest with the full field subset, in cents', () => {
+    const { bills } = buildSnapshot({ ...baseLedger, bills: [installmentBill] });
+    expect(bills).toEqual([{
+      id: 'b1',
+      vendor: 'Apple Card installment - iPhone',
+      amountCents: 4579,
+      frequency: 'weekly',
+      nonNegotiable: true,
+      endDate: null,
+      installmentsRemaining: null,
+      // paymentMethodId 'apple-card' -> PAYMENT_METHODS['apple-card'].label
+      method: 'Apple Card',
+    }]);
+  });
+
+  it('carries endDate/installmentsRemaining verbatim when the bill has them', () => {
+    const withEnd: Bill = { ...installmentBill, endDate: '2027-01-01' };
+    expect(buildSnapshot({ ...baseLedger, bills: [withEnd] }).bills[0].endDate).toBe('2027-01-01');
+
+    const withCount: Bill = { ...installmentBill, endDate: undefined, installmentsRemaining: 13 };
+    expect(buildSnapshot({ ...baseLedger, bills: [withCount] }).bills[0].installmentsRemaining).toBe(13);
+  });
+
+  it('a cancelled bill is absent from the digest, same rule as upcoming (isCharging)', () => {
+    const cancelled: Bill = { ...installmentBill, lifecycleStatus: 'cancelled' };
+    expect(buildSnapshot({ ...baseLedger, bills: [cancelled] }).bills).toHaveLength(0);
+  });
+
+  it('an ended bill (endDate in the past) is absent from the digest', () => {
+    const ended: Bill = { ...installmentBill, endDate: '2020-01-01' };
+    expect(buildSnapshot({ ...baseLedger, bills: [ended] }).bills).toHaveLength(0);
+  });
+
+  it('DOUBLE-COUNT GUARD: the bills digest is a pure addition — it changes no derived figure', () => {
+    const withoutBill = buildSnapshot({ ...baseLedger, transactions: [rent] });
+    const withBill = buildSnapshot({ ...baseLedger, transactions: [rent], bills: [installmentBill] });
+
+    expect(withBill.snapshot.avgMonthlySpendCents).toBe(withoutBill.snapshot.avgMonthlySpendCents);
+    expect(withBill.snapshot.runway.days).toBe(withoutBill.snapshot.runway.days);
+    expect(withBill.snapshot.runway.hasBurn).toBe(withoutBill.snapshot.runway.hasBurn);
+    // No bills at all -> no digest and (pre-existing behaviour) nothing locked.
+    expect(withoutBill.bills).toEqual([]);
+    expect(withoutBill.upcoming).toEqual([]);
   });
 });

@@ -1,5 +1,6 @@
 import { buildChatContext, explanationOf, parseChatAction, fallbackText } from '@/lib/chat-actions';
 import { applyMappingRules, MappingRule } from '@/lib/mapping-rules';
+import type { Bill } from '@/lib/bills';
 import { PaymentAccount, Transaction } from '@/types';
 
 const txn = (over: Partial<Transaction> = {}): Transaction => ({
@@ -22,6 +23,19 @@ const account = (name: string): PaymentAccount => ({
   isActive: true,
   openingBalance: 0,
   openingDate: '2026-01-01',
+});
+
+const bill = (over: Partial<Bill> = {}): Bill => ({
+  id: Math.random().toString(36).slice(2),
+  vendor: 'Verizon Wireless',
+  amount: 85,
+  frequency: 'monthly',
+  paymentMethodId: 'bofa-debit',
+  migrationStatus: 'to-review',
+  lifecycleStatus: 'active',
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
+  ...over,
 });
 
 const goodRule = {
@@ -148,10 +162,16 @@ describe('buildChatContext', () => {
     expect(ctx.categories.length).toBeLessThanOrEqual(20);
     expect(Math.max(...ctx.merchants.map((m) => m.length))).toBeLessThanOrEqual(60);
     expect(Math.max(...ctx.recent.map((r) => r.title.length))).toBeLessThanOrEqual(60);
+    // #22: recurring is capped the same way merchants is — a big/weird ledger still
+    // stops at 40 entries, clipped to 60 chars each.
+    expect(ctx.recurring.length).toBeLessThanOrEqual(40);
+    expect(Math.max(0, ...ctx.recurring.map((r) => r.merchant.length))).toBeLessThanOrEqual(60);
     // The whole payload, not just the row count. Raised from 6k when the ledger
     // summary landed: the context now carries app-computed totals over every row,
     // which is what makes "what did I spend this year" answerable at all.
-    expect(JSON.stringify(ctx).length).toBeLessThan(16000);
+    // Raised again from 16000 (#22): this fixture's 300 distinct padded merchants also
+    // qualify as recurring (detectRecurring, capped at 40 entries) — measured 18211.
+    expect(JSON.stringify(ctx).length).toBeLessThan(19000);
   });
 
   it('does not grow with the size of the ledger — the actual guarantee', () => {
@@ -165,7 +185,12 @@ describe('buildChatContext', () => {
     const large = JSON.stringify(buildChatContext(make(50_000), [])).length;
 
     // Totals get wider (more digits), never longer. A few percent, not a few hundred.
-    expect(large).toBeLessThan(small * 1.2);
+    // #22: widened from 1.2 — 500 rows of this fixture's 300 cycling merchants barely
+    // clears detectRecurring's 3-occurrence floor (1 recurring item found); 50,000 rows
+    // of the SAME 300 merchants trips its 40-entry cap (40 found). That is recurring
+    // detection doing its job, not the payload tracking ledger size unboundedly — it is
+    // still a flat 40-row cap at any ledger size beyond this, never 100x for 100x rows.
+    expect(large).toBeLessThan(small * 1.4);
   });
 
   it('ranks merchants by frequency and falls back to the title when the feed has no merchant', () => {
@@ -203,6 +228,90 @@ describe('buildChatContext', () => {
     const ctx = buildChatContext([], []);
     expect(ctx).toMatchObject({ merchants: [], accounts: [], recent: [] });
     expect(ctx.categories.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * #22 (cashflow-mobile). The owner asked the chat "is it existing?" and "what are my
+ * current recurring payments" and got "I do not have that information" — the chat could
+ * WRITE bills (record_bill) but never SAW them. buildChatContext now supplies the Bills
+ * register and the app's own recurring-merchant detection (behavior.ts's fixedBills),
+ * the same source `record_bill`'s dedupe check reads server-side.
+ */
+describe('buildChatContext — bills and recurring merchants (#22)', () => {
+  it('supplies recorded bills — vendor/amount/frequency/flags/method — filtered to current ones', () => {
+    const active = bill({
+      vendor: 'Verizon Wireless', amount: 85, frequency: 'monthly',
+      nonNegotiable: true, paymentMethodId: 'bofa-debit',
+    });
+    const cancelled = bill({ vendor: 'Old Gym', lifecycleStatus: 'cancelled' });
+    const ended = bill({ vendor: 'Old Loan', endDate: '2020-01-01' });
+
+    const ctx = buildChatContext([], [], [active, cancelled, ended]);
+
+    expect(ctx.bills).toEqual([
+      { vendor: 'Verizon Wireless', amount: 85, frequency: 'monthly', nonNegotiable: true, method: 'BofA Debit' },
+    ]);
+  });
+
+  it('carries endDate/installmentsRemaining verbatim, and omits keys the bill does not set', () => {
+    const withEnd = bill({ vendor: 'Apple Card installment', endDate: '2027-01-01' });
+    const ctx = buildChatContext([], [], [withEnd]);
+    expect(ctx.bills?.[0]).toMatchObject({ endDate: '2027-01-01' });
+    expect('installmentsRemaining' in (ctx.bills?.[0] ?? {})).toBe(false);
+    expect('nonNegotiable' in (ctx.bills?.[0] ?? {})).toBe(false);
+  });
+
+  it('defaults to an empty bills list — never undefined — when none are passed', () => {
+    const ctx = buildChatContext([txn()], []);
+    expect(ctx.bills).toEqual([]);
+  });
+
+  it('supplies detected recurring merchants from behavior.ts (fixedBills), separate from the Bills register', () => {
+    const now = new Date();
+    const m = (back: number, dayN = 14) =>
+      new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - back, dayN)).toISOString().slice(0, 10);
+    // Same fixture shape src/__tests__/behavior.test.ts proves detectRecurring picks up:
+    // 6 months of a merchant at the same day-of-month, amount within band.
+    const recurringTxns = [1, 2, 3, 4, 5, 6].map((b) =>
+      txn({ id: `nf${b}`, merchant: 'NETFLIX', amount: 15.49, date: m(b, 14) })
+    );
+
+    const ctx = buildChatContext(recurringTxns, []);
+
+    expect(ctx.recurring).toContainEqual({ merchant: 'NETFLIX', amount: 15.49, cadence: 'monthly' });
+    // Bills register and detected-recurring are different sources — a Bill in the
+    // register does not appear in `recurring` just because it was also passed in.
+    expect(ctx.bills).toEqual([]);
+  });
+
+  /**
+   * `recurring` reads buildAssumptions().fixedBills, which honours the owner's saved
+   * corrections (forecast/page.tsx's Forecast Assumptions panel) via AssumptionOverrides
+   * in localStorage. Without threading those through, the chat could show a merchant the
+   * owner disabled, or its raw detected amount instead of a corrected one — contradicting
+   * what the Forecast page itself says for the exact same merchant.
+   */
+  describe('recurring merchants honour the owner\'s saved Forecast overrides', () => {
+    afterEach(() => localStorage.clear());
+
+    const netflixTxns = () => {
+      const now = new Date();
+      const m = (back: number) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - back, 14)).toISOString().slice(0, 10);
+      return [1, 2, 3, 4, 5, 6].map((b) => txn({ id: `nf${b}`, merchant: 'NETFLIX', amount: 15.49, date: m(b) }));
+    };
+
+    it('omits a merchant the owner disabled on the Forecast page', () => {
+      localStorage.setItem('assumptionOverrides', JSON.stringify({ bills: { NETFLIX: { disabled: true } } }));
+      const ctx = buildChatContext(netflixTxns(), []);
+      expect(ctx.recurring.some((r) => r.merchant === 'NETFLIX')).toBe(false);
+    });
+
+    it('shows the owner\'s corrected amount, not the raw detected one', () => {
+      localStorage.setItem('assumptionOverrides', JSON.stringify({ bills: { NETFLIX: { amount: 20 } } }));
+      const ctx = buildChatContext(netflixTxns(), []);
+      expect(ctx.recurring).toContainEqual({ merchant: 'NETFLIX', amount: 20, cadence: 'monthly' });
+    });
   });
 });
 
