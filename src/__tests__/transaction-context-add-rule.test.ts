@@ -43,8 +43,14 @@ jest.mock('@/lib/firebase', () => ({
   deleteDoc: jest.fn(),
 }));
 
+const updateTransactionMock = jest.fn();
+const addTransactionMock = jest.fn();
+const newDocIdMock = jest.fn((userId, collection) => `${collection}-${userId}-${Date.now()}`);
 jest.mock('@/lib/firestore', () => ({
   getTransactions: jest.fn().mockResolvedValue([]),
+  updateTransaction: (...args: unknown[]) => updateTransactionMock(...args),
+  addTransaction: (...args: unknown[]) => addTransactionMock(...args),
+  newDocId: (...args: unknown[]) => newDocIdMock(...args),
 }));
 
 const applyDecisionMock = jest.fn();
@@ -83,6 +89,9 @@ beforeEach(() => {
   applyDecisionMock.mockReset();
   getDocsMock.mockClear();
   updateDocMock.mockClear().mockResolvedValue(undefined);
+  updateTransactionMock.mockReset().mockResolvedValue(undefined);
+  addTransactionMock.mockReset().mockResolvedValue(undefined);
+  newDocIdMock.mockClear();
 });
 
 describe('TransactionContext.addRule (#130 — applyDecision write path)', () => {
@@ -179,5 +188,147 @@ describe('TransactionContext.updateRuleCategory (cashflow-mobile#24)', () => {
     expect(get().rules[0]).toMatchObject({ id: 'r1', match: RULE.match, set: { category: 'other' } });
     // Firestore: a dot-path update, never a whole-document overwrite.
     expect(updateDocMock).toHaveBeenCalledWith(expect.anything(), { 'set.category': 'other' });
+  });
+});
+
+/**
+ * cashflow-mobile#24 — updateRuleCategoryAwaited and updateTransactionAwaited
+ * are the primitives used by remove_category's reassignment sweep. They write
+ * FIRST, then update local state (reverse of the optimistic siblings), so a
+ * failed Firestore write is not masked by a local update — the next sweep
+ * retry finds the row again. This test suite proves those implementations
+ * carry the truthfulness guarantee: on rejection, they return false AND leave
+ * state untouched; on resolution, they return true AND state reflects the change.
+ */
+describe('TransactionContext.updateRuleCategoryAwaited (cashflow-mobile#24 — write-first primitive)', () => {
+  it('returns false and leaves local state untouched when updateDoc rejects', async () => {
+    const err = new Error('Network timeout');
+    updateDocMock.mockRejectedValueOnce(err);
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    applyDecisionMock.mockResolvedValueOnce({
+      decisionId: 'r1',
+      changed: { transactionsMatched: 0, monthsAffected: [] },
+    });
+    const { get } = await mount();
+    await act(async () => { await get().addRule(RULE); });
+    expect(get().rules[0]).toMatchObject({ id: 'r1', set: { category: 'shopping' } });
+
+    let result: boolean | undefined;
+    await act(async () => {
+      result = await get().updateRuleCategoryAwaited('r1', 'other');
+    });
+
+    // Returns false to signal the failure to the caller (e.g., remove_category
+    // needs to retry this row).
+    expect(result).toBe(false);
+    // State is UNTOUCHED — no optimistic update survives a failed write. The row
+    // still shows 'shopping', so a subsequent retry sweep finds it again.
+    expect(get().rules[0]).toMatchObject({ id: 'r1', set: { category: 'shopping' } });
+    expect(warn).toHaveBeenCalledWith('Mapping rule category update (awaited) failed:', err);
+
+    warn.mockRestore();
+  });
+
+  it('returns true and updates local state when updateDoc resolves', async () => {
+    updateDocMock.mockResolvedValueOnce(undefined);
+
+    applyDecisionMock.mockResolvedValueOnce({
+      decisionId: 'r1',
+      changed: { transactionsMatched: 0, monthsAffected: [] },
+    });
+    const { get } = await mount();
+    await act(async () => { await get().addRule(RULE); });
+    expect(get().rules[0]).toMatchObject({ id: 'r1', set: { category: 'shopping' } });
+
+    let result: boolean | undefined;
+    await act(async () => {
+      result = await get().updateRuleCategoryAwaited('r1', 'other');
+    });
+
+    // Returns true to signal success.
+    expect(result).toBe(true);
+    // State reflects the change AFTER Firestore confirmed it.
+    expect(get().rules[0]).toMatchObject({ id: 'r1', set: { category: 'other' } });
+  });
+});
+
+/**
+ * cashflow-mobile#24 — updateTransactionAwaited is used by remove_category's
+ * sweep to move rows to a new category. It must return false on write failure
+ * so the caller knows the row was not moved, and crucially, must NOT update
+ * local state on failure so a retry finds the row still at its old category.
+ */
+describe('TransactionContext.updateTransactionAwaited (cashflow-mobile#24 — write-first primitive)', () => {
+  it('returns false and leaves local state untouched when updateTransaction rejects', async () => {
+    const err = new Error('Firestore write failed');
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    updateTransactionMock.mockRejectedValueOnce(err);
+
+    const { get } = await mount();
+    // Add a transaction manually to the raw state.
+    await act(async () => {
+      await get().addTransaction({
+        date: '2026-08-21',
+        merchant: 'SHOP',
+        amount: 100,
+        category: 'shopping' as any,
+        paymentMethod: 'credit_card' as any,
+        description: 'Test',
+        notes: '',
+      });
+    });
+
+    // Find the transaction we just added.
+    const txn = get().transactions.find((t) => t.merchant === 'SHOP');
+    expect(txn).toBeDefined();
+    expect(txn?.category).toBe('shopping');
+
+    let result: boolean | undefined;
+    await act(async () => {
+      result = await get().updateTransactionAwaited(txn!.id, { category: 'other' as any });
+    });
+
+    // Returns false to signal the failure.
+    expect(result).toBe(false);
+    // State is UNTOUCHED — the transaction still shows 'shopping'.
+    const stillThere = get().transactions.find((t) => t.id === txn!.id);
+    expect(stillThere?.category).toBe('shopping');
+    expect(warn).toHaveBeenCalled();
+
+    warn.mockRestore();
+  });
+
+  it('returns true and updates local state when updateTransaction resolves', async () => {
+    updateTransactionMock.mockResolvedValueOnce(undefined);
+
+    const { get } = await mount();
+    // Add a transaction.
+    await act(async () => {
+      await get().addTransaction({
+        date: '2026-08-21',
+        merchant: 'SHOP2',
+        amount: 200,
+        category: 'shopping' as any,
+        paymentMethod: 'credit_card' as any,
+        description: 'Test 2',
+        notes: '',
+      });
+    });
+
+    const txn = get().transactions.find((t) => t.merchant === 'SHOP2');
+    expect(txn).toBeDefined();
+    expect(txn?.category).toBe('shopping');
+
+    let result: boolean | undefined;
+    await act(async () => {
+      result = await get().updateTransactionAwaited(txn!.id, { category: 'other' as any });
+    });
+
+    // Returns true to signal success.
+    expect(result).toBe(true);
+    // State reflects the change.
+    const updated = get().transactions.find((t) => t.id === txn!.id);
+    expect(updated?.category).toBe('other');
   });
 });
