@@ -14,6 +14,7 @@ import { Transaction } from '@/types';
 const aiChat = jest.fn();
 const addRule = jest.fn();
 const addBill = jest.fn();
+const getBills = jest.fn();
 
 jest.mock('@/lib/callables', () => ({
   aiChat: (...args: unknown[]) => aiChat(...args),
@@ -22,6 +23,7 @@ jest.mock('@/lib/callables', () => ({
 
 jest.mock('@/lib/firestore', () => ({
   addBill: (...args: unknown[]) => addBill(...args),
+  getBills: (...args: unknown[]) => getBills(...args),
 }));
 
 const txn = (id: string, title: string, merchant: string): Transaction => ({
@@ -86,6 +88,7 @@ beforeEach(() => {
   aiChat.mockReset();
   addRule.mockReset();
   addBill.mockReset().mockResolvedValue('new-bill-id');
+  getBills.mockReset().mockResolvedValue([]);
   updateProfile.mockReset().mockResolvedValue(undefined);
   PROFILE_SETTINGS = {};
 });
@@ -630,5 +633,47 @@ describe('the record_bill card and Defect 1 — nextDueDate wires anchorDate thr
 
     const saved: Bill = { id: 'b1', createdAt: '', updatedAt: '', ...addBill.mock.calls[0][1] };
     expect(billUpcomingEvents([saved], '2026-08-25', 45).length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * #22 (cashflow-mobile). The chat could WRITE a bill (record_bill above) but could not
+ * SEE the register it had just written to — asked "is it existing?" it said "I do not
+ * have that information". This is the fetch that closes the gap: the SAME getBills()
+ * the Bills tab already uses, fed into buildChatContext so every turn carries it.
+ */
+describe('DataChatSheet fetches the Bills register and includes it in the chat context (#22)', () => {
+  const savedBill = {
+    id: 'bill-1', vendor: 'Verizon Wireless', amount: 85, frequency: 'monthly' as const,
+    paymentMethodId: 'bofa-debit', migrationStatus: 'to-review' as const, lifecycleStatus: 'active' as const,
+    nonNegotiable: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+
+  it('sends context.bills built from the fetched register, so the model can answer "what bills do I have"', async () => {
+    getBills.mockResolvedValue([savedBill]);
+    aiChat.mockResolvedValue({ success: true, result: { action: 'answer', explanation: 'Verizon Wireless, $85 monthly.' } });
+
+    render(<DataChatSheet open onClose={() => {}} />);
+    await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+
+    send('what bills do I have');
+    await waitFor(() => expect(aiChat).toHaveBeenCalled());
+
+    const [{ context }] = aiChat.mock.calls[0];
+    expect(context.bills).toEqual([
+      { vendor: 'Verizon Wireless', amount: 85, frequency: 'monthly', nonNegotiable: true, method: 'BofA Debit' },
+    ]);
+  });
+
+  it('sends an empty bills list — never undefined — before the fetch resolves or when nothing is recorded', async () => {
+    getBills.mockResolvedValue([]);
+    aiChat.mockResolvedValue({ success: true, result: { action: 'answer', explanation: 'You have no bills recorded.' } });
+
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('what bills do I have');
+    await waitFor(() => expect(aiChat).toHaveBeenCalled());
+
+    const [{ context }] = aiChat.mock.calls[0];
+    expect(context.bills).toEqual([]);
   });
 });
