@@ -9,8 +9,9 @@ import { describeRule, rulePreview, MappingRule, NewMappingRule } from '@/lib/ma
 import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import { formatMoney } from '@/lib/money';
+import { sanitizeAssumedSpend } from '@/lib/profile-settings';
 import { matchIncomeDeposits } from '@/lib/ask';
-import { deriveAccountBalance } from '@/lib/forecast';
+import { deriveAccountBalance, monthlyAverages } from '@/lib/forecast';
 import type { IncomeContext } from '@/lib/classify';
 import { PaymentAccount, Transaction, displayCategory } from '@/types';
 
@@ -41,6 +42,8 @@ interface ChatMessage {
   balance?: { accountName: string; balance: number };
   /** Set when the assistant proposed an approved income source. */
   income?: { name: string; matchText: string[] };
+  /** FIN-SPEND-001 (#133): set when the assistant proposed a runway spend override. */
+  spend?: { amount: number };
   status?: 'pending' | 'applied';
 }
 
@@ -66,7 +69,7 @@ export default function DataChatSheet({ open, onClose, seed }: {
   seed?: string;
 }) {
   const { transactions, addRule } = useTransactions();
-  const { profile, reconcileAccount, addIncomeSource, incomeContext } = useUserProfile();
+  const { profile, reconcileAccount, addIncomeSource, incomeContext, updateProfile } = useUserProfile();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -120,6 +123,17 @@ export default function DataChatSheet({ open, onClose, seed }: {
     () => buildChatContext(transactions, profile?.paymentAccounts ?? []),
     [transactions, profile?.paymentAccounts]
   );
+
+  // FIN-SPEND-001 (#133): the derived 6-month average — the SAME basis Home and
+  // Forecast use — so the spend proposal card can show what the owner's number
+  // would replace. account TYPE is all monthlyAverages consults here, so the raw
+  // profile list (no balance derivation) is exactly as correct and one step
+  // cheaper than deriving balances just to throw them away.
+  const derivedMonthlySpend = useMemo(
+    () => monthlyAverages(transactions, profile?.paymentAccounts ?? [], 6, incomeContext).spending,
+    [transactions, profile?.paymentAccounts, incomeContext]
+  );
+  const currentMonthlySpend = sanitizeAssumedSpend(profile?.settings?.assumedMonthlySpend) ?? derivedMonthlySpend;
 
   useEffect(() => {
     endRef.current?.scrollIntoView?.({ block: 'end' });
@@ -181,6 +195,11 @@ export default function DataChatSheet({ open, onClose, seed }: {
                 income: { name: reply.name, matchText: reply.matchText },
                 status: 'pending',
               })
+          : reply?.action === 'set_monthly_spend'
+            ? mk('assistant', reply.reason, {
+                spend: { amount: reply.amount },
+                status: 'pending',
+              })
             : mk('assistant', explanation
               || "I got a reply I couldn't read. Try saying it as a rule — for example “Turo is Travel”."),
       ]);
@@ -217,7 +236,7 @@ export default function DataChatSheet({ open, onClose, seed }: {
   };
 
   const dismiss = (id: string) =>
-    setMessages((prev) => prev.map((x) => (x.id === id ? { ...x, rule: undefined, balance: undefined, income: undefined, status: undefined } : x)));
+    setMessages((prev) => prev.map((x) => (x.id === id ? { ...x, rule: undefined, balance: undefined, income: undefined, spend: undefined, status: undefined } : x)));
 
   /** THE one path from a balance proposal to the store — a button press, same
    *  reconcile() the accounts screen used before its manual knob was removed. */
@@ -264,6 +283,47 @@ export default function DataChatSheet({ open, onClose, seed }: {
       setMessages((prev) => [
         ...prev.map((x) => (x.id === m.id ? { ...x, status: 'applied' as const } : x)),
         mk('assistant', `Saved — ${stats.count} deposit${stats.count === 1 ? '' : 's'} now count as income from ${m.income!.name}, about ${formatMoney(stats.amount, profile?.currency, 2)} ${stats.frequency}.`),
+      ]);
+    } catch {
+      setMessages((prev) => [...prev, mk('assistant', 'That could not be saved. Please try again.')]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * FIN-SPEND-001 (#133). Same settings-write helper FIN-PENDING-001 uses
+   * (updateProfile -> toFirestoreSettings -> updateUserSettings) — one round
+   * trip, no new write path. `null`, not omission: Firestore drops an
+   * `undefined` key from the write outright, so "Back to derived" (below)
+   * would silently fail to clear a previously-set override if it sent one.
+   */
+  const applySpend = async (m: ChatMessage) => {
+    if (!m.spend || busy) return;
+    setBusy(true);
+    try {
+      await updateProfile({ settings: { assumedMonthlySpend: m.spend.amount } });
+      setMessages((prev) => [
+        ...prev.map((x) => (x.id === m.id ? { ...x, status: 'applied' as const } : x)),
+        mk('assistant', `Saved — runway now assumes ${formatMoney(m.spend!.amount, profile?.currency, 2)} a month, until you clear it.`),
+      ]);
+    } catch {
+      setMessages((prev) => [...prev, mk('assistant', 'That could not be saved. Please try again.')]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** The "Back to derived" affordance: clears the override regardless of what
+   *  amount was proposed — an alternative to Apply, not a variant of it. */
+  const clearSpend = async (m: ChatMessage) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await updateProfile({ settings: { assumedMonthlySpend: null } });
+      setMessages((prev) => [
+        ...prev.map((x) => (x.id === m.id ? { ...x, status: 'applied' as const } : x)),
+        mk('assistant', 'Saved — runway is back to your derived 6-month average.'),
       ]);
     } catch {
       setMessages((prev) => [...prev, mk('assistant', 'That could not be saved. Please try again.')]);
@@ -373,6 +433,19 @@ export default function DataChatSheet({ open, onClose, seed }: {
                   busy={busy}
                   money={money}
                   onApply={() => applyBalance(m)}
+                  onCancel={() => dismiss(m.id)}
+                />
+              )}
+              {m.spend && (
+                <SpendProposalCard
+                  proposal={m.spend}
+                  currentAmount={currentMonthlySpend}
+                  currentIsOverride={sanitizeAssumedSpend(profile?.settings?.assumedMonthlySpend) != null}
+                  currency={profile?.currency}
+                  pending={m.status === 'pending'}
+                  busy={busy}
+                  onApply={() => applySpend(m)}
+                  onClear={() => clearSpend(m)}
                   onCancel={() => dismiss(m.id)}
                 />
               )}
@@ -578,6 +651,50 @@ function BalanceProposalCard({ proposal, currency, accounts, transactions, incom
       {pending ? (
         <div className="flex gap-2 mt-3">
           <button type="button" onClick={onApply} disabled={busy} className="btn-primary min-h-[44px] px-4 text-sm disabled:opacity-50">Apply</button>
+          <button type="button" onClick={onCancel} disabled={busy} className="min-h-[44px] px-4 text-sm rounded-card border border-[var(--border-color)] text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] transition-colors disabled:opacity-50">Cancel</button>
+        </div>
+      ) : (
+        <p className="mt-3 text-xs text-[var(--accent-success)]">Applied</p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * FIN-SPEND-001 (#133). Before -> after, both figures EXPLICITLY labelled —
+ * the accuracy rule this whole feature exists for: an overridden figure must
+ * never read as derived, and once applied it must never read as anything else
+ * either. "Back to derived" is a third choice, not a variant of Apply: the
+ * owner can reject the proposed number and still clear whatever override was
+ * already active, in the same click.
+ */
+function SpendProposalCard({ proposal, currentAmount, currentIsOverride, currency, pending, busy, onApply, onClear, onCancel }: {
+  proposal: { amount: number };
+  currentAmount: number;
+  currentIsOverride: boolean;
+  currency?: string;
+  pending: boolean;
+  busy: boolean;
+  onApply: () => void;
+  onClear: () => void;
+  onCancel: () => void;
+}) {
+  // ONE template string (not JSX interpolation), always 2 decimals — same
+  // convention as BalanceProposalCard's m2, for the same reason: this is a
+  // figure the owner is confirming, not an approximate display number.
+  const m2 = (n: number) => formatMoney(n, currency, 2);
+  return (
+    <div className="mt-3 rounded-card border border-[var(--border-color)] bg-[var(--background)] p-3">
+      <p className="font-medium text-[var(--foreground)]">
+        {`Runway spend assumption — ${m2(currentAmount)} (${currentIsOverride ? 'your assumption' : 'derived'}) → ${m2(proposal.amount)} (your assumption)`}
+      </p>
+      <p className="text-xs text-[var(--foreground-muted)] mt-1">
+        Replaces the derived 6-month average everywhere runway is shown, until you clear it.
+      </p>
+      {pending ? (
+        <div className="flex gap-2 flex-wrap mt-3">
+          <button type="button" onClick={onApply} disabled={busy} className="btn-primary min-h-[44px] px-4 text-sm disabled:opacity-50">Apply</button>
+          <button type="button" onClick={onClear} disabled={busy} className="min-h-[44px] px-4 text-sm rounded-card border border-[var(--border-color)] text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] transition-colors disabled:opacity-50">Back to derived</button>
           <button type="button" onClick={onCancel} disabled={busy} className="min-h-[44px] px-4 text-sm rounded-card border border-[var(--border-color)] text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] transition-colors disabled:opacity-50">Cancel</button>
         </div>
       ) : (

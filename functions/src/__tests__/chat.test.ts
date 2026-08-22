@@ -120,6 +120,15 @@ describe('the balance action travels with the contract', () => {
   });
 });
 
+describe('the monthly-spend override travels with the contract', () => {
+  it('teaches the model the shape, the dollars convention, and to never emit it for a question', () => {
+    const system = buildChatMessages({ message: 'assume I spend 3000 a month' })[0].content;
+    expect(system).toContain('"action":"set_monthly_spend"');
+    expect(system).toContain('DOLLARS, greater than 0, at most 1,000,000');
+    expect(system).toContain('NEVER emit this for a question');
+  });
+});
+
 describe('the system prompt tells the model what an attached image is', () => {
   it('explains screenshots, the create_rule reply shape and asking over guessing', () => {
     const system = buildChatMessages({ message: 'hi' })[0].content;

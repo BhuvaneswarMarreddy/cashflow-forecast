@@ -424,6 +424,12 @@ INCOME SOURCE:
 - name: the payer, in their words. matchText: distinctive statement text for those deposits, lowercase, 3+ chars, no amounts or dates.
 - Never set amount or frequency: the app derives both from the deposits that match and shows the count and total before saving.
 
+MONTHLY SPEND ASSUMPTION:
+{"action":"set_monthly_spend","amount":0,"reason":"string"}
+- Use ONLY when the user asks to CHANGE the monthly-spend number that drives their runway ("assume I spend 3000 a month", "use 2500 instead of my average", "lower my runway assumption to 2000"). NEVER emit this for a question ("what's my runway", "how much do I spend a month") — answer those with "answer" instead, quoting the figure from LEDGER TOTALS.
+- amount is DOLLARS, greater than 0, at most 1,000,000.
+- reason: one calm sentence restating the number the user chose. This only PROPOSES the override; the user confirms it. Applying it replaces the derived 6-month average everywhere runway is shown, until the user clears it back to derived — you cannot clear it yourself, there is no action for that.
+
 WHAT THESE ACTIONS DO NOT DO:
 - No action applies anything. Each one renders a confirmation the user has to press.
 - No action can mark a credit-card credit as earned income, and none can delete a transaction.

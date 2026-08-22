@@ -31,6 +31,7 @@ import {
 } from '@/lib/forecast';
 import { RESERVE_TARGET_MONTHS, homeSummary, runwayLabel } from '@/lib/home';
 import { interpretLedgerRows, type MappingRule } from '@/lib/mapping-rules';
+import { sanitizeAssumedSpend } from '@/lib/profile-settings';
 import type {
   ForecastEvent,
   InflowReview,
@@ -66,6 +67,15 @@ export interface Ledger {
   goals: SavingsGoal[];
   safetyThreshold: number;
   includePending: boolean;
+  /**
+   * FIN-SPEND-001 (#133). The owner's own monthly-spend figure, dollars,
+   * validated finite > 0 here so a corrupt or hand-edited doc can never
+   * silently become a $0 or negative "burn". `null` — never absent, never
+   * `undefined` — is the actual "no override" value: it survives a Firestore
+   * round trip (`undefined` does not) and is what the "Back to derived"
+   * write sets.
+   */
+  assumedMonthlySpend: number | null;
   /** `meta/plaid.lastSuccess` — when the banks were last actually reached. */
   lastBankSyncAt: string | null;
   /** The owner's mapping rules, newest first — same precedence order as
@@ -111,6 +121,7 @@ export async function readLedger(uid: string): Promise<Ledger> {
   const settings = (userDoc.data()?.settings ?? {}) as {
     safetyThreshold?: number;
     includePendingInCalculations?: boolean;
+    assumedMonthlySpend?: number | null;
   };
 
   const rules = rulesDocs.docs
@@ -149,6 +160,11 @@ export async function readLedger(uid: string): Promise<Ledger> {
     goals: goals.docs.map((d) => ({ id: d.id, ...d.data() }) as SavingsGoal),
     safetyThreshold: settings.safetyThreshold ?? DEFAULT_SAFETY_THRESHOLD,
     includePending: settings.includePendingInCalculations ?? false,
+    // > 0 and finite, or null — the write side (chat-actions.ts) already enforces
+    // this, but a doc edited by hand or by an older client must not turn into a
+    // fabricated $0/negative "burn" downstream. sanitizeAssumedSpend enforces this
+    // on both web and mobile so they never diverge on corrupt input.
+    assumedMonthlySpend: sanitizeAssumedSpend(settings.assumedMonthlySpend),
     rules,
   };
 }
@@ -228,13 +244,13 @@ const UPCOMING_KIND: Partial<Record<ForecastEvent['type'], 'bill' | 'card-paymen
 
 // ── The callable ────────────────────────────────────────────────────────────
 
-export const homeSnapshot = onCall({ cors: true }, async (request) => {
-  if (!request.auth) {
-    throw new HttpsError('unauthenticated', 'Sign in to load your figures.');
-  }
-
-  const ledger = await readLedger(request.auth.uid);
-
+/**
+ * Everything `homeSnapshot` computes once it has a `Ledger` — pure, no
+ * Firestore, unit-tested directly (`__tests__/spend-assumption.test.ts`), same
+ * split `applyDecisionCore` uses in decisions.ts. The callable below is the
+ * thin auth + read shell around it.
+ */
+export function buildSnapshot(ledger: Ledger) {
   // The app's financial policy, assembled exactly as UserProfileContext does.
   const policy: IncomeContext = {
     sources: ledger.incomeSources,
@@ -248,10 +264,15 @@ export const homeSnapshot = onCall({ cors: true }, async (request) => {
     .filter((a) => a.type === 'credit_card')
     .reduce((sum, a) => sum + currentOf(a), 0);
   const averages = monthlyAverages(ledger.transactions, accounts, AVERAGE_MONTHS, policy);
+  // FIN-SPEND-001 (#133): the owner's own number, when set, always wins over
+  // the derived average — this is the one place both `homeSummary` and the
+  // snapshot's own spend field resolve which one that is, so they can never
+  // show two different "$N a month" figures for the same runway.
+  const avgMonthlyExpense = ledger.assumedMonthlySpend ?? averages.spending;
 
   const home = homeSummary({
     currentCash: cash,
-    avgMonthlyExpense: averages.spending,
+    avgMonthlyExpense,
     cardsOwed,
     lockedMonthly: nonNegotiableMonthly(ledger.bills),
     today: new Date(),
@@ -326,12 +347,18 @@ export const homeSnapshot = onCall({ cors: true }, async (request) => {
         amountToNextMonthCents: cents(home.amountToNextMonth),
       },
       lockedMonthlyCents: cents(home.lockedMonthly),
-      avgMonthlySpendCents: cents(averages.spending),
+      avgMonthlySpendCents: cents(avgMonthlyExpense),
       avgMonthlyIncomeCents: cents(averages.income),
       // FIN-PENDING-001. Returned so the client can show the policy that
       // produced these figures — every number above honours it, so a screen
       // offering the toggle must read the same value the maths used.
       includePending: ledger.includePending,
+      // FIN-SPEND-001 (#133). Dollars, verbatim from settings — NOT cents, unlike
+      // every other money field above. This one is not for arithmetic, it is for
+      // labelling: null means avgMonthlySpendCents is the derived average, a
+      // number means it is the owner's own assumption, and the client must show
+      // that distinction rather than let an overridden figure read as derived.
+      assumedMonthlySpend: ledger.assumedMonthlySpend,
     },
 
     accounts: accounts.map(mapAccount),
@@ -347,4 +374,13 @@ export const homeSnapshot = onCall({ cors: true }, async (request) => {
       })),
     activity,
   };
+}
+
+export const homeSnapshot = onCall({ cors: true }, async (request) => {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Sign in to load your figures.');
+  }
+
+  const ledger = await readLedger(request.auth.uid);
+  return buildSnapshot(ledger);
 });

@@ -87,6 +87,10 @@ export type ChatAction =
    *  figures. amount/frequency are DERIVED client-side from the deposits that
    *  actually match, never taken from the model. */
   | { action: 'set_income_source'; name: string; matchText: string[]; reason: string }
+  /** FIN-SPEND-001 (#133). Proposes an OVERRIDE of the derived 6-month average
+   *  that drives runway. amount is DOLLARS, > 0, capped at 1,000,000 — a model
+   *  typo here would relabel the owner's own runway deadline, not just a rule. */
+  | { action: 'set_monthly_spend'; amount: number; reason: string }
   | RecoveryAction;
 
 /**
@@ -477,6 +481,18 @@ export function parseChatAction(raw: unknown, ctx?: RecoveryContext): ChatAction
     if (!accountName || !reason) return null;
     if (typeof balance !== 'number' || !Number.isFinite(balance) || Math.abs(balance) > 5_000_000) return null;
     return { action: 'set_account_balance', accountName, balance: Math.round(balance * 100) / 100, reason };
+  }
+
+  if (action === 'set_monthly_spend') {
+    const o = record(raw, ['action', 'amount', 'reason']);
+    if (!o) return null;
+    const reason = str(o.reason, MAX.explanation);
+    const amount = o.amount;
+    if (!reason) return null;
+    // Finite, positive, and bounded: a model typo (25000 instead of 2500) would
+    // otherwise pass straight through as the owner's own runway assumption.
+    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0 || amount > 1_000_000) return null;
+    return { action: 'set_monthly_spend', amount: Math.round(amount * 100) / 100, reason };
   }
 
   if (action === 'set_income_source') {

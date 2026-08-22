@@ -25,6 +25,7 @@ import { buildAssumptions, AssumptionOverrides } from '@/lib/behavior';
 import { accountsBehindFigure } from '@/lib/accounts';
 import { homeSummary, RESERVE_TARGET_MONTHS } from '@/lib/home';
 import { formatMoney } from '@/lib/money';
+import { sanitizeAssumedSpend } from '@/lib/profile-settings';
 import { loadOverrides, saveOverrides } from '@/lib/assumption-overrides';
 import * as firestoreService from '@/lib/firestore';
 import { format } from 'date-fns';
@@ -215,14 +216,18 @@ export default function ForecastPage() {
   // the CHART's display range into itself, so Runway changed when you changed
   // the range or picked an account. One basis, shared with Home (lib/home.ts).
   const steadyBurn = monthlyAverages(transactions, derivedAccounts, 6, incomeContext).spending;
+  // FIN-SPEND-001 (#133): same override resolution as Home and homeSnapshot —
+  // the owner's own number, set from chat, wins over the derived average so
+  // this screen's "steady burn" can never disagree with theirs.
+  const avgMonthlyExpense = sanitizeAssumedSpend(profile?.settings?.assumedMonthlySpend) ?? steadyBurn;
   const runway = homeSummary({
     currentCash,
-    avgMonthlyExpense: steadyBurn,
+    avgMonthlyExpense,
     cardsOwed: 0,
     lockedMonthly: 0,
     today: new Date(),
   });
-  const monthlyExpenses = steadyBurn;
+  const monthlyExpenses = avgMonthlyExpense;
 
   return (
     <div className="min-h-screen relative">

@@ -42,6 +42,7 @@
     "../src/lib/mapping-rules.ts",
     "../src/lib/money.ts",
     "../src/lib/palette.ts",
+    "../src/lib/profile-settings.ts",
     "../src/lib/transfers.ts",
     "../src/lib/obs/events.ts",
     "../src/lib/obs/redact.ts",

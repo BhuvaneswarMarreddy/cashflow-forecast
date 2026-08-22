@@ -58,11 +58,16 @@ const MOCK_ACCOUNTS = [
 // incomeContext is a required, real argument to deriveAccountBalance (src/lib/forecast.ts)
 // — the fix must thread a real policy through, never a literal `{}` stand-in.
 const MOCK_INCOME_CONTEXT = { sources: [], reviews: {} };
+const updateProfile = jest.fn().mockResolvedValue(undefined);
+// Mutable so individual tests can put the owner in either state — no override
+// (derived) vs an existing override — before rendering.
+let PROFILE_SETTINGS: { assumedMonthlySpend?: number | null } = {};
 jest.mock('@/context/UserProfileContext', () => ({
   useUserProfile: () => ({
-    profile: { currency: 'USD', paymentAccounts: MOCK_ACCOUNTS },
+    profile: { currency: 'USD', paymentAccounts: MOCK_ACCOUNTS, settings: PROFILE_SETTINGS },
     reconcileAccount,
     incomeContext: MOCK_INCOME_CONTEXT,
+    updateProfile: (...args: unknown[]) => updateProfile(...args),
   }),
 }));
 
@@ -74,6 +79,8 @@ beforeAll(() => {
 beforeEach(() => {
   aiChat.mockReset();
   addRule.mockReset();
+  updateProfile.mockReset().mockResolvedValue(undefined);
+  PROFILE_SETTINGS = {};
 });
 
 const RULE_REPLY = {
@@ -306,5 +313,86 @@ describe('the balance proposal card', () => {
     await screen.findByText(/Saved — Legacy Cash reads \$900\.00 as of today/);
 
     expect(reconcileAccount).toHaveBeenCalledWith('acct-legacy', 900, 850);
+  });
+});
+
+/**
+ * FIN-SPEND-001 (#133). Same confirm-gate shape as the balance card: nothing
+ * is written until a button is pressed, and the card must never let an
+ * overridden figure read as the derived average — before AND after are both
+ * labelled explicitly.
+ */
+describe('the monthly-spend override proposal card', () => {
+  const proposal = (amount = 3000) => ({
+    success: true,
+    result: { action: 'set_monthly_spend', amount, reason: `Assume $${amount} a month.` },
+  });
+
+  it('shows the derived figure -> the proposed one, and writes ONLY on Apply', async () => {
+    aiChat.mockResolvedValue(proposal(3000));
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('assume I spend 3000 a month');
+
+    // Derived side is not pinned to an exact number (it depends on the fixture's
+    // dates vs. whenever the suite runs) — only that it is labelled "derived" and
+    // the proposed side reads exactly $3,000.00, labelled "your assumption".
+    expect(await screen.findByText(/\(derived\) → \$3,000\.00 \(your assumption\)/)).toBeInTheDocument();
+    expect(updateProfile).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    await screen.findByText(/Saved — runway now assumes \$3,000\.00 a month/);
+    expect(updateProfile).toHaveBeenCalledWith({ settings: { assumedMonthlySpend: 3000 } });
+    expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+  });
+
+  it('an existing override shows as "your assumption" on the before side too', async () => {
+    PROFILE_SETTINGS = { assumedMonthlySpend: 1800 };
+    aiChat.mockResolvedValue(proposal(2200));
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('use 2200 instead of my average');
+
+    expect(await screen.findByText(
+      'Runway spend assumption — $1,800.00 (your assumption) → $2,200.00 (your assumption)'
+    )).toBeInTheDocument();
+  });
+
+  it('"Back to derived" clears the override instead of accepting the proposed number', async () => {
+    PROFILE_SETTINGS = { assumedMonthlySpend: 1800 };
+    aiChat.mockResolvedValue(proposal(2200));
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('use 2200 instead of my average');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Back to derived' }));
+
+    await screen.findByText('Saved — runway is back to your derived 6-month average.');
+    expect(updateProfile).toHaveBeenCalledWith({ settings: { assumedMonthlySpend: null } });
+  });
+
+  it('Cancel drops the proposal without writing anything', async () => {
+    aiChat.mockResolvedValue(proposal(3000));
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('assume I spend 3000 a month');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByText(/your assumption/)).not.toBeInTheDocument();
+    expect(updateProfile).not.toHaveBeenCalled();
+  });
+
+  it('rejects corrupt values (0, negative, NaN, Infinity, string) as null — falls back to derived (FIN-SPEND-001)', async () => {
+    // A doc edited by hand or by an older client must not corrupt the UI. The sanitization
+    // guard ensures corrupt settings values are treated as null (i.e., use derived average).
+    PROFILE_SETTINGS = { assumedMonthlySpend: 0 };
+    aiChat.mockResolvedValue(proposal(3000));
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('assume I spend 3000 a month');
+
+    // Zero is treated as null, so the before side reads "derived" not "your assumption".
+    expect(await screen.findByText(/\(derived\) → \$3,000\.00 \(your assumption\)/)).toBeInTheDocument();
+
+    // Same for negative — should also treat as derived.
+    PROFILE_SETTINGS = { assumedMonthlySpend: -500 };
+    const { rerender } = render(<DataChatSheet open onClose={() => {}} />);
+    expect(screen.getByText(/\(derived\) → \$3,000\.00 \(your assumption\)/)).toBeInTheDocument();
   });
 });

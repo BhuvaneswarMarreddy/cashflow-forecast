@@ -247,3 +247,30 @@ describe('set_account_balance — the first chat action that touches an account'
     expect(parseChatAction({ ...valid, accountName: '' })).toBeNull();
   });
 });
+
+describe('set_monthly_spend — FIN-SPEND-001, the owner\'s runway assumption', () => {
+  const valid = { action: 'set_monthly_spend', amount: 2500, reason: 'You want runway to assume $2,500 a month.' };
+
+  it('accepts a well-formed proposal verbatim', () => {
+    expect(parseChatAction(valid)).toEqual(valid);
+  });
+
+  it('rounds to cents precision like every other money amount here', () => {
+    expect(parseChatAction({ ...valid, amount: 2500.006 })).toEqual({ ...valid, amount: 2500.01 });
+  });
+
+  it('rejects anything off-shape rather than coercing', () => {
+    expect(parseChatAction({ ...valid, extra: 1 })).toBeNull();            // unknown key
+    expect(parseChatAction({ ...valid, amount: 'a lot' })).toBeNull();     // not a number
+    expect(parseChatAction({ ...valid, amount: Infinity })).toBeNull();    // not finite
+    expect(parseChatAction({ ...valid, amount: NaN })).toBeNull();         // not finite
+    expect(parseChatAction({ ...valid, amount: 0 })).toBeNull();           // not > 0
+    expect(parseChatAction({ ...valid, amount: -500 })).toBeNull();        // not > 0
+    expect(parseChatAction({ ...valid, amount: 1_000_001 })).toBeNull();   // over the ceiling
+    expect(parseChatAction({ ...valid, reason: '' })).toBeNull();          // silent action
+  });
+
+  it('accepts exactly the ceiling', () => {
+    expect(parseChatAction({ ...valid, amount: 1_000_000 })).toEqual({ ...valid, amount: 1_000_000 });
+  });
+});
