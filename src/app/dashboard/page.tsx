@@ -108,11 +108,15 @@ export default function DashboardPage({ initialBills }: { initialBills?: Bill[] 
   // Fall back to a figure DERIVED from the last 6 months of transactions when the user
   // hasn't hand-entered income sources / a budget — so these never show a bare $0.
   const derivedMonthly = monthlyAverages(transactions, derivedAccounts, 6, incomeContext);
+  // FIN-SPEND-001 (#133): the owner's own number, set from chat, always wins over
+  // the derived average — same resolution homeSnapshot uses server-side, so the
+  // mobile client and this screen can never disagree about what drives runway.
+  const avgMonthlyExpense = profile?.settings?.assumedMonthlySpend ?? derivedMonthly.spending;
 
   // UI-102: the hero's numbers — one computation (lib/home.ts), tested there.
   const home = homeSummary({
     currentCash: calculateCurrentCash(derivedAccounts),
-    avgMonthlyExpense: derivedMonthly.spending,
+    avgMonthlyExpense,
     cardsOwed: totalCreditUsed,
     lockedMonthly: nonNegotiableMonthly(bills),
     today: new Date(),
