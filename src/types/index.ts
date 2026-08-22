@@ -660,9 +660,17 @@ export function resolveCategories(settings?: { categories?: CustomCategory[] }):
     value: c.value, label: c.label, icon: c.icon, archived: false,
   }));
 
+  // A hand-edited or corrupted profile document can hold ANYTHING under
+  // `categories` — an object, a string, a number. `for...of` throws outright on
+  // most of those (only a handful of iterables, arrays included, survive it),
+  // which would take down readLedger/homeSnapshot and DataChatSheet's render for
+  // that one owner. Fail SAFE to "no custom categories" instead — the 13
+  // defaults still resolve, exactly as if `categories` had been absent.
+  const container = Array.isArray(settings?.categories) ? settings.categories : [];
+
   const custom: ResolvedCategory[] = [];
-  for (const c of settings?.categories ?? []) {
-    if (!c || typeof c.value !== 'string' || seen.has(c.value)) continue;
+  for (const c of container) {
+    if (!c || typeof c !== 'object' || typeof c.value !== 'string' || seen.has(c.value)) continue;
     seen.add(c.value);
     custom.push({
       value: c.value,
@@ -672,6 +680,27 @@ export function resolveCategories(settings?: { categories?: CustomCategory[] }):
     });
   }
   return [...defaults, ...custom];
+}
+
+/**
+ * cashflow-mobile#24. What a NEW-selection picker (Add Transaction, Planned
+ * Payments, Receipt Scanner, Budget Settings, ...) offers: every ASSIGNABLE
+ * category — defaults plus non-archived custom ones, exactly resolveCategories()
+ * minus the archived entries — so a chat-created category is finally selectable
+ * by hand, and a removed one is not offered for anything new.
+ *
+ * `currentValue` is the row's OWN existing category, when editing one that
+ * already exists (a transaction, a planned payment, ...). It is always
+ * included even if archived: a `<select>` whose `value` is not among its own
+ * `<option>`s renders as if nothing were chosen, which would make editing any
+ * OTHER field on that row silently reset its category out from under it. A
+ * brand-new row (no currentValue) gets exactly the assignable set.
+ */
+export function selectableCategories(resolved: readonly ResolvedCategory[], currentValue?: string): ResolvedCategory[] {
+  const assignable = resolved.filter((c) => !c.archived);
+  if (!currentValue || assignable.some((c) => c.value === currentValue)) return assignable;
+  const current = resolved.find((c) => c.value === currentValue);
+  return current ? [...assignable, current] : assignable;
 }
 
 /**

@@ -8,10 +8,12 @@ import {
   getMerchantColor,
   displayCategory,
   resolveCategories,
+  selectableCategories,
   slugForCategoryLabel,
   AccountType,
   PaymentMethod,
   ExpenseCategory,
+  CustomCategory,
 } from '@/types';
 
 describe('displayCategory', () => {
@@ -76,6 +78,86 @@ describe('resolveCategories', () => {
     });
     expect(resolved.filter((c) => c.value === 'vacations')).toHaveLength(1);
     expect(resolved.find((c) => c.value === 'vacations')?.label).toBe('Vacations');
+  });
+
+  /**
+   * A hand-edited or corrupted profile document can hold anything under
+   * `categories`. Before the fix, `for...of` on a non-iterable container
+   * (an object, a number) threw straight out of this function — which would
+   * take down readLedger/homeSnapshot and DataChatSheet's render for that
+   * owner. Every malformed shape below must fail SAFE to the 13 defaults.
+   */
+  test('a non-array categories container fails safe to the 13 defaults', () => {
+    const cases: unknown[] = [
+      { oops: true },      // plain object — not iterable at all
+      'not-an-array',      // string — iterable, but never the intended shape
+      42,                  // number — not iterable, would throw
+      true,                // boolean — not iterable, would throw
+    ];
+    for (const bad of cases) {
+      const resolved = resolveCategories({ categories: bad as CustomCategory[] });
+      expect(resolved).toHaveLength(EXPENSE_CATEGORIES.length);
+      expect(resolved.map((c) => c.value)).toEqual(EXPENSE_CATEGORIES.map((c) => c.value));
+    }
+  });
+
+  test('null categories (not just absent/undefined) also fails safe to the defaults', () => {
+    const resolved = resolveCategories({ categories: null as unknown as CustomCategory[] });
+    expect(resolved).toHaveLength(EXPENSE_CATEGORIES.length);
+  });
+
+  test('an array of junk entries drops the junk and keeps the valid ones', () => {
+    const resolved = resolveCategories({
+      categories: [
+        null,
+        undefined,
+        'just a string',
+        42,
+        { label: 'No value field' },
+        { value: 'vacations', label: 'Vacations' },
+      ] as unknown as CustomCategory[],
+    });
+    expect(resolved).toHaveLength(EXPENSE_CATEGORIES.length + 1);
+    expect(resolved.find((c) => c.value === 'vacations')).toMatchObject({ label: 'Vacations' });
+  });
+});
+
+/**
+ * cashflow-mobile#24 — the web pickers' fix. Every consumer (AddTransactionModal,
+ * PlannedPaymentsPanel, ReceiptScannerModal, BudgetSettingsPanel) shares this ONE
+ * derivation of "what can a NEW selection offer", so a chat-created category
+ * becomes manually selectable everywhere at once, and a removed one stops being
+ * offered everywhere at once.
+ */
+describe('selectableCategories', () => {
+  const resolved = resolveCategories({
+    categories: [
+      { value: 'vacations', label: 'Vacations', icon: '🏖️' },
+      { value: 'old-hobby', label: 'Old Hobby', archived: true },
+    ],
+  });
+
+  test('a non-archived custom category is offered for a new selection', () => {
+    const options = selectableCategories(resolved);
+    expect(options.some((c) => c.value === 'vacations')).toBe(true);
+  });
+
+  test('an archived category is excluded from a new selection', () => {
+    const options = selectableCategories(resolved);
+    expect(options.some((c) => c.value === 'old-hobby')).toBe(false);
+  });
+
+  test('an archived category IS included when it is the row being edited\'s own current value — never yanked out from under it', () => {
+    const options = selectableCategories(resolved, 'old-hobby');
+    expect(options.some((c) => c.value === 'old-hobby')).toBe(true);
+    // Still excluded as a choice for every OTHER row — only appended once, for
+    // the one row that currently carries it.
+    expect(options.filter((c) => c.value === 'old-hobby')).toHaveLength(1);
+  });
+
+  test('a currentValue that resolves to nothing at all (data corruption) is not fabricated', () => {
+    const options = selectableCategories(resolved, 'nonexistent-value');
+    expect(options.some((c) => c.value === 'nonexistent-value')).toBe(false);
   });
 });
 
