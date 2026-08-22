@@ -4,8 +4,9 @@ import React, { createContext, useContext, useState, useEffect, ReactNode, useCa
 import { Transaction, PaymentAccount, PaymentMethod, ExpenseCategory } from '@/types';
 import { useAuth } from './AuthContext';
 import * as firestoreService from '@/lib/firestore';
-import { db, collection, doc, getDocs, setDoc, updateDoc, deleteDoc } from '@/lib/firebase';
+import { db, collection, doc, getDocs, updateDoc, deleteDoc } from '@/lib/firebase';
 import { definedSet, interpretLedgerRows, MappingRule, NewMappingRule } from '@/lib/mapping-rules';
+import { applyDecision, ChangeSummary } from '@/lib/callables';
 import { generateSampleData } from '@/lib/storage';
 import { isUnsyncedId, planDrain, withoutId } from '@/lib/offline-queue';
 import { interpretTransaction, IncomeContext } from '@/lib/classify';
@@ -16,7 +17,7 @@ export interface TransactionContextType {
   error: string | null;
   // User-defined mapping rules (users/{uid}/rules). Newest first = highest precedence.
   rules: MappingRule[];
-  addRule: (rule: NewMappingRule) => Promise<MappingRule | undefined>;
+  addRule: (rule: NewMappingRule) => Promise<{ rule: MappingRule; changed: ChangeSummary } | undefined>;
   deleteRule: (id: string) => Promise<void>;
   toggleRule: (id: string, enabled: boolean) => Promise<void>;
   addTransaction: (transaction: Omit<Transaction, 'id'>) => Promise<void>;
@@ -181,30 +182,52 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
     [rawTransactions, rules]
   );
 
-  // Writes are optimistic, like every other write in this file: with offline persistence
-  // enabled, awaiting the server ack hangs until the network comes back.
+  /**
+   * #130 — the single validated write path for a merchant rule
+   * (functions/src/decisions.ts), shared with the mobile app: this browser no
+   * longer writes users/{uid}/rules directly. Still optimistic, like every other
+   * write in this file, but NOT like the offline-persisted Firestore writes below
+   * (deleteRule/toggleRule): applyDecision is a Cloud Function call, so it
+   * genuinely needs the network and can genuinely fail outright rather than just
+   * queue. `doc()` here only MINTS an id — no request happens — so the optimistic
+   * prepend has a provisional id to key on, reconciled to the server's real
+   * `decisionId` once the callable resolves.
+   *
+   * On rejection the optimistic entry is removed. The old direct-`setDoc` version
+   * swallowed a failed write and left the entry in `rules` forever — a rule that
+   * LOOKED saved (it was right there in the list) but had never reached Firestore.
+   * Throwing here, instead of swallowing, is also what lets a caller show its own
+   * failure message rather than a false "Saved".
+   */
   const addRule = useCallback(
-    async (rule: NewMappingRule): Promise<MappingRule | undefined> => {
+    async (rule: NewMappingRule): Promise<{ rule: MappingRule; changed: ChangeSummary } | undefined> => {
       if (!user?.id) return;
       const ref = rule.id
         ? doc(db, 'users', user.id, 'rules', rule.id)
         : doc(collection(db, 'users', user.id, 'rules'));
-      const saved: MappingRule = {
+      const optimistic: MappingRule = {
         ...rule,
         set: definedSet(rule.set),
         id: ref.id,
         createdAt: rule.createdAt || new Date().toISOString(),
       };
 
-      setRules((prev) => [saved, ...prev.filter((r) => r.id !== saved.id)]);
-      setDoc(ref, {
-        match: saved.match,
-        set: saved.set,
-        createdAt: saved.createdAt,
-        enabled: saved.enabled,
-      }).catch((err) => console.warn('Mapping rule write failed:', err));
+      setRules((prev) => [optimistic, ...prev.filter((r) => r.id !== optimistic.id)]);
 
-      return saved;
+      try {
+        const { decisionId, changed } = await applyDecision({
+          kind: 'merchantRule',
+          match: optimistic.match,
+          set: optimistic.set,
+        });
+        const saved: MappingRule = { ...optimistic, id: decisionId };
+        setRules((prev) => prev.map((r) => (r.id === optimistic.id ? saved : r)));
+        return { rule: saved, changed };
+      } catch (err) {
+        console.warn('Mapping rule write failed:', err);
+        setRules((prev) => prev.filter((r) => r.id !== optimistic.id));
+        throw err;
+      }
     },
     [user?.id]
   );

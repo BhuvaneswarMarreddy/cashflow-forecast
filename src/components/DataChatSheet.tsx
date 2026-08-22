@@ -195,15 +195,22 @@ export default function DataChatSheet({ open, onClose, seed }: {
     if (!m.rule || busy) return;
     setBusy(true);
     try {
-      const saved = await addRule(m.rule);
+      // #130: addRule resolves { rule, changed } now — `changed` is the server's
+      // real count (functions/src/decisions.ts), not the client-side preview
+      // rulePreview() showed before Apply was pressed.
+      const result = await addRule(m.rule);
       setMessages((prev) => [
         ...prev.map((x) => (x.id === m.id ? { ...x, status: 'applied' as const } : x)),
-        mk('assistant', saved
-          ? `Saved — ${describeRule(saved)}. It applies to your existing transactions and every future one.`
+        mk('assistant', result
+          ? `Saved — ${describeRule(result.rule)}. ${result.changed.transactionsMatched} existing transaction${
+              result.changed.transactionsMatched === 1 ? '' : 's'
+            } changed; it applies to every future one too.`
           : 'Sign in to save rules.'),
       ]);
     } catch (e) {
-      setMessages((prev) => [...prev, mk('assistant', callableErrorMessage(e))]);
+      // Not an AI failure — a decision that didn't save — so this is NOT the
+      // default "AI request failed" wording.
+      setMessages((prev) => [...prev, mk('assistant', callableErrorMessage(e, 'That rule could not be saved. Please try again.'))]);
     } finally {
       setBusy(false);
     }
