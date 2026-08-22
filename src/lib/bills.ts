@@ -10,7 +10,7 @@
  * round once, so per-row rounding can never drift a header total.
  */
 
-import { addDays, differenceInCalendarDays, format, isAfter, isBefore, parseISO } from 'date-fns';
+import { addDays, differenceInCalendarDays, format, getDaysInMonth, isAfter, isBefore, parseISO } from 'date-fns';
 
 import type { Transaction } from '@/types';
 
@@ -334,7 +334,12 @@ function projectMonthlyish(bill: Bill, periodMonths: number, today: Date, horizo
   const dates: Date[] = [];
   for (let m = startMonth; m <= endMonth; m++) {
     if (((m - originMonth) % periodMonths + periodMonths) % periodMonths !== 0) continue;
-    const candidate = new Date(Math.floor(m / 12), ((m % 12) + 12) % 12, day);
+    const y = Math.floor(m / 12);
+    const mo = ((m % 12) + 12) % 12;
+    // Clamp, don't let JS Date roll a day-31 bill into next month for a shorter one
+    // (Feb, or any 30-day month) — `new Date(y, mo, 31)` silently normalizes into mo+1.
+    const clampedDay = Math.min(day, getDaysInMonth(new Date(y, mo, 1)));
+    const candidate = new Date(y, mo, clampedDay);
     if (!isBefore(candidate, today) && !isAfter(candidate, horizonEnd)) dates.push(candidate);
   }
   return dates;

@@ -387,4 +387,23 @@ describe('billUpcomingEvents', () => {
     expect(events.map(e => e.dueDate)).toEqual(['2026-08-25', '2026-08-28']);
     expect(events.map(e => e.vendor)).toEqual(['Early Vendor', 'Late Vendor']);
   });
+
+  // Defect 2 (bills.ts:337): `new Date(year, month, 31)` rolls over in any month with
+  // fewer than 31 days — JS Date normalizes the overflow into the FOLLOWING month rather
+  // than clamping. Verified before the fix: autopayDay 31, monthly, Jan 1 + 90 days
+  // produced ['2026-01-31', '2026-03-03', '2026-03-31'] — a phantom "Mar 3" from Feb's
+  // rollover, alongside March's own real 31st.
+  test('autopayDay 31 clamps into February — no phantom rollover into March', () => {
+    const bill = mk(50, 'monthly', { autopayDay: 31 });
+    const events = billUpcomingEvents([bill], '2026-01-01', 90); // horizon ends Apr 1
+    expect(events.map(e => e.dueDate)).toEqual(['2026-01-31', '2026-02-28', '2026-03-31']);
+  });
+
+  test('autopayDay 31 clamps into a 30-day month (Sep), not just February', () => {
+    const bill = mk(50, 'monthly', { autopayDay: 31 });
+    const events = billUpcomingEvents([bill], '2026-09-01', 35); // horizon ends Oct 6
+    // Buggy code rolls Sep 31 -> Oct 1 (a phantom, since Sep only has 30 days); Oct's
+    // own real 31st is excluded by the horizon either way.
+    expect(events.map(e => e.dueDate)).toEqual(['2026-09-30']);
+  });
 });
