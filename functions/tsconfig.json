@@ -39,6 +39,7 @@
     "../src/lib/flow-simple.ts",
     "../src/lib/forecast.ts",
     "../src/lib/home.ts",
+    "../src/lib/mapping-rules.ts",
     "../src/lib/money.ts",
     "../src/lib/palette.ts",
     "../src/lib/transfers.ts",

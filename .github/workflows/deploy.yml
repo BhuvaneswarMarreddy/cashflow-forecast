@@ -9,7 +9,8 @@
 #   2. GitHub → Settings → Secrets → Actions → new secret FIREBASE_TOKEN
 #
 # WHAT SHIPS
-#   functions:api  — aiChat, aiDecision, parseReceipt
+#   functions:api  — aiChat, aiDecision, parseReceipt, homeSnapshot, reviewQueue,
+#     resolveReview, flowSnapshot, flowNodeDetail, importCsv, applyDecision, undoDecision
 #   hosting        — the Next.js app and its SSR function
 #
 # WHAT DELIBERATELY DOES NOT

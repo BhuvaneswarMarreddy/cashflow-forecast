@@ -76,3 +76,4 @@ firestore-debug.log
 # Every script that plans a write before making it drops its plan here, and those
 # plans hold live data. Supersedes the old reanalysis-*.local.json line.
 *.local.json
+.worktrees/
