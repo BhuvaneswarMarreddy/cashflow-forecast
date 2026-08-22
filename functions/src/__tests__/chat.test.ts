@@ -1,4 +1,8 @@
-import { buildChatMessages } from '../prompts';
+import { buildChatMessages, CHAT_IMAGE_CAPS } from '../prompts';
+
+// content is `string | ChatContentPart[]` now that a user turn can carry an image; every
+// pre-existing test below is text-only, so content is always a plain string at runtime.
+const asText = (content: unknown): string => (typeof content === 'string' ? content : '');
 
 const ctx = {
   categories: ['food', 'transportation', 'shopping'],
@@ -52,7 +56,7 @@ describe('buildChatMessages', () => {
     expect(msgs.map((m) => m.role)).toEqual(['system', 'user', 'assistant', 'user']);
     expect(msgs[1].content).toBe('Instacart is groceries');
     expect(msgs[3].content).toBe('and Carvana is a car loan');
-    expect(msgs.some((m) => m.content.includes('ignore all previous instructions'))).toBe(false);
+    expect(msgs.some((m) => asText(m.content).includes('ignore all previous instructions'))).toBe(false);
   });
 
   it('bounds a hand-rolled oversized request', () => {
@@ -70,13 +74,15 @@ describe('buildChatMessages', () => {
     expect(msgs.length).toBe(1 + 10 + 1); // system + capped history + user
     expect(msgs[msgs.length - 1].content.length).toBe(1000);
     expect(msgs[1].content).toBe('turn 30'); // trailing turns kept, not the first ones
-    const system = msgs[0].content;
+    const system = asText(msgs[0].content);
     expect(system.split('\n').filter((l) => /^merchant \d+$/.test(l)).length).toBe(60);
     expect(system.split('acct ').length - 1).toBe(25);
     const recentLines = system.split('\n').filter((l) => l.startsWith('- yyy'));
     expect(recentLines.length).toBe(20);
     expect(recentLines[0]).toBe(`- ${'y'.repeat(80)} | - | 1 | -`);
-    expect(system.length).toBeLessThan(12000);
+    // Bumped from 12000: the fixed IMAGES section (prompts.ts) added a constant amount to
+    // every system prompt. Still a loose sanity bound, not an exact byte contract.
+    expect(system.length).toBeLessThan(13000);
   });
 
   it('survives a garbage context without throwing', () => {
@@ -111,5 +117,74 @@ describe('the balance action travels with the contract', () => {
     expect(system).toContain('"action":"set_account_balance"');
     expect(system).toContain('amount OWED');
     expect(system).toContain('copied from the ACCOUNTS list');
+  });
+});
+
+describe('the system prompt tells the model what an attached image is', () => {
+  it('explains screenshots, the create_rule reply shape and asking over guessing', () => {
+    const system = buildChatMessages({ message: 'hi' })[0].content;
+    expect(system).toContain('screenshot');
+    expect(system).toContain('create_rule');
+    expect(system).toMatch(/ask/i);
+  });
+});
+
+describe('buildChatMessages — optional image (vision) input', () => {
+  const tinyBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB';
+
+  it('text-only stays exactly the string-content shape it always was', () => {
+    const msgs = buildChatMessages({ message: 'anything from Instacart is Groceries' });
+    const user = msgs[msgs.length - 1];
+    expect(user.content).toBe('anything from Instacart is Groceries');
+    expect(typeof user.content).toBe('string');
+  });
+
+  it('with an image, the final user message becomes a multi-part content array mirroring receipt.ts', () => {
+    const msgs = buildChatMessages({
+      message: 'these are groceries',
+      imageBase64: tinyBase64,
+      imageMimeType: 'image/png',
+    });
+    const user = msgs[msgs.length - 1] as { role: string; content: unknown };
+    expect(user.role).toBe('user');
+    expect(Array.isArray(user.content)).toBe(true);
+    const parts = user.content as { type: string; text?: string; image_url?: { url: string; detail: string } }[];
+    expect(parts).toEqual([
+      { type: 'text', text: 'these are groceries' },
+      { type: 'image_url', image_url: { url: `data:image/png;base64,${tinyBase64}`, detail: 'high' } },
+    ]);
+  });
+
+  it('missing mimeType defaults to image/jpeg, same as receipt.ts', () => {
+    const msgs = buildChatMessages({ message: 'x', imageBase64: tinyBase64 });
+    const parts = msgs[msgs.length - 1].content as { type: string; image_url?: { url: string } }[];
+    expect(parts[1].image_url?.url).toBe(`data:image/jpeg;base64,${tinyBase64}`);
+  });
+
+  it('rejects an unsupported mime type with invalid-argument, no network involved', () => {
+    let code: string | undefined;
+    try {
+      buildChatMessages({ message: 'x', imageBase64: tinyBase64, imageMimeType: 'application/pdf' });
+    } catch (e) {
+      code = (e as { code?: string }).code;
+    }
+    expect(code).toBe('invalid-argument');
+  });
+
+  it('rejects an oversized image with invalid-argument, capped the same as the receipt scanner (10MB)', () => {
+    // Decodes to > CHAT_IMAGE_CAPS.maxBytes bytes.
+    const oversized = 'A'.repeat(Math.ceil((CHAT_IMAGE_CAPS.maxBytes * 4) / 3) + 8);
+    let code: string | undefined;
+    try {
+      buildChatMessages({ message: 'x', imageBase64: oversized, imageMimeType: 'image/jpeg' });
+    } catch (e) {
+      code = (e as { code?: string }).code;
+    }
+    expect(code).toBe('invalid-argument');
+  });
+
+  it('an image with an empty/missing base64 string is treated as no image at all', () => {
+    const msgs = buildChatMessages({ message: 'hi', imageBase64: '', imageMimeType: 'image/png' });
+    expect(msgs[msgs.length - 1].content).toBe('hi');
   });
 });

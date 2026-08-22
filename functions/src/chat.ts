@@ -20,46 +20,61 @@ const UNAVAILABLE = {
   explanation: 'AI chat is temporarily unavailable. You can add the rule by hand in Settings.',
 };
 
-export const aiChat = onCall({ secrets: ['OPENAI_API_KEY'], cors: true }, async (request) => {
-  if (!request.auth) {
-    throw new HttpsError('unauthenticated', 'Sign in to use AI features.');
-  }
-  await checkRateLimit(request.auth.uid, 'aiChat', LIMITS.aiChat);
+export const aiChat = onCall(
+  {
+    secrets: ['OPENAI_API_KEY'],
+    cors: true,
+    // A base64 screenshot can ride along now (see prompts.ts's CHAT_IMAGE_CAPS) — same
+    // room receipt.ts gives its vision calls.
+    memory: '512MiB',
+    timeoutSeconds: 120,
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign in to use AI features.');
+    }
+    await checkRateLimit(request.auth.uid, 'aiChat', LIMITS.aiChat);
 
-  const body = (request.data || {}) as AiChatRequest;
-  if (typeof body.message !== 'string' || !body.message.trim()) {
-    throw new HttpsError('invalid-argument', 'Message is required.');
-  }
+    const body = (request.data || {}) as AiChatRequest;
+    if (typeof body.message !== 'string' || !body.message.trim()) {
+      throw new HttpsError('invalid-argument', 'Message is required.');
+    }
 
-  if (!process.env.OPENAI_API_KEY) {
-    throw new HttpsError('unavailable', 'AI service not configured');
-  }
+    if (!process.env.OPENAI_API_KEY) {
+      throw new HttpsError('unavailable', 'AI service not configured');
+    }
 
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    // Built (and validated — CHAT_IMAGE_CAPS) outside the try below, so a bad image throws
+    // its real invalid-argument code instead of being flattened into the generic 'internal'
+    // catch-all meant for OpenAI call failures.
+    const messages = buildChatMessages(body);
 
-  try {
-    const completion = await openai.chat.completions.create({
-      model: AI_CONFIG.model,
-      temperature: 0,
-      max_tokens: 500,
-      response_format: { type: 'json_object' },
-      messages: buildChatMessages(body),
-    });
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-    const content = completion.choices[0]?.message?.content || '';
     try {
-      return { success: true, result: JSON.parse(content) };
-    } catch {
-      // JSON mode failed us — hand the text back as a plain answer rather than 500.
-      return { success: true, result: { action: 'answer', explanation: content || UNAVAILABLE.explanation } };
-    }
-  } catch (error: unknown) {
-    const err = error as { code?: string; status?: number };
-    console.error('AI Chat Error:', error);
+      const completion = await openai.chat.completions.create({
+        model: AI_CONFIG.model,
+        temperature: 0,
+        max_tokens: 500,
+        response_format: { type: 'json_object' },
+        messages,
+      });
 
-    if (err?.code === 'insufficient_quota' || err?.status === 429) {
-      return { success: true, result: UNAVAILABLE, fallback: true };
+      const content = completion.choices[0]?.message?.content || '';
+      try {
+        return { success: true, result: JSON.parse(content) };
+      } catch {
+        // JSON mode failed us — hand the text back as a plain answer rather than 500.
+        return { success: true, result: { action: 'answer', explanation: content || UNAVAILABLE.explanation } };
+      }
+    } catch (error: unknown) {
+      const err = error as { code?: string; status?: number };
+      console.error('AI Chat Error:', error);
+
+      if (err?.code === 'insufficient_quota' || err?.status === 429) {
+        return { success: true, result: UNAVAILABLE, fallback: true };
+      }
+      throw new HttpsError('internal', 'Failed to process request');
     }
-    throw new HttpsError('internal', 'Failed to process request');
   }
-});
+);
