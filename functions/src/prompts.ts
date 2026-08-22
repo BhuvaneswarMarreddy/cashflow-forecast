@@ -281,19 +281,49 @@ export const CHAT_IMAGE_CAPS = {
 };
 
 /**
- * Validate an attached image and return the mime type to use. Pure — throws HttpsError
- * directly (no Firebase Admin, no network), same 'invalid-argument' code receipt.ts uses
- * for its one check ("No file provided").
+ * Validate base64 image data and return the mime type to use. Pure — throws HttpsError
+ * directly (no Firebase Admin, no network), same 'invalid-argument' code receipt.ts uses.
+ * Validates: typeof string, base64 alphabet, size, and mime type.
+ *
+ * @param imageBase64 - The base64-encoded image data
+ * @param imageMimeType - The claimed mime type (uses default 'image/jpeg' if not provided)
+ * @param allowedMimes - Array of allowed mime types (e.g., ['image/jpeg', 'image/png'])
+ * @param maxBytes - Maximum size in bytes (e.g., 10MB = 10 * 1024 * 1024)
+ * @returns The validated mime type
+ * @throws HttpsError with code 'invalid-argument' on any validation failure
  */
-function validateChatImage(imageBase64: string, imageMimeType: string | undefined): string {
+export function validateImageBase64(
+  imageBase64: unknown,
+  imageMimeType: string | undefined,
+  allowedMimes: readonly string[],
+  maxBytes: number
+): string {
+  // DEFECT 2: Require typeof string FIRST to close non-string truthy values
+  if (typeof imageBase64 !== 'string') {
+    throw new HttpsError('invalid-argument', 'Image data must be a string.');
+  }
+
+  // DEFECT 1: Validate base64 alphabet before byteLength — rejects wide-char encoding attacks
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(imageBase64)) {
+    throw new HttpsError('invalid-argument', 'Invalid base64 format.');
+  }
+
   const mime = typeof imageMimeType === 'string' && imageMimeType ? imageMimeType : 'image/jpeg';
-  if (!CHAT_IMAGE_CAPS.mimeTypes.includes(mime)) {
+  if (!allowedMimes.includes(mime)) {
     throw new HttpsError('invalid-argument', 'Unsupported image type.');
   }
-  if (Buffer.byteLength(imageBase64, 'base64') > CHAT_IMAGE_CAPS.maxBytes) {
+  if (Buffer.byteLength(imageBase64, 'base64') > maxBytes) {
     throw new HttpsError('invalid-argument', 'Image is too large.');
   }
   return mime;
+}
+
+/**
+ * Validate an attached image for aiChat and return the mime type to use.
+ * Specialization of validateImageBase64 with chat-specific caps.
+ */
+function validateChatImage(imageBase64: string, imageMimeType: string | undefined): string {
+  return validateImageBase64(imageBase64, imageMimeType, CHAT_IMAGE_CAPS.mimeTypes, CHAT_IMAGE_CAPS.maxBytes);
 }
 
 /** Server-side caps. The client already trims; this bounds a hand-rolled request. */
