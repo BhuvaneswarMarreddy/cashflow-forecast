@@ -74,6 +74,9 @@ interface ChatMessage {
     | { kind: 'add'; label: string; icon?: string }
     | { kind: 'rename'; value: string; label: string }
     | { kind: 'remove'; value: string; reassignTo: string };
+  /** cashflow-mobile#25: set when the assistant answered with a table instead of
+   *  prose. DISPLAY ONLY — never gets a `status`, never an Apply button. */
+  report?: { columns: string[]; rows: (string | number)[][]; note?: string };
   status?: 'pending' | 'applied';
 }
 
@@ -371,6 +374,10 @@ export default function DataChatSheet({ open, onClose, seed }: {
                 category: { kind: 'remove', value: reply.value, reassignTo: reply.reassignTo },
                 status: 'pending',
               })
+          : reply?.action === 'report'
+            // cashflow-mobile#25: no `status` — a report is never pending, never
+            // applied, and DataChatSheet never renders it an Apply button.
+            ? mk('assistant', reply.title, { report: { columns: reply.columns, rows: reply.rows, note: reply.note } })
             : mk('assistant', explanation
               || "I got a reply I couldn't read. Try saying it as a rule — for example “Turo is Travel”."),
       ]);
@@ -805,6 +812,7 @@ export default function DataChatSheet({ open, onClose, seed }: {
                   onCancel={() => dismiss(m.id)}
                 />
               )}
+              {m.report && <ReportCard report={m.report} />}
             </div>
           </div>
         ))}
@@ -1220,6 +1228,56 @@ function CategoryProposalCard({
         Nothing is left pointing at the removed category.
       </p>
       {buttons}
+    </div>
+  );
+}
+
+/**
+ * cashflow-mobile#25. "What did I spend this month, and on what" as a table instead of
+ * a paragraph. DISPLAY ONLY — no `pending`/`applied` status, no Apply/Cancel: the table
+ * itself is the whole answer, same as a plain "answer" bubble.
+ *
+ * Alignment is per-CELL, not per-column: every cell the parser accepted as a number
+ * (never a formatted string like "$120.00" — chat-actions.ts rejects that) renders
+ * right-aligned and tabular; every string cell (a category, a month label) stays left.
+ */
+function ReportCard({ report }: { report: NonNullable<ChatMessage['report']> }) {
+  return (
+    <div className="mt-3 rounded-card border border-[var(--border-color)] bg-[var(--background)] p-3">
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-[var(--border-color)]">
+              {report.columns.map((c, i) => (
+                <th
+                  key={i}
+                  scope="col"
+                  className={`py-1.5 px-2 font-medium text-[var(--foreground-secondary)] whitespace-nowrap ${i === 0 ? 'text-left' : 'text-right'}`}
+                >
+                  {c}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[var(--border-color)]">
+            {report.rows.map((row, ri) => (
+              <tr key={ri}>
+                {row.map((cell, ci) => (
+                  <td
+                    key={ci}
+                    className={`py-1.5 px-2 text-[var(--foreground)] ${
+                      typeof cell === 'number' ? 'text-right tabular-nums' : 'text-left'
+                    }`}
+                  >
+                    {typeof cell === 'number' ? cell.toLocaleString(undefined, { maximumFractionDigits: 2 }) : cell}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {report.note && <p className="mt-2 text-xs text-[var(--foreground-muted)]">{report.note}</p>}
     </div>
   );
 }

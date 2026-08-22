@@ -1059,3 +1059,75 @@ describe('the remove_category proposal card', () => {
     await waitFor(() => expect(updateBill).toHaveBeenCalledWith('user-1', 'bill-vac', { category: 'other' }));
   });
 });
+
+/**
+ * cashflow-mobile#25. "What did I spend this month, and on what" used to come back as
+ * a paragraph. This is the table rendering: a `report` action becomes a semantic table,
+ * never a write, never an Apply button — the table itself IS the answer.
+ */
+describe('the report card (cashflow-mobile#25) — a DISPLAY-ONLY table, never an Apply button', () => {
+  const proposal = (over: Record<string, unknown> = {}) => ({
+    success: true,
+    result: {
+      action: 'report',
+      title: 'Spending by category, August 2026',
+      columns: ['Category', 'Spent'],
+      rows: [['Groceries', 412.5], ['Dining', 88]],
+      note: 'Top 2 of 9 categories shown.',
+      ...over,
+    },
+  });
+
+  it('renders the title, table headers, rows (numbers formatted) and the note', async () => {
+    aiChat.mockResolvedValue(proposal());
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('what did I spend this month, and on what');
+
+    expect(await screen.findByText('Spending by category, August 2026')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Category' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Spent' })).toBeInTheDocument();
+    expect(screen.getByText('Groceries')).toBeInTheDocument();
+    expect(screen.getByText('412.5')).toBeInTheDocument();
+    expect(screen.getByText('Dining')).toBeInTheDocument();
+    expect(screen.getByText('88')).toBeInTheDocument();
+    expect(screen.getByText('Top 2 of 9 categories shown.')).toBeInTheDocument();
+  });
+
+  it('never offers Apply or Cancel — the table itself is the whole answer, nothing to confirm', async () => {
+    aiChat.mockResolvedValue(proposal());
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('what did I spend this month, and on what');
+
+    await screen.findByRole('table');
+    expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Applied')).not.toBeInTheDocument();
+    // Nothing this action could possibly write is ever called.
+    expect(updateProfile).not.toHaveBeenCalled();
+    expect(addBill).not.toHaveBeenCalled();
+    expect(addRule).not.toHaveBeenCalled();
+  });
+
+  it('renders with no note when the model gave none — nothing extra shown', async () => {
+    const { note: _note, ...withoutNote } = proposal().result;
+    aiChat.mockResolvedValue({ success: true, result: withoutNote });
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('what did I spend this month, and on what');
+
+    await screen.findByRole('table');
+    expect(screen.queryByText('Top 2 of 9 categories shown.')).not.toBeInTheDocument();
+  });
+
+  it('a report with a payload the parser rejects falls back to plain text, exactly like any other refused action', async () => {
+    // Ragged row — chat-actions.ts rejects this outright.
+    aiChat.mockResolvedValue({
+      success: true,
+      result: { action: 'report', title: 'Bad table', columns: ['A', 'B'], rows: [['only-one']] },
+    });
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('what did I spend this month, and on what');
+
+    expect(await screen.findByText(/I got a reply I couldn't read/)).toBeInTheDocument();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+  });
+});
