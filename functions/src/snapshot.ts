@@ -22,7 +22,7 @@ import { HttpsError, onCall } from 'firebase-functions/v2/https';
 
 import { currentOf, isUnanchored, sortAccounts } from '@/lib/accounts';
 import { nonNegotiableMonthly, type Bill } from '@/lib/bills';
-import { isPositive, type IncomeContext } from '@/lib/classify';
+import { isPositive, withoutSupersededHolds, type IncomeContext } from '@/lib/classify';
 import {
   calculateCurrentCash,
   generateForecast,
@@ -30,6 +30,7 @@ import {
   withDerivedBalances,
 } from '@/lib/forecast';
 import { RESERVE_TARGET_MONTHS, homeSummary, runwayLabel } from '@/lib/home';
+import { applyMappingRules, type MappingRule } from '@/lib/mapping-rules';
 import type {
   ForecastEvent,
   InflowReview,
@@ -67,7 +68,32 @@ export interface Ledger {
   includePending: boolean;
   /** `meta/plaid.lastSuccess` — when the banks were last actually reached. */
   lastBankSyncAt: string | null;
+  /** The owner's mapping rules, newest first — same precedence order as
+   *  TransactionContext. Exposed on the ledger (not just applied and dropped)
+   *  so a later derivation can explain WHY a row looks the way it does. */
+  rules: MappingRule[];
 }
+
+/**
+ * Rules then holds — TransactionContext's exact order, verified at
+ * src/context/TransactionContext.tsx:174-181: every row is passed through the
+ * owner's mapping rules first, and the superseded-hold guard runs on THAT
+ * result. Neither step is order-sensitive today — no rule's `set` touches the
+ * `pending`/`pendingTransactionId` fields the hold guard reads — but this
+ * callable and the browser must share one derivation, not two orders that
+ * happen to agree by coincidence.
+ *
+ * Every `readLedger` caller (`homeSnapshot`, `reviewQueue`, `flowSnapshot`,
+ * `flowNodeDetail`) gets this for free because it runs inside `readLedger`,
+ * not once per caller.
+ */
+export const interpretLedgerRows = (
+  transactions: Transaction[],
+  rules: MappingRule[],
+): Transaction[] =>
+  withoutSupersededHolds(
+    rules.length ? transactions.map((t) => applyMappingRules(t, rules)) : transactions,
+  );
 
 /**
  * Everything one derivation needs, in one round of parallel reads.
@@ -79,7 +105,7 @@ export interface Ledger {
 export async function readLedger(uid: string): Promise<Ledger> {
   const user = getFirestore().collection('users').doc(uid);
 
-  const [userDoc, plaidMeta, accounts, transactions, income, reviews, bills, goals] =
+  const [userDoc, plaidMeta, accounts, rawTransactions, income, reviews, bills, goals, rulesDocs] =
     await Promise.all([
     user.get(),
     // The ONLY real sync timestamp in the system. Written by `_guarded` /
@@ -92,6 +118,9 @@ export async function readLedger(uid: string): Promise<Ledger> {
     user.collection('reviews').get(),
     user.collection('bills').get(),
     user.collection('goals').get(),
+    // Own subcollection, same as TransactionContext — never `settings`, which
+    // is rebuilt from a hardcoded whitelist and would silently drop these.
+    user.collection('rules').get(),
   ]);
 
   const settings = (userDoc.data()?.settings ?? {}) as {
@@ -99,15 +128,26 @@ export async function readLedger(uid: string): Promise<Ledger> {
     includePendingInCalculations?: boolean;
   };
 
+  const rules = rulesDocs.docs
+    .map((d) => ({ ...(d.data() as Omit<MappingRule, 'id'>), id: d.id }))
+    // Newest first = highest precedence — a later correction beats an older
+    // rule without deleting it. Mirrors TransactionContext's `rules` load.
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+
+  const transactions = interpretLedgerRows(
+    rawTransactions.docs.map((d) => {
+      const data = d.data();
+      return { ...data, id: d.id, date: toIso(data.date) ?? data.date } as Transaction;
+    }),
+    rules,
+  );
+
   return {
     lastBankSyncAt: toIso(plaidMeta.data()?.lastSuccess),
     accounts: sortAccounts(
       accounts.docs.map((d) => ({ id: d.id, ...d.data() }) as PaymentAccount),
     ),
-    transactions: transactions.docs.map((d) => {
-      const data = d.data();
-      return { ...data, id: d.id, date: toIso(data.date) ?? data.date } as Transaction;
-    }),
+    transactions,
     incomeSources: income.docs.map((d) => ({ id: d.id, ...d.data() }) as IncomeSource),
     reviews: Object.fromEntries(
       reviews.docs.map((d) => [d.id, { ...(d.data() as InflowReview), transactionId: d.id }]),
@@ -124,6 +164,7 @@ export async function readLedger(uid: string): Promise<Ledger> {
     goals: goals.docs.map((d) => ({ id: d.id, ...d.data() }) as SavingsGoal),
     safetyThreshold: settings.safetyThreshold ?? DEFAULT_SAFETY_THRESHOLD,
     includePending: settings.includePendingInCalculations ?? false,
+    rules,
   };
 }
 
