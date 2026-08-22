@@ -10,7 +10,7 @@
  */
 import { buildSnapshot } from '../snapshot';
 import type { Ledger } from '../snapshot';
-import type { Bill } from '@/lib/bills';
+import { nonNegotiableMonthly, type Bill } from '@/lib/bills';
 import type { PaymentAccount, Transaction } from '@/types';
 
 const checking: PaymentAccount = {
@@ -138,6 +138,13 @@ describe('the Bills register feeds Upcoming (display only)', () => {
     expect(withBill.snapshot.avgMonthlySpendCents).toBe(withoutBill.snapshot.avgMonthlySpendCents);
     expect(withBill.snapshot.runway.days).toBe(withoutBill.snapshot.runway.days);
     expect(withBill.snapshot.runway.hasBurn).toBe(withoutBill.snapshot.runway.hasBurn);
+    // lockedMonthlyCents is a pure function of ledger.bills (nonNegotiableMonthly) — the
+    // same guard extends to it: real transaction history (the `rent` row) must change
+    // nothing here, AND the figure itself must be the bill's own monthly-normalized cost
+    // pinned exactly, not merely "some positive number" — the weaker toBeGreaterThan(0)
+    // assertion below (BILLS-003) would not catch a formula that computed the wrong value.
+    expect(withoutBill.snapshot.lockedMonthlyCents).toBe(0);
+    expect(withBill.snapshot.lockedMonthlyCents).toBe(Math.round(nonNegotiableMonthly([installmentBill]) * 100));
   });
 
   it('a non-negotiable bill still reaches lockedMonthlyCents (BILLS-003, unchanged wiring)', () => {
