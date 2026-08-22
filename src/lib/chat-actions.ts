@@ -94,8 +94,23 @@ export type RecoveryAction =
   | { action: 'mark_subscription_cancelled'; candidateId: string; effectiveDate: string; reason: string }
   | { action: 'dismiss_review_candidate'; candidateId: string; reason: string };
 
+/**
+ * cashflow-mobile#25. A breakdown/comparison answer rendered as a table instead of a
+ * paragraph — "what did I spend this month, and on what" as rows, not a wall of prose.
+ * DISPLAY ONLY: unlike every proposal action above, this never reaches a write path and
+ * DataChatSheet never offers it an Apply button — the table itself IS the whole answer.
+ */
+export interface ReportAction {
+  action: 'report';
+  title: string;
+  columns: string[];
+  rows: (string | number)[][];
+  note?: string;
+}
+
 export type ChatAction =
   | { action: 'answer'; explanation: string }
+  | ReportAction
   | { action: 'create_rule'; rule: NewMappingRule; explanation: string }
   /** Proposes a balance re-anchor. accountName resolves CLIENT-side against the
    *  owner's real account list; an ambiguous or unknown name renders no button. */
@@ -197,6 +212,14 @@ const MAX = {
   categoryLabel: 40,
   categoryValue: 32,
   categoryIcon: 4,
+  // cashflow-mobile#25 — report (a table). Rejected when oversized, never silently
+  // clipped: a truncated column header or a chopped dollar figure is a WRONG table.
+  reportTitle: 80,
+  reportColumns: 6,
+  reportColumnLabel: 24,
+  reportRows: 30,
+  reportCell: 40,
+  reportNote: 200,
 } as const;
 
 // The DEFAULT category set — used as the fallback everywhere a caller does not (yet)
@@ -301,6 +324,18 @@ function str(v: unknown, max: number): string | null {
   if (typeof v !== 'string') return null;
   const s = clip(v, max);
   return s || null;
+}
+
+/**
+ * A trimmed string whose length falls inside [min, max], or null — REJECTED, never
+ * clipped. report's title/columns/cells use this instead of str(): a table where a
+ * column header or a dollar figure got silently chopped to fit is a wrong table, not
+ * a smaller one, so an oversized value here throws the whole action out.
+ */
+function boundedStr(v: unknown, min: number, max: number): string | null {
+  if (typeof v !== 'string') return null;
+  const s = v.trim();
+  return s.length >= min && s.length <= max ? s : null;
 }
 
 function parseRule(raw: unknown, allowedCategories: readonly string[]): NewMappingRule | null {
@@ -595,6 +630,52 @@ export function parseChatAction(
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const action = (raw as Record<string, unknown>).action;
   if (typeof action !== 'string') return null;
+
+  // cashflow-mobile#25 — report. A DISPLAY-ONLY table: no write, no Apply. Validated as
+  // strictly as every other action, and oversized pieces are REJECTED, not truncated —
+  // see boundedStr's doc comment.
+  if (action === 'report') {
+    const o = record(raw, ['action', 'title', 'columns', 'rows', 'note']);
+    if (!o) return null;
+
+    const title = boundedStr(o.title, 1, MAX.reportTitle);
+    if (!title) return null;
+
+    if (!Array.isArray(o.columns) || !o.columns.length || o.columns.length > MAX.reportColumns) return null;
+    const columns: string[] = [];
+    for (const c of o.columns) {
+      const label = boundedStr(c, 1, MAX.reportColumnLabel);
+      if (!label) return null;
+      columns.push(label);
+    }
+
+    if (!Array.isArray(o.rows) || o.rows.length > MAX.reportRows) return null;
+    const rows: (string | number)[][] = [];
+    for (const r of o.rows) {
+      if (!Array.isArray(r) || r.length !== columns.length) return null;
+      const row: (string | number)[] = [];
+      for (const cell of r) {
+        if (typeof cell === 'number') {
+          if (!Number.isFinite(cell)) return null;
+          row.push(cell);
+        } else {
+          const s = boundedStr(cell, 0, MAX.reportCell);
+          if (s === null) return null;
+          row.push(s);
+        }
+      }
+      rows.push(row);
+    }
+
+    let note: string | undefined;
+    if (o.note !== undefined) {
+      const n = boundedStr(o.note, 1, MAX.reportNote);
+      if (!n) return null;
+      note = n;
+    }
+
+    return { action: 'report', title, columns, rows, ...(note !== undefined ? { note } : {}) };
+  }
 
   if (action === 'set_account_balance') {
     const o = record(raw, ['action', 'accountName', 'balance', 'reason']);
