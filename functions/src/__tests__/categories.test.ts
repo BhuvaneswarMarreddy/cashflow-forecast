@@ -93,8 +93,11 @@ describe('buildSnapshot — categories payload (cashflow-mobile#24)', () => {
       ],
     });
 
-    const { categories: _c1, ...snapshotWithout } = without;
-    const { categories: _c2, ...snapshotWithCustom } = withCustom;
+    // `generatedAt` is wall-clock and the two builds are milliseconds apart —
+    // comparing it compares the clock, not the figures. Everything else must
+    // be identical.
+    const { categories: _c1, generatedAt: _g1, ...snapshotWithout } = without;
+    const { categories: _c2, generatedAt: _g2, ...snapshotWithCustom } = withCustom;
     expect(snapshotWithCustom).toEqual(snapshotWithout);
   });
 });
