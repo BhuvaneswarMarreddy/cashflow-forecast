@@ -9,3 +9,4 @@ export { homeSnapshot } from './snapshot';
 export { importCsv } from './importCsv';
 export { flowSnapshot, flowNodeDetail } from './flow';
 export { reviewQueue, resolveReview } from './review';
+export { applyDecision } from './decisions';
