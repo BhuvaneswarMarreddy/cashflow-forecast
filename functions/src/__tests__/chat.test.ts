@@ -94,7 +94,12 @@ describe('buildChatMessages', () => {
     // the paragraph teaching the model to extract it (an installment screenshot's "Next
     // installment on <date>"), needed so weekly/quarterly/etc. chat-recorded bills get an
     // anchorDate. Measured worst-case went 15980 -> 16506 (+526 chars).
-    expect(system.length).toBeLessThan(16700);
+    // Bumped again from 16506 (#22): three new context sections (BILLS REGISTER, UPCOMING,
+    // DETECTED RECURRING MERCHANTS — this test's context supplies none of them, so this is
+    // just the headers/placeholders/omitted-lines) plus the two teaching paragraphs (answer
+    // bill/recurring questions from them; check both before proposing record_bill). Measured
+    // worst-case went 16506 -> 17775 (+1269 chars).
+    expect(system.length).toBeLessThan(18000);
   });
 
   it('survives a garbage context without throwing', () => {
@@ -186,6 +191,82 @@ describe('the record_bill action travels with the contract', () => {
     const system = buildChatMessages({ message: 'record my iPhone installment' })[0].content;
     expect(system).toContain('nextDueDate');
     expect(system).toMatch(/next installment on/i);
+  });
+});
+
+/**
+ * #22 (cashflow-mobile). The chat could WRITE bills (record_bill above) but could not
+ * SEE them: "is X already on my bills" and "what are my current recurring payments"
+ * both got "I do not have that information" because ChatContext never carried the
+ * Bills register, the forecast's Upcoming events, or the app's own recurring-merchant
+ * detection. These three sections close that gap.
+ */
+describe('ChatContext — bills/upcoming/recurring sections (#22)', () => {
+  const stateCtx = {
+    ...ctx,
+    bills: [
+      { vendor: 'Verizon Wireless', amount: 85, frequency: 'monthly', nonNegotiable: true },
+      { vendor: 'Apple Card installment - iPhone', amount: 45.79, frequency: 'weekly', installmentsRemaining: 12 },
+    ],
+    upcoming: [{ name: 'Verizon Wireless', dueDate: '2026-09-01', amount: 85 }],
+    recurring: [{ merchant: 'NETFLIX', amount: 15.49, cadence: 'monthly' }],
+  };
+
+  it('renders the bills register, upcoming and detected recurring merchants sections', () => {
+    const system = buildChatMessages({ message: 'what bills do I have', context: stateCtx })[0].content;
+    expect(system).toContain('BILLS REGISTER');
+    expect(system).toContain('Verizon Wireless');
+    expect(system).toContain('85.00');
+    expect(system).toContain('monthly');
+    expect(system).toContain('12 left');
+    expect(system).toContain('UPCOMING');
+    expect(system).toContain('2026-09-01');
+    expect(system).toContain('DETECTED RECURRING MERCHANTS');
+    expect(system).toContain('NETFLIX');
+    expect(system).toContain('15.49');
+  });
+
+  it('says so explicitly when no bills/upcoming/recurring were supplied', () => {
+    const system = buildChatMessages({ message: 'hi' })[0].content;
+    expect(system).toContain('BILLS REGISTER');
+    expect(system).toMatch(/\(none recorded\)/);
+    expect(system).toMatch(/\(none detected\)/);
+  });
+
+  it('caps bills/upcoming/recurring and reports what was left out, same convention as merchants/months', () => {
+    const msgs = buildChatMessages({
+      message: 'x',
+      context: {
+        bills: Array.from({ length: 200 }, (_, i) => ({ vendor: `Vendor ${i}`, amount: 10, frequency: 'monthly' })),
+        upcoming: Array.from({ length: 200 }, (_, i) => ({ name: `Bill ${i}`, dueDate: '2026-09-01', amount: 10 })),
+        recurring: Array.from({ length: 200 }, (_, i) => ({ merchant: `Merchant ${i}`, amount: 10, cadence: 'monthly' })),
+      },
+    });
+    const system = asText(msgs[0].content);
+    expect(system).toMatch(/and \d+ more bills not listed/);
+    expect(system).toMatch(/and \d+ more upcoming items not listed/);
+    expect(system).toMatch(/and \d+ more recurring merchants not listed/);
+  });
+
+  it('survives a garbage bills/upcoming/recurring context without throwing', () => {
+    const msgs = buildChatMessages({
+      message: 'hi',
+      context: { bills: [null, { vendor: 'Real Vendor' }] as never, recurring: [{ amount: NaN }] as never },
+    });
+    expect(asText(msgs[0].content)).toContain('Real Vendor');
+  });
+
+  it('teaches the model to answer bills/upcoming/recurring questions from these app-computed sections, not claim it has no information', () => {
+    const system = buildChatMessages({ message: 'what are my current recurring payments' })[0].content;
+    expect(system).toMatch(/BILLS REGISTER[\s\S]*UPCOMING[\s\S]*DETECTED RECURRING MERCHANTS/);
+    expect(system).toMatch(/answer questions about current bills.*recurring.*directly from them/i);
+  });
+
+  it('tells the model to check for an existing bill or recurring merchant BEFORE proposing record_bill — never propose a duplicate', () => {
+    const system = buildChatMessages({ message: 'record my iPhone installment' })[0].content;
+    expect(system).toMatch(/before proposing record_bill/i);
+    expect(system).toMatch(/already (recorded|exists|detected)/i);
+    expect(system).toMatch(/instead of proposing (a )?duplicate/i);
   });
 });
 
