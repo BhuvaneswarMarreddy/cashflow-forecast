@@ -10,6 +10,7 @@
  * beats the older one without anyone having to delete anything.
  */
 
+import { withoutSupersededHolds } from '@/lib/classify';
 import { EXPENSE_CATEGORIES, ExpenseCategory, Transaction, TransactionType } from '@/types';
 
 /**
@@ -104,6 +105,24 @@ export function applyMappingRules<T extends Partial<Transaction>>(txn: T, rules:
   const changes = definedSet(hit.set);
   return Object.keys(changes).length ? { ...txn, ...changes } : txn;
 }
+
+/**
+ * Rules then holds — TransactionContext's exact order, verified at
+ * src/context/TransactionContext.tsx:176-181: every row is passed through the
+ * owner's mapping rules first, and the superseded-hold guard runs on THAT
+ * result. Neither step is order-sensitive today — no rule's `set` touches the
+ * `pending`/`pendingTransactionId` fields the hold guard reads — but the
+ * browser and every server derivation built on this (`readLedger` and, through
+ * it, `homeSnapshot`/`reviewQueue`/`flowSnapshot`/`flowNodeDetail`) must share
+ * ONE derivation, not two orders that happen to agree by coincidence.
+ */
+export const interpretLedgerRows = (
+  transactions: Transaction[],
+  rules: MappingRule[],
+): Transaction[] =>
+  withoutSupersededHolds(
+    rules.length ? transactions.map((t) => applyMappingRules(t, rules)) : transactions,
+  );
 
 /** Whether applying this rule's `set` would actually alter the row. */
 function wouldChange(txn: Partial<Transaction>, set: MappingRule['set']): boolean {

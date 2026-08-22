@@ -16,6 +16,7 @@ import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 
 import { applyMappingRules, definedSet, type MappingRule, type RuleMatch } from '@/lib/mapping-rules';
+import { EXPENSE_CATEGORIES, type TransactionType } from '@/types';
 
 import { readLedger, type Ledger } from './snapshot';
 
@@ -35,6 +36,18 @@ export type ChangeSummary = { transactionsMatched: number; monthsAffected: strin
 
 const MATCH_FIELDS: RuleMatch['field'][] = ['merchant', 'title', 'description'];
 const MATCH_OPS: RuleMatch['op'][] = ['contains', 'equals'];
+const MATCH_DIRECTIONS: NonNullable<RuleMatch['direction']>[] = ['inflow', 'outflow'];
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+// The exact four keys `MappingRule['set']` has — anything else must never reach
+// Firestore, since the Admin SDK write below is the ONLY gate (firestore.rules
+// does not check `set` at all, see isValidMappingRuleShape).
+const SET_KEYS: (keyof MappingRule['set'])[] = ['category', 'sourceCategory', 'type', 'merchant'];
+const EXPENSE_CATEGORY_VALUES = new Set(EXPENSE_CATEGORIES.map((c) => c.value));
+const SET_TYPES: TransactionType[] = ['expense', 'income', 'transfer'];
+
+const isBoundedString = (v: unknown, max = 200): boolean =>
+  typeof v === 'string' && v.length >= 1 && v.length <= max;
 
 /**
  * Hand validation at the trust boundary, mirroring `firestore.rules:71-83`
@@ -64,6 +77,39 @@ export function validateOp(op: DecisionOp): void {
   }
   if (typeof match.value !== 'string' || match.value.length < 1 || match.value.length > 200) {
     throw new HttpsError('invalid-argument', 'Match value must be 1-200 characters.');
+  }
+  // MAP-001's optional qualifiers — absent is always valid (any direction, any
+  // account, all history); present means it must be well-formed.
+  if (match.direction !== undefined && !MATCH_DIRECTIONS.includes(match.direction)) {
+    throw new HttpsError('invalid-argument', 'Malformed match direction.');
+  }
+  if (match.accountId !== undefined && !isBoundedString(match.accountId)) {
+    throw new HttpsError('invalid-argument', 'Malformed match account.');
+  }
+  if (match.onOrAfter !== undefined && (typeof match.onOrAfter !== 'string' || !ISO_DATE.test(match.onOrAfter))) {
+    throw new HttpsError('invalid-argument', 'Malformed match date.');
+  }
+
+  // `set` itself: exactly the four keys MappingRule['set'] has, and each present
+  // value well-formed. Every field is read defensively — `op.set` is
+  // attacker-controlled JSON, not a `MappingRule['set']`.
+  const set = (op.set ?? {}) as Record<string, unknown>;
+  for (const key of Object.keys(set)) {
+    if (!SET_KEYS.includes(key as keyof MappingRule['set'])) {
+      throw new HttpsError('invalid-argument', `Unknown set field "${key}".`);
+    }
+  }
+  if (set.category !== undefined && !EXPENSE_CATEGORY_VALUES.has(set.category as never)) {
+    throw new HttpsError('invalid-argument', 'Malformed category.');
+  }
+  if (set.type !== undefined && !SET_TYPES.includes(set.type as TransactionType)) {
+    throw new HttpsError('invalid-argument', 'Malformed type.');
+  }
+  if (set.sourceCategory !== undefined && !isBoundedString(set.sourceCategory)) {
+    throw new HttpsError('invalid-argument', 'Malformed sourceCategory.');
+  }
+  if (set.merchant !== undefined && !isBoundedString(set.merchant)) {
+    throw new HttpsError('invalid-argument', 'Malformed merchant.');
   }
 
   if (!op.set || Object.keys(definedSet(op.set)).length === 0) {
@@ -96,7 +142,10 @@ export function applyDecisionCore(
 
   const ruleDoc: Omit<MappingRule, 'id'> = {
     match: op.match,
-    set: op.set,
+    // Firestore rejects `undefined` values outright; `definedSet` is the same
+    // guard the browser applies at TransactionContext.tsx:193 before its own
+    // `setDoc`, so neither write path can persist an undefined/null-laden set.
+    set: definedSet(op.set),
     createdAt: now,
     enabled: true,
   };
@@ -207,6 +256,12 @@ export const undoDecision = onCall({ cors: true }, async (request) => {
   const { decisionId } = (request.data ?? {}) as { decisionId?: string };
   if (!decisionId) {
     throw new HttpsError('invalid-argument', 'Which decision?');
+  }
+  // A doc id containing '/' changes the path .doc() resolves — e.g.
+  // `rules/evil` would target a different collection entirely, not the rule
+  // it looks like it names. Reject before it ever reaches a ref.
+  if (decisionId.includes('/')) {
+    throw new HttpsError('invalid-argument', 'Malformed decision id.');
   }
 
   const user = getFirestore().collection('users').doc(request.auth.uid);

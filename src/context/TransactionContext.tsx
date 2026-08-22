@@ -5,10 +5,10 @@ import { Transaction, PaymentAccount, PaymentMethod, ExpenseCategory } from '@/t
 import { useAuth } from './AuthContext';
 import * as firestoreService from '@/lib/firestore';
 import { db, collection, doc, getDocs, setDoc, updateDoc, deleteDoc } from '@/lib/firebase';
-import { applyMappingRules, definedSet, MappingRule, NewMappingRule } from '@/lib/mapping-rules';
+import { definedSet, interpretLedgerRows, MappingRule, NewMappingRule } from '@/lib/mapping-rules';
 import { generateSampleData } from '@/lib/storage';
 import { isUnsyncedId, planDrain, withoutId } from '@/lib/offline-queue';
-import { interpretTransaction, withoutSupersededHolds, IncomeContext } from '@/lib/classify';
+import { interpretTransaction, IncomeContext } from '@/lib/classify';
 
 export interface TransactionContextType {
   transactions: Transaction[];
@@ -171,12 +171,13 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
   //
   // The superseded-hold guard rides here for the same reason: a hold whose posted row has
   // already arrived must not be visible to ANY screen, and one filter at the entrance is
-  // the only version of that nobody can forget. `raw` below is untouched, so the audit
-  // view still shows exactly what was stored.
+  // the only version of that nobody can forget. `rawTransactions` is untouched, so the
+  // audit view still shows exactly what was stored.
+  //
+  // `interpretLedgerRows` (`@/lib/mapping-rules`) is this exact composition, shared with
+  // the server's `readLedger` so a rule or a superseded hold reads identically on both.
   const transactions = useMemo(
-    () => withoutSupersededHolds(
-      rules.length ? rawTransactions.map((t) => applyMappingRules(t, rules)) : rawTransactions
-    ),
+    () => interpretLedgerRows(rawTransactions, rules),
     [rawTransactions, rules]
   );
 

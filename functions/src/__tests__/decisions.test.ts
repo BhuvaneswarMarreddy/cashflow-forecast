@@ -14,7 +14,7 @@ const ledger = {
     { id: 't1', merchant: 'COSTCO WHSE #55', title: 'COSTCO', category: 'shopping', date: '2026-06-03' },
     { id: 't2', merchant: 'COSTCO GAS', title: 'COSTCO GAS', category: 'auto', date: '2026-07-11' },
     { id: 't3', merchant: 'TRADER JOES', title: 'TJ', category: 'groceries', date: '2026-07-12' },
-    { id: 't4', merchant: 'COSTCO BUSINESS', title: 'COSTCO', category: 'groceries', date: '2026-08-02' },
+    { id: 't4', merchant: 'COSTCO BUSINESS', title: 'COSTCO', category: 'food', date: '2026-08-02' },
   ],
   rules: [],
 } as never;
@@ -22,33 +22,20 @@ const ledger = {
 const op = {
   kind: 'merchantRule',
   match: { field: 'merchant', op: 'contains', value: 'COSTCO' },
-  set: { category: 'groceries' },
+  // 'food' — a real member of ExpenseCategory (src/types/index.ts) — now that
+  // validateOp enforces set.category membership. t4 above is pre-set to
+  // 'food' on purpose, to keep exercising "already has the target value".
+  set: { category: 'food' },
 } as const;
 
 it('builds the rule doc and counts exactly the rows the rule changes', () => {
-  // 'groceries' is not a member of ExpenseCategory in this codebase (see
-  // src/types/index.ts) — irrelevant to applyDecisionCore, which never
-  // validates `set` values, only that `set` is non-empty. `as never` matches
-  // `ledger`'s cast above for the same reason: this fixture is a plain
-  // literal, not a typed MappingRule.
   const { ruleDoc, summary } = applyDecisionCore(ledger, op as never, '2026-08-21T00:00:00.000Z');
   expect(ruleDoc).toEqual({
     match: op.match, set: op.set,
     createdAt: '2026-08-21T00:00:00.000Z', enabled: true,
   });
-  expect(summary.transactionsMatched).toBe(2); // t1 (shopping→groceries) and t2 (auto→groceries), not t3 (no match) or t4 (already groceries)
+  expect(summary.transactionsMatched).toBe(2); // t1 (shopping→food) and t2 (auto→food), not t3 (no match) or t4 (already food)
   expect(summary.monthsAffected).toEqual(['2026-06', '2026-07']);
-});
-
-it('does not count rows that already have the target values', () => {
-  // t4 matches the rule (merchant contains 'COSTCO') but already has
-  // category='groceries', so it should NOT be counted as changed. Ledger
-  // transactions arrive already rule-applied, so a rule matching a row whose
-  // values already equal the rule's set must not contribute its month or
-  // increment the count.
-  const { summary } = applyDecisionCore(ledger, op as never, '2026-08-21T00:00:00.000Z');
-  expect(summary.transactionsMatched).toBe(2); // unchanged: still 2
-  expect(summary.monthsAffected).toEqual(['2026-06', '2026-07']); // unchanged: no 2026-08
 });
 
 it('rejects malformed ops with the rules-file constraints', () => {
@@ -58,6 +45,42 @@ it('rejects malformed ops with the rules-file constraints', () => {
   expect(() => validateOp({ ...op, set: {} } as never)).toThrow(); // a rule that sets nothing is noise
 });
 
+// FIX 1: `set` is unconstrained today and the Admin SDK bypasses firestore.rules, so
+// validateOp is the ONLY gate on what a decision can write.
+it('rejects a set key outside category/sourceCategory/type/merchant', () => {
+  expect(() => validateOp({ ...op, set: { category: 'food', notAKey: 'x' } } as never)).toThrow();
+});
+
+it('rejects a category that is not a member of EXPENSE_CATEGORIES, including null', () => {
+  expect(() => validateOp({ ...op, set: { category: 'not-a-real-category' } } as never)).toThrow();
+  expect(() => validateOp({ ...op, set: { category: null } } as never)).toThrow();
+});
+
+it('rejects a type outside expense/income/transfer', () => {
+  expect(() => validateOp({ ...op, set: { type: 'nonsense' } } as never)).toThrow();
+});
+
+it('rejects sourceCategory/merchant outside 1-200 characters', () => {
+  expect(() => validateOp({ ...op, set: { sourceCategory: '' } } as never)).toThrow();
+  expect(() => validateOp({ ...op, set: { merchant: 'a'.repeat(201) } } as never)).toThrow();
+});
+
+it('rejects malformed optional match qualifiers: direction, accountId, onOrAfter', () => {
+  expect(() => validateOp({ ...op, match: { ...op.match, direction: 'sideways' } } as never)).toThrow();
+  expect(() => validateOp({ ...op, match: { ...op.match, accountId: '' } } as never)).toThrow();
+  expect(() => validateOp({ ...op, match: { ...op.match, onOrAfter: '08-21-2026' } } as never)).toThrow();
+});
+
+it('accepts valid optional match qualifiers and every allowed set field', () => {
+  expect(() =>
+    validateOp({
+      ...op,
+      match: { ...op.match, direction: 'inflow', accountId: 'acc1', onOrAfter: '2026-01-01' },
+      set: { category: 'food', sourceCategory: 'Groceries', type: 'expense', merchant: 'Costco' },
+    } as never)
+  ).not.toThrow();
+});
+
 describe('undoPatch', () => {
   it('is exactly {enabled: false} — disable, never delete, never touch other fields', () => {
     expect(undoPatch()).toEqual({ enabled: false });
@@ -65,6 +88,16 @@ describe('undoPatch', () => {
 });
 
 describe('undoDecision', () => {
+  it('rejects a decisionId containing "/" without touching Firestore', async () => {
+    const fakeDb = { collection: jest.fn() };
+    (getFirestore as jest.Mock).mockReturnValue(fakeDb);
+
+    await expect(
+      undoDecision.run({ auth: { uid: 'u1' }, data: { decisionId: 'rules/evil' } } as never),
+    ).rejects.toMatchObject({ code: 'invalid-argument' });
+    expect(fakeDb.collection).not.toHaveBeenCalled();
+  });
+
   it('raises not-found when the rule doc does not exist', async () => {
     const fakeDb = {
       collection: jest.fn(() => ({

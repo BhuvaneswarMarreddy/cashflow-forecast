@@ -22,7 +22,7 @@ import { HttpsError, onCall } from 'firebase-functions/v2/https';
 
 import { currentOf, isUnanchored, sortAccounts } from '@/lib/accounts';
 import { nonNegotiableMonthly, type Bill } from '@/lib/bills';
-import { isPositive, withoutSupersededHolds, type IncomeContext } from '@/lib/classify';
+import { isPositive, type IncomeContext } from '@/lib/classify';
 import {
   calculateCurrentCash,
   generateForecast,
@@ -30,7 +30,7 @@ import {
   withDerivedBalances,
 } from '@/lib/forecast';
 import { RESERVE_TARGET_MONTHS, homeSummary, runwayLabel } from '@/lib/home';
-import { applyMappingRules, type MappingRule } from '@/lib/mapping-rules';
+import { interpretLedgerRows, type MappingRule } from '@/lib/mapping-rules';
 import type {
   ForecastEvent,
   InflowReview,
@@ -74,26 +74,11 @@ export interface Ledger {
   rules: MappingRule[];
 }
 
-/**
- * Rules then holds — TransactionContext's exact order, verified at
- * src/context/TransactionContext.tsx:174-181: every row is passed through the
- * owner's mapping rules first, and the superseded-hold guard runs on THAT
- * result. Neither step is order-sensitive today — no rule's `set` touches the
- * `pending`/`pendingTransactionId` fields the hold guard reads — but this
- * callable and the browser must share one derivation, not two orders that
- * happen to agree by coincidence.
- *
- * Every `readLedger` caller (`homeSnapshot`, `reviewQueue`, `flowSnapshot`,
- * `flowNodeDetail`) gets this for free because it runs inside `readLedger`,
- * not once per caller.
- */
-export const interpretLedgerRows = (
-  transactions: Transaction[],
-  rules: MappingRule[],
-): Transaction[] =>
-  withoutSupersededHolds(
-    rules.length ? transactions.map((t) => applyMappingRules(t, rules)) : transactions,
-  );
+// `interpretLedgerRows` moved to `@/lib/mapping-rules` — one derivation, one
+// home, shared with `TransactionContext.tsx`'s useMemo instead of two copies
+// that could drift. Re-exported here so every existing `readLedger` caller in
+// this file, and `../__tests__/snapshot.test.ts`, keep working unchanged.
+export { interpretLedgerRows };
 
 /**
  * Everything one derivation needs, in one round of parallel reads.
