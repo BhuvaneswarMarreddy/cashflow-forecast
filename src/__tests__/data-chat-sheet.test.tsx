@@ -1,8 +1,9 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import DataChatSheet from '@/components/DataChatSheet';
+import DataChatSheet, { resolveBillPaymentMethod, resolveBillAnchor } from '@/components/DataChatSheet';
 import { applyMappingRules, rulePreview, MappingRule } from '@/lib/mapping-rules';
+import { billUpcomingEvents, Bill } from '@/lib/bills';
 import { Transaction } from '@/types';
 
 /**
@@ -12,10 +13,15 @@ import { Transaction } from '@/types';
 
 const aiChat = jest.fn();
 const addRule = jest.fn();
+const addBill = jest.fn();
 
 jest.mock('@/lib/callables', () => ({
   aiChat: (...args: unknown[]) => aiChat(...args),
   callableErrorMessage: () => 'AI request failed. Please try again.',
+}));
+
+jest.mock('@/lib/firestore', () => ({
+  addBill: (...args: unknown[]) => addBill(...args),
 }));
 
 const txn = (id: string, title: string, merchant: string): Transaction => ({
@@ -64,7 +70,7 @@ const updateProfile = jest.fn().mockResolvedValue(undefined);
 let PROFILE_SETTINGS: { assumedMonthlySpend?: number | null } = {};
 jest.mock('@/context/UserProfileContext', () => ({
   useUserProfile: () => ({
-    profile: { currency: 'USD', paymentAccounts: MOCK_ACCOUNTS, settings: PROFILE_SETTINGS },
+    profile: { id: 'user-1', currency: 'USD', paymentAccounts: MOCK_ACCOUNTS, settings: PROFILE_SETTINGS },
     reconcileAccount,
     incomeContext: MOCK_INCOME_CONTEXT,
     updateProfile: (...args: unknown[]) => updateProfile(...args),
@@ -79,6 +85,7 @@ beforeAll(() => {
 beforeEach(() => {
   aiChat.mockReset();
   addRule.mockReset();
+  addBill.mockReset().mockResolvedValue('new-bill-id');
   updateProfile.mockReset().mockResolvedValue(undefined);
   PROFILE_SETTINGS = {};
 });
@@ -394,5 +401,234 @@ describe('the monthly-spend override proposal card', () => {
     PROFILE_SETTINGS = { assumedMonthlySpend: -500 };
     const { rerender } = render(<DataChatSheet open onClose={() => {}} />);
     expect(screen.getByText(/\(derived\) → \$3,000\.00 \(your assumption\)/)).toBeInTheDocument();
+  });
+});
+
+/**
+ * record_bill (#10/#14). The scene this fixes: an owner attached an Apple Card
+ * installment screenshot, asked to record it, and the model said "This will be
+ * recorded" with NOTHING written. This card is the actual write path.
+ */
+describe('resolveBillPaymentMethod — accountName -> paymentMethodId', () => {
+  it('resolves an exact (case-insensitive) label match', () => {
+    expect(resolveBillPaymentMethod('Apple Card')).toBe('apple-card');
+    expect(resolveBillPaymentMethod('apple card')).toBe('apple-card');
+  });
+
+  it('resolves a unique substring match', () => {
+    expect(resolveBillPaymentMethod('Apple')).toBe('apple-card');
+  });
+
+  it('no name at all defaults to "manual" — the model just did not say', () => {
+    expect(resolveBillPaymentMethod(undefined)).toBe('manual');
+  });
+
+  it('a name that matches nothing resolves to null — unresolvable, not a guess', () => {
+    expect(resolveBillPaymentMethod('Chase Sapphire')).toBeNull();
+  });
+});
+
+describe('the record_bill proposal card', () => {
+  const proposal = (over: Record<string, unknown> = {}) => ({
+    success: true,
+    result: {
+      action: 'record_bill',
+      vendor: 'Apple Card installment - iPhone',
+      amount: 45.79,
+      frequency: 'monthly',
+      dueDay: 15,
+      accountName: 'Apple Card',
+      installmentsRemaining: 13,
+      nonNegotiable: true,
+      reason: 'You said $45.79/mo on the Apple Card, 13 payments left.',
+      ...over,
+    },
+  });
+
+  it('shows the proposal and writes NOTHING until Apply', async () => {
+    aiChat.mockResolvedValue(proposal());
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('record my iPhone installment, $45.79 monthly on Apple Card, $595.31 remaining');
+
+    expect(await screen.findByText('Record Apple Card installment - iPhone — $45.79 monthly (day 15)')).toBeInTheDocument();
+    expect(addBill).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    await waitFor(() => expect(addBill).toHaveBeenCalledTimes(1));
+    expect(addBill).toHaveBeenCalledWith('user-1', expect.objectContaining({
+      vendor: 'Apple Card installment - iPhone',
+      amount: 45.79,
+      frequency: 'monthly',
+      autopayDay: 15,
+      paymentMethodId: 'apple-card',
+      installmentsRemaining: 13,
+      nonNegotiable: true,
+      lifecycleStatus: 'active',
+    }));
+    expect(await screen.findByText(/Saved/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+  });
+
+  it('Cancel drops the proposal without saving it', async () => {
+    aiChat.mockResolvedValue(proposal());
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('record my iPhone installment');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+    expect(addBill).not.toHaveBeenCalled();
+  });
+
+  it('an accountName that matches nothing gets words and NO button — the model never picks the method', async () => {
+    aiChat.mockResolvedValue(proposal({ accountName: 'Chase Sapphire' }));
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('record it on my chase sapphire');
+
+    expect(await screen.findByText(/couldn't match .Chase Sapphire./)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+  });
+
+  it('no accountName at all still offers Apply, defaulting to "Manual / other"', async () => {
+    const { accountName, ...withoutAccount } = proposal().result;
+    aiChat.mockResolvedValue({ success: true, result: withoutAccount });
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('record my netflix subscription');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(addBill).toHaveBeenCalledTimes(1));
+    expect(addBill).toHaveBeenCalledWith('user-1', expect.objectContaining({ paymentMethodId: 'manual' }));
+  });
+
+  it('never claims a save happened before Apply is pressed — the live overpromise bug', async () => {
+    aiChat.mockResolvedValue(proposal());
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('record my iPhone installment');
+
+    await screen.findByText(/Apple Card installment - iPhone/);
+    expect(screen.queryByText(/Saved/)).not.toBeInTheDocument();
+    expect(addBill).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Defect 1 (record-bill-report.md follow-up, #10/#14): a chat-recorded bill never got
+ * a Bill.anchorDate, so billUpcomingEvents (src/lib/bills.ts) silently produced ZERO
+ * Upcoming events for weekly/biweekly (projectWeeklyish requires anchorDate) and
+ * quarterly/semiannual/annual (projectMonthlyish's periodMonths>1 branch requires it
+ * too, to pin WHICH months in the cycle qualify). record_bill's new nextDueDate field
+ * is the fix's input; resolveBillAnchor turns it into autopayDay/anchorDate exactly
+ * the way billUpcomingEvents needs.
+ */
+describe('resolveBillAnchor — dueDay/nextDueDate -> autopayDay/anchorDate (Defect 1)', () => {
+  it('monthly: an explicit dueDay becomes autopayDay', () => {
+    expect(resolveBillAnchor({ frequency: 'monthly', dueDay: 15 })).toEqual({ autopayDay: 15 });
+  });
+
+  it('monthly: neither dueDay nor nextDueDate still resolves — "varies" is a valid pre-existing state, not broken', () => {
+    expect(resolveBillAnchor({ frequency: 'monthly' })).toEqual({ autopayDay: undefined });
+  });
+
+  it('monthly: derives autopayDay from nextDueDate\'s day-of-month when dueDay is absent', () => {
+    expect(resolveBillAnchor({ frequency: 'monthly', nextDueDate: '2026-09-15' })).toEqual({ autopayDay: 15 });
+  });
+
+  it('weekly/biweekly: nextDueDate becomes anchorDate — dueDay is irrelevant to them', () => {
+    expect(resolveBillAnchor({ frequency: 'weekly', nextDueDate: '2026-09-03' })).toEqual({ anchorDate: '2026-09-03' });
+    expect(resolveBillAnchor({ frequency: 'biweekly', nextDueDate: '2026-09-03' })).toEqual({ anchorDate: '2026-09-03' });
+  });
+
+  it('weekly/biweekly: no nextDueDate resolves to null — a dueDay alone cannot anchor them', () => {
+    expect(resolveBillAnchor({ frequency: 'weekly' })).toBeNull();
+    expect(resolveBillAnchor({ frequency: 'biweekly', dueDay: 15 })).toBeNull();
+  });
+
+  it('quarterly/semiannual/annual: need nextDueDate to pin the cycle, even when dueDay is given', () => {
+    expect(resolveBillAnchor({ frequency: 'quarterly', dueDay: 10 })).toBeNull();
+    expect(resolveBillAnchor({ frequency: 'semiannual', dueDay: 10 })).toBeNull();
+    expect(resolveBillAnchor({ frequency: 'annual', dueDay: 10 })).toBeNull();
+  });
+
+  it('quarterly: resolves from nextDueDate alone, deriving autopayDay from its day-of-month', () => {
+    expect(resolveBillAnchor({ frequency: 'quarterly', nextDueDate: '2026-01-10' }))
+      .toEqual({ autopayDay: 10, anchorDate: '2026-01-10' });
+  });
+
+  it('quarterly: an explicit dueDay wins over the derived one when both are given', () => {
+    expect(resolveBillAnchor({ frequency: 'quarterly', dueDay: 12, nextDueDate: '2026-01-10' }))
+      .toEqual({ autopayDay: 12, anchorDate: '2026-01-10' });
+  });
+});
+
+describe('the record_bill card and Defect 1 — nextDueDate wires anchorDate through to Upcoming', () => {
+  const billReply = (over: Record<string, unknown> = {}) => ({
+    success: true,
+    result: {
+      action: 'record_bill',
+      vendor: 'Test Bill',
+      amount: 45.79,
+      frequency: 'weekly',
+      reason: 'Recording a test bill.',
+      ...over,
+    },
+  });
+
+  it('a weekly bill with no nextDueDate cannot anchor — words, no Apply button', async () => {
+    aiChat.mockResolvedValue(billReply({ frequency: 'weekly' }));
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('record my weekly $45.79 bill');
+
+    expect(await screen.findByText(/next due date for a weekly bill/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+    expect(addBill).not.toHaveBeenCalled();
+  });
+
+  it('a quarterly bill with a dueDay but no nextDueDate STILL cannot anchor — a day-of-month alone cannot pin the cycle', async () => {
+    aiChat.mockResolvedValue(billReply({ frequency: 'quarterly', dueDay: 10 }));
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('record my quarterly $45.79 bill, due the 10th');
+
+    expect(await screen.findByText(/next due date for a quarterly bill/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+    expect(addBill).not.toHaveBeenCalled();
+  });
+
+  it('a weekly bill WITH nextDueDate applies, writes anchorDate, and now produces an Upcoming event', async () => {
+    const nextDueDate = '2026-09-03';
+    aiChat.mockResolvedValue(billReply({ frequency: 'weekly', nextDueDate, accountName: 'Apple Card' }));
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('record my weekly $45.79 on Apple Card, next payment Sep 3');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(addBill).toHaveBeenCalledTimes(1));
+    expect(addBill).toHaveBeenCalledWith('user-1', expect.objectContaining({
+      frequency: 'weekly',
+      anchorDate: nextDueDate,
+      paymentMethodId: 'apple-card',
+    }));
+
+    // The actual proof this defect is fixed: the row addBill just received, run
+    // through the real projection util, now yields an Upcoming event.
+    const saved: Bill = { id: 'b1', createdAt: '', updatedAt: '', ...addBill.mock.calls[0][1] };
+    expect(billUpcomingEvents([saved], '2026-08-25', 45).length).toBeGreaterThan(0);
+  });
+
+  it('a quarterly bill with ONLY nextDueDate applies, derives autopayDay, and now produces an Upcoming event', async () => {
+    const nextDueDate = '2026-09-10';
+    aiChat.mockResolvedValue(billReply({ frequency: 'quarterly', nextDueDate, accountName: 'Apple Card' }));
+    render(<DataChatSheet open onClose={() => {}} />);
+    send('record my quarterly $45.79 on Apple Card, next payment Sep 10');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(addBill).toHaveBeenCalledTimes(1));
+    expect(addBill).toHaveBeenCalledWith('user-1', expect.objectContaining({
+      frequency: 'quarterly',
+      autopayDay: 10,
+      anchorDate: nextDueDate,
+      paymentMethodId: 'apple-card',
+    }));
+
+    const saved: Bill = { id: 'b1', createdAt: '', updatedAt: '', ...addBill.mock.calls[0][1] };
+    expect(billUpcomingEvents([saved], '2026-08-25', 45).length).toBeGreaterThan(0);
   });
 });

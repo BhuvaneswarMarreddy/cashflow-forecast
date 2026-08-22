@@ -21,7 +21,7 @@ import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 
 import { currentOf, isUnanchored, sortAccounts } from '@/lib/accounts';
-import { nonNegotiableMonthly, type Bill } from '@/lib/bills';
+import { billUpcomingEvents, nonNegotiableMonthly, type Bill } from '@/lib/bills';
 import { isPositive, type IncomeContext } from '@/lib/classify';
 import {
   calculateCurrentCash,
@@ -288,7 +288,7 @@ export function buildSnapshot(ledger: Ledger) {
     UPCOMING_DAYS,
   );
 
-  const upcoming = forecast.events
+  const forecastUpcoming = forecast.events
     .filter((e) => UPCOMING_KIND[e.type])
     .map((e, index) => ({
       id: `${e.type}-${e.date}-${index}`,
@@ -301,6 +301,28 @@ export function buildSnapshot(ledger: Ledger) {
       // being asked, which is what autopay means to the person reading it.
       autopay: e.source === 'recurring',
     }));
+
+  // Bills register -> Upcoming (#10/#14). DISPLAY ONLY, LOUDLY: `avgMonthlyExpense`
+  // above is DERIVED from real transaction history, which already includes every
+  // bill's real charge once it posts. Folding the bill register's PROJECTED amount
+  // into anything that feeds runway/forecast math would charge the same obligation
+  // TWICE — once as settled history, once as a projected bill event. billUpcomingEvents
+  // is a pure display projection; it must never reach generateForecast, monthlyAverages,
+  // or homeSummary above. If you are tempted to "just add bills to the forecast", don't —
+  // that is exactly this double-count.
+  const billRows = billUpcomingEvents(ledger.bills, new Date().toISOString().slice(0, 10), UPCOMING_DAYS)
+    .map((e, index) => ({
+      id: `bill-register-${e.billId}-${e.dueDate}-${index}`,
+      name: e.vendor,
+      dueDate: e.dueDate,
+      amountCents: cents(e.amount),
+      accountId: null,
+      kind: 'bill' as const,
+      // Bills carry no autopay flag (bills.ts) — never true here.
+      autopay: false,
+    }));
+
+  const upcoming = [...forecastUpcoming, ...billRows].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 
   const paycheck = forecast.events.find((e) => e.type === 'income');
 
