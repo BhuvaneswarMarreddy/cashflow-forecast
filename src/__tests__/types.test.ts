@@ -7,6 +7,8 @@ import {
   EXPENSE_CATEGORIES,
   getMerchantColor,
   displayCategory,
+  resolveCategories,
+  slugForCategoryLabel,
   AccountType,
   PaymentMethod,
   ExpenseCategory,
@@ -25,6 +27,77 @@ describe('displayCategory', () => {
 
   test('an empty source category is treated as absent, not shown blank', () => {
     expect(displayCategory({ sourceCategory: '', category: 'food' })).toBe('Food & Dining');
+  });
+});
+
+/**
+ * cashflow-mobile#24. resolveCategories: defaults + the owner's custom set,
+ * kept CLOSED by construction — a hallucinated category never gets in because
+ * nothing here invents membership, only reads what settings.categories holds.
+ */
+describe('resolveCategories', () => {
+  test('absent settings resolves to exactly the 13 defaults, none archived', () => {
+    const resolved = resolveCategories();
+    expect(resolved).toHaveLength(EXPENSE_CATEGORIES.length);
+    expect(resolved.every((c) => c.archived === false)).toBe(true);
+    expect(resolved.map((c) => c.value)).toEqual(EXPENSE_CATEGORIES.map((c) => c.value));
+  });
+
+  test('appends custom categories after the defaults, filling in a fallback icon', () => {
+    const resolved = resolveCategories({ categories: [{ value: 'vacations', label: 'Vacations' }] });
+    expect(resolved).toHaveLength(EXPENSE_CATEGORIES.length + 1);
+    const custom = resolved.find((c) => c.value === 'vacations');
+    expect(custom).toMatchObject({ label: 'Vacations', archived: false });
+    expect(custom?.icon).toBeTruthy();
+  });
+
+  test('a custom icon is kept verbatim', () => {
+    const resolved = resolveCategories({ categories: [{ value: 'vacations', label: 'Vacations', icon: '🏖️' }] });
+    expect(resolved.find((c) => c.value === 'vacations')?.icon).toBe('🏖️');
+  });
+
+  test('archived is passed through — still resolvable, just not the default false', () => {
+    const resolved = resolveCategories({ categories: [{ value: 'vacations', label: 'Vacations', archived: true }] });
+    expect(resolved.find((c) => c.value === 'vacations')?.archived).toBe(true);
+  });
+
+  test('a custom entry colliding with a default value is dropped — defaults always win', () => {
+    const resolved = resolveCategories({ categories: [{ value: 'food', label: 'Hijacked' }] });
+    expect(resolved.filter((c) => c.value === 'food')).toHaveLength(1);
+    expect(resolved.find((c) => c.value === 'food')?.label).toBe('Food & Dining');
+  });
+
+  test('two custom entries with the same value collapse to one — the first wins', () => {
+    const resolved = resolveCategories({
+      categories: [
+        { value: 'vacations', label: 'Vacations' },
+        { value: 'vacations', label: 'Duplicate' },
+      ],
+    });
+    expect(resolved.filter((c) => c.value === 'vacations')).toHaveLength(1);
+    expect(resolved.find((c) => c.value === 'vacations')?.label).toBe('Vacations');
+  });
+});
+
+describe('slugForCategoryLabel', () => {
+  test('lowercases, replaces non-alphanumerics with dashes, trims edge dashes', () => {
+    expect(slugForCategoryLabel('Vacations!', new Set())).toBe('vacations');
+    expect(slugForCategoryLabel('  Car Loan  ', new Set())).toBe('car-loan');
+    expect(slugForCategoryLabel('Ma & Pa Fund', new Set())).toBe('ma-pa-fund');
+  });
+
+  test('a label with no alphanumerics falls back to "category"', () => {
+    expect(slugForCategoryLabel('!!!', new Set())).toBe('category');
+  });
+
+  test('caps at 32 characters', () => {
+    const slug = slugForCategoryLabel('a'.repeat(60), new Set());
+    expect(slug.length).toBeLessThanOrEqual(32);
+  });
+
+  test('a collision appends -2, -3, ... until free', () => {
+    const taken = new Set(['vacations', 'vacations-2']);
+    expect(slugForCategoryLabel('Vacations', taken)).toBe('vacations-3');
   });
 });
 
