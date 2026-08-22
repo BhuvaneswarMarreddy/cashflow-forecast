@@ -156,3 +156,77 @@ resolved set instead of a hardcoded one.
 - No `undo` affordance on the three new verbs — matches `record_bill`'s existing precedent
   (no undo there either), not epic #23's aspirational "every applied change offers Undo"
   standard, which this task's concrete design spec did not ask for.
+
+## Review response — three reviewed findings fixed (2026-08-22)
+
+### FIX 1 (truthfulness) — remove_category's apply now reports what actually landed
+`updateTransaction`/`updateRuleCategory` (TransactionContext) fire their Firestore write
+with `.catch(console.warn)` and never await it, so their promises always resolved
+regardless of what reached Firestore — "Saved — N moved" was printed whether or not
+anything actually moved. `updateBill` was already the one write that could genuinely
+reject.
+
+Added `updateTransactionAwaited`/`updateRuleCategoryAwaited` — twins used ONLY by
+`remove_category`'s reassignment sweep, never touching the optimistic behaviour of the
+existing callers elsewhere. Both write to Firestore FIRST and only update local state
+once the write is CONFIRMED (the reverse order of every other write in the file,
+deliberately): a failed row is left exactly as it was. `applyCategory` now collects a
+real per-write outcome (transactions, rules, bills) and reports honestly: full "Saved"
+message only when every planned write confirmed; a partial failure states the true
+counts, says some could not be saved, and leaves the card `pending` (status is NOT set to
+`applied`) so the same Apply button is a genuine retry — plan is recomputed fresh from
+current state on the next press, which by then only still shows what never moved.
+Archiving the removed category proceeds regardless of a partial failure: verified that
+`planCategoryRemoval` matches on the row's own stored `category`/`set.category` field,
+never on whether the settings entry is archived, so a straggler stays targetable and a
+repeat sweep picks it up — the copy now says this and it is true, not just plausible.
+
+### FIX 2 (robustness) — resolveCategories fails safe on a malformed container
+`for...of settings.categories` threw outright whenever the field was present but not an
+array (an object or a number is not iterable; a string accidentally survived by
+iterating its characters, which was never the intent). Guarded with `Array.isArray`
+before iterating; any non-array (or `null`) container now falls back to exactly the 13
+defaults, same as absent. Per-entry validation (drops null/undefined/non-object/valueless
+entries, dedupes against defaults and against itself) is unchanged.
+
+### FIX 3 (owner's full control) — web pickers now offer the resolved set
+Added `selectableCategories(resolved, currentValue)`: the assignable (non-archived) set,
+plus the row's own current value even if archived — so a `<select>` editing an existing
+row never has its value silently reset because the option disappeared. Wired into
+AddTransactionModal, PlannedPaymentsPanel and ReceiptScannerModal (each has a real
+"current value" per row/form) and BudgetSettingsPanel (no current value — a budget toggle
+is always a new selection, so it takes the assignable set alone). AccountTransactions and
+BudgetStatusPanel are DISPLAY lookups, not pickers, so they were pointed at the full
+`resolveCategories()` result (archived included) instead — BudgetStatusPanel's icon
+lookup had NO fallback at all and rendered visibly blank for any category outside the 13;
+both its icon and label lookups now resolve through the owner's set, with a plain
+fallback icon kept for the one remaining edge (a stored id that resolves to nothing at
+all). `CSVImportModal.tsx` was read in full and left untouched: it has no manual category
+picker — categories there are auto-mapped from the CSV's own text by
+`csv-import.ts`'s `mapCategory` heuristic, never user-selected — so there was nothing to
+wire up, and inventing a picker there would have been scope creep beyond what was asked.
+
+**STATUS: DONE.**
+
+**Commits** (`feat/custom-categories`):
+- `8dc3e4a` fix(data-chat-sheet): report what remove_category actually moved, not what was attempted
+- `2b56652` fix(types): resolveCategories fails safe on a malformed categories container
+- `b74106b` fix(pickers): offer the owner's resolved category set, not just the 13 defaults
+
+**Tests**: functions `120 → 120` (unchanged, no server-side edits this round), web
+`1571 → 1582` passed (+11, same 9 pre-existing unrelated skips) — all green; `npm run
+build --prefix functions` clean; `npx tsc --noEmit` clean; `npm run build` (next)
+compiles and prerenders clean; `npx playwright test e2e/accounts-observability.spec.ts`
+— 2/2 passed (picker changes touching contexts did not reintroduce a mount-time read).
+
+**Concerns**:
+- `src/lib/budgets.ts`'s `calculateBudgetStatuses`/`simulateBudgetImpact` still compute
+  `categoryLabel` against the hardcoded 13 (`EXPENSE_CATEGORIES.find`), falling back to
+  the raw stored id for anything else. Not blank (a real, if inelegant, string), so out of
+  FIX 3's literal "renders blank" scope and not in its named file list — flagged, not
+  fixed. BudgetStatusPanel's own lookup now overrides this with the real label wherever
+  it can resolve one, so the gap is currently invisible in the UI; a future direct reader
+  of `CategoryBudgetStatus.categoryLabel` would still see the raw id.
+- `mcp/load-firestore.ts`'s category coercion (flagged in the original report, still not
+  fixed) and mobile's own picker mirror remain open, unrelated to this round's three
+  findings.
