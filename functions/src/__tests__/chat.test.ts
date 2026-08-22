@@ -1,4 +1,6 @@
 import { buildChatMessages, CHAT_IMAGE_CAPS } from '../prompts';
+import { modelFor, successLogFields } from '../chat';
+import { AI_CONFIG } from '../ai-config';
 
 // content is `string | ChatContentPart[]` now that a user turn can carry an image; every
 // pre-existing test below is text-only, so content is always a plain string at runtime.
@@ -80,9 +82,12 @@ describe('buildChatMessages', () => {
     const recentLines = system.split('\n').filter((l) => l.startsWith('- yyy'));
     expect(recentLines.length).toBe(20);
     expect(recentLines[0]).toBe(`- ${'y'.repeat(80)} | - | 1 | -`);
-    // Bumped from 12000: the fixed IMAGES section (prompts.ts) added a constant amount to
-    // every system prompt. Still a loose sanity bound, not an exact byte contract.
-    expect(system.length).toBeLessThan(13000);
+    // Bumped from 13000: the IMAGES section (prompts.ts) was widened from "transaction or
+    // statement screenshots" to any financial screenshot (installment plans, balances,
+    // statements, order histories) so those stop falling through to "I cannot read this".
+    // Measured worst-case system length went 12956 -> 13397 (+441 chars), a constant added
+    // to every system prompt. Still a loose sanity bound, not an exact byte contract.
+    expect(system.length).toBeLessThan(13500);
   });
 
   it('survives a garbage context without throwing', () => {
@@ -135,6 +140,30 @@ describe('the system prompt tells the model what an attached image is', () => {
     expect(system).toContain('screenshot');
     expect(system).toContain('create_rule');
     expect(system).toMatch(/ask/i);
+  });
+
+  // Bug report: a crisp Apple Card installment screenshot got "I cannot read the details
+  // from the image" — the old IMAGES block only described transaction-list screenshots,
+  // so anything else (installment plans, balances, statements, order histories) fell
+  // through to "if you cannot read it, ask".
+  it('covers any financial screenshot, not just transaction lists', () => {
+    const system = buildChatMessages({ message: 'hi' })[0].content;
+    expect(system).toMatch(/ANY financial screenshot/);
+    expect(system).toMatch(/installment/i);
+    expect(system).toMatch(/balance/i);
+    expect(system).toMatch(/statement/i);
+    expect(system).toMatch(/order histor/i);
+  });
+
+  it('tells the model to describe concretely what it sees when answering', () => {
+    const system = buildChatMessages({ message: 'hi' })[0].content;
+    expect(system).toMatch(/describing concretely what you see/i);
+  });
+
+  it('only refuses when genuinely illegible, and even then says what it CAN see', () => {
+    const system = buildChatMessages({ message: 'hi' })[0].content;
+    expect(system).toMatch(/genuinely illegible/i);
+    expect(system).toMatch(/what you CAN see/);
   });
 });
 
@@ -195,5 +224,31 @@ describe('buildChatMessages — optional image (vision) input', () => {
   it('an image with an empty/missing base64 string is treated as no image at all', () => {
     const msgs = buildChatMessages({ message: 'hi', imageBase64: '', imageMimeType: 'image/png' });
     expect(msgs[msgs.length - 1].content).toBe('hi');
+  });
+});
+
+// Bug report root cause #2: image turns are rare (rate-limited, personal app) and
+// gpt-4o-mini's weaker vision is what users actually notice — a crisp installment-plan
+// screenshot came back "I cannot read the details." Pay for the stronger vision model
+// only on the turns that carry an image.
+describe('modelFor — vision model selection', () => {
+  it('uses gpt-4o when the turn carries an image', () => {
+    expect(modelFor(true)).toBe('gpt-4o');
+  });
+
+  it('keeps the configured (cheap) model for text-only turns', () => {
+    expect(modelFor(false)).toBe(AI_CONFIG.model);
+    expect(modelFor(false)).toBe('gpt-4o-mini');
+  });
+});
+
+// Bug report root cause #3: verify image delivery in logs without ever logging figures,
+// merchant text or base64. The narrow return type is the enforcement — a future field
+// has to fit boolean | number, not free text.
+describe('successLogFields — counts-only success log', () => {
+  it('carries only hasImage and durationMs', () => {
+    expect(successLogFields(true, 42)).toEqual({ hasImage: true, durationMs: 42 });
+    expect(successLogFields(false, 0)).toEqual({ hasImage: false, durationMs: 0 });
+    expect(Object.keys(successLogFields(true, 1))).toEqual(['hasImage', 'durationMs']);
   });
 });
