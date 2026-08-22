@@ -45,7 +45,9 @@ jest.mock('@/lib/firebase', () => ({
 
 const updateTransactionMock = jest.fn();
 const addTransactionMock = jest.fn();
-const newDocIdMock = jest.fn((userId, collection) => `${collection}-${userId}-${Date.now()}`);
+const newDocIdMock = jest.fn(
+  (...args: unknown[]) => `${String(args[1])}-${String(args[0])}-${Date.now()}`,
+);
 jest.mock('@/lib/firestore', () => ({
   getTransactions: jest.fn().mockResolvedValue([]),
   updateTransaction: (...args: unknown[]) => updateTransactionMock(...args),
@@ -270,12 +272,13 @@ describe('TransactionContext.updateTransactionAwaited (cashflow-mobile#24 — wr
     await act(async () => {
       await get().addTransaction({
         date: '2026-08-21',
+        title: 'SHOP',
+        type: 'expense',
         merchant: 'SHOP',
         amount: 100,
-        category: 'shopping' as any,
-        paymentMethod: 'credit_card' as any,
+        paymentMethod: 'visa',
+        category: 'shopping',
         description: 'Test',
-        notes: '',
       });
     });
 
@@ -307,12 +310,13 @@ describe('TransactionContext.updateTransactionAwaited (cashflow-mobile#24 — wr
     await act(async () => {
       await get().addTransaction({
         date: '2026-08-21',
+        title: 'SHOP2',
+        type: 'expense',
         merchant: 'SHOP2',
         amount: 200,
-        category: 'shopping' as any,
-        paymentMethod: 'credit_card' as any,
+        paymentMethod: 'visa',
+        category: 'shopping',
         description: 'Test 2',
-        notes: '',
       });
     });
 
