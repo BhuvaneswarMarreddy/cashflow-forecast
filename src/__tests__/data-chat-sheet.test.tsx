@@ -108,7 +108,7 @@ const send = (text: string) => {
 };
 
 describe('DataChatSheet', () => {
-  it('portals the rail to <body> — inside the navbar it pins to the 64px bar', () => {
+  it('portals the rail to <body> — inside the navbar it pins to the 64px bar', async () => {
     // The nav has backdrop-filter, which makes it the containing block for
     // position:fixed descendants. Rendered in place, the rail anchored itself
     // INSIDE the bar with its contents spilling out transparently. That shipped;
@@ -116,6 +116,10 @@ describe('DataChatSheet', () => {
     const { container } = render(<div style={{ backdropFilter: 'blur(4px)' }}>
       <DataChatSheet open onClose={() => {}} />
     </div>);
+    // Flushes the mount-time getBills fetch (and its setBills) before the test ends,
+    // so its resolution never lands outside any act() — same fix as the rail-resize
+    // tests below.
+    await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
     const rail = screen.getByRole('complementary', { name: 'Ask about your data' });
     expect(rail.parentElement).toBe(document.body);
     expect(container.querySelector('aside')).toBeNull();
@@ -229,8 +233,11 @@ describe('the rail resizes from its left edge', () => {
   const rail = () => screen.getByRole('complementary', { name: 'Ask about your data' });
   const handle = () => screen.getByRole('separator', { name: 'Resize chat panel' });
 
-  it('dragging the handle sets the width from the pointer, clamped at both ends', () => {
+  it('dragging the handle sets the width from the pointer, clamped at both ends', async () => {
     render(<DataChatSheet open onClose={() => {}} />);
+    // Flushes the mount-time getBills fetch before driving the handle — same fix as
+    // the "portals the rail" test above.
+    await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
     // jsdom has no PointerEvent; a MouseEvent with the pointermove TYPE carries the
     // buttons/clientX the handler reads and still reaches React's listener.
     const move = (init: MouseEventInit) =>
@@ -249,8 +256,9 @@ describe('the rail resizes from its left edge', () => {
     expect(rail().style.width).toBe('819px');
   });
 
-  it('arrow keys resize from the keyboard and the width persists', () => {
+  it('arrow keys resize from the keyboard and the width persists', async () => {
     render(<DataChatSheet open onClose={() => {}} />);
+    await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
     // ArrowLeft pushes the left edge left: default 416 + 24.
     fireEvent.keyDown(handle(), { key: 'ArrowLeft' });
     expect(rail().style.width).toBe('440px');
@@ -259,9 +267,10 @@ describe('the rail resizes from its left edge', () => {
     expect(window.localStorage.getItem('chat-rail-width')).toBe('416');
   });
 
-  it('double-click (and Home) return to the stylesheet default', () => {
+  it('double-click (and Home) return to the stylesheet default', async () => {
     window.localStorage.setItem('chat-rail-width', '500');
     render(<DataChatSheet open onClose={() => {}} />);
+    await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
     expect(rail().style.width).toBe('500px'); // the saved size survived a reopen
     fireEvent.doubleClick(handle());
     expect(rail().style.width).toBe('');
@@ -402,7 +411,10 @@ describe('the monthly-spend override proposal card', () => {
 
     // Same for negative — should also treat as derived.
     PROFILE_SETTINGS = { assumedMonthlySpend: -500 };
-    const { rerender } = render(<DataChatSheet open onClose={() => {}} />);
+    render(<DataChatSheet open onClose={() => {}} />);
+    // A second, independent mount — its own getBills fetch, flushed before the test
+    // ends so its resolution never lands outside act().
+    await waitFor(() => expect(getBills).toHaveBeenCalledTimes(2));
     expect(screen.getByText(/\(derived\) → \$3,000\.00 \(your assumption\)/)).toBeInTheDocument();
   });
 });
@@ -675,5 +687,43 @@ describe('DataChatSheet fetches the Bills register and includes it in the chat c
 
     const [{ context }] = aiChat.mock.calls[0];
     expect(context.bills).toEqual([]);
+  });
+
+  /**
+   * The defect this closes: `bills` was fetched ONCE on mount and never refreshed, so
+   * within one open session, recording a bill via Apply and then asking "is it existing?"
+   * still answered from the pre-write list — the model saw no such bill. Apply must
+   * update local state immediately, not wait for a reopen/reload.
+   */
+  it('a bill recorded via Apply THIS session is in context.bills on the very next turn — no reopen needed', async () => {
+    getBills.mockResolvedValue([]); // nothing recorded yet when the sheet opens
+    addBill.mockResolvedValue('new-bill-id');
+    aiChat
+      .mockResolvedValueOnce({
+        success: true,
+        result: {
+          action: 'record_bill', vendor: 'Netflix', amount: 15.49, frequency: 'monthly', dueDay: 14,
+          reason: 'Record Netflix, $15.49/mo.',
+        },
+      })
+      .mockResolvedValueOnce({ success: true, result: { action: 'answer', explanation: 'Yes, Netflix is on your bills.' } });
+
+    render(<DataChatSheet open onClose={() => {}} />);
+    await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+
+    send('record my netflix subscription, $15.49 monthly, due the 14th');
+    fireEvent.click(await screen.findByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(addBill).toHaveBeenCalledTimes(1));
+    await screen.findByText(/Saved — Netflix/);
+
+    send('is netflix already on my bills?');
+    await waitFor(() => expect(aiChat).toHaveBeenCalledTimes(2));
+
+    const [{ context }] = aiChat.mock.calls[1];
+    expect(context.bills).toEqual([
+      { vendor: 'Netflix', amount: 15.49, frequency: 'monthly', method: 'Manual / other' },
+    ]);
+    // The fix is a local state update, not a second read of the register.
+    expect(getBills).toHaveBeenCalledTimes(1);
   });
 });

@@ -429,20 +429,29 @@ export default function DataChatSheet({ open, onClose, seed }: {
     if (!anchor) return;
     setBusy(true);
     try {
-      await addBill(profile.id, {
+      const draft = {
         vendor: m.bill.vendor,
         amount: m.bill.amount,
         frequency: m.bill.frequency,
         autopayDay: anchor.autopayDay,
         anchorDate: anchor.anchorDate,
         paymentMethodId,
-        migrationStatus: 'to-review',
-        lifecycleStatus: 'active',
+        migrationStatus: 'to-review' as const,
+        lifecycleStatus: 'active' as const,
         nonNegotiable: m.bill.nonNegotiable,
         endDate: m.bill.endDate,
         installmentsRemaining: m.bill.installmentsRemaining,
-        source: 'manual',
-      });
+        source: 'manual' as const,
+      };
+      const id = await addBill(profile.id, draft);
+      // `bills` is fetched once on mount and never re-read from Firestore — without this,
+      // a bill recorded THIS session stayed invisible to buildChatContext (chat-actions.ts)
+      // until the sheet was reopened: recording a bill, then asking "is it existing?" in
+      // the same session, answered wrong. Append what was just written — same pattern
+      // BillsTab.tsx's handleSave uses — rather than a round trip back to Firestore for a
+      // row whose full shape (minus the server timestamp) we already have in hand.
+      const now = new Date().toISOString();
+      setBills((prev) => [...prev, { ...draft, id, createdAt: now, updatedAt: now }]);
       setMessages((prev) => [
         ...prev.map((x) => (x.id === m.id ? { ...x, status: 'applied' as const } : x)),
         mk('assistant', `Saved — ${m.bill!.vendor} now shows in Upcoming and Bills, ${formatMoney(m.bill!.amount, profile?.currency, 2)} ${m.bill!.frequency}.`),
