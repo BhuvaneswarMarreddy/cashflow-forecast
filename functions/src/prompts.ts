@@ -266,6 +266,12 @@ export interface LedgerSummary {
   monthsOmitted?: number;
   byCategoryThisYear?: { category?: string; spending?: number; count?: number }[];
   categoriesOmitted?: number;
+  /** cashflow-mobile#25: month-scoped breakdowns, so "what did I spend this month, and
+   *  on what" is answerable precisely — byCategoryThisYear alone is too coarse. */
+  byCategoryThisMonth?: { category?: string; spending?: number; count?: number }[];
+  categoriesThisMonthOmitted?: number;
+  byCategoryLastMonth?: { category?: string; spending?: number; count?: number }[];
+  categoriesLastMonthOmitted?: number;
   topMerchants?: {
     name?: string; spending?: number; income?: number; transferred?: number; count?: number;
     categories?: string[]; firstDate?: string; lastDate?: string;
@@ -348,15 +354,16 @@ function validateChatImage(imageBase64: string, imageMimeType: string | undefine
 /** Server-side caps. The client already trims; this bounds a hand-rolled request. */
 const CAPS = {
   merchants: 60, accounts: 25, recent: 20, history: 10, str: 80, message: 1000,
-  years: 12, months: 24, cats: 25, topMerchants: 40,
+  years: 12, months: 24, cats: 25, catsMonth: 15, topMerchants: 40,
   // #22
   bills: 60, upcoming: 30, recurring: 40,
 };
 
-export const CHAT_SYSTEM_PROMPT = `You turn a user's plain-English instruction into ONE durable categorization rule, or answer a short question about their spending.
+export const CHAT_SYSTEM_PROMPT = `You turn a user's plain-English instruction into ONE durable categorization rule, answer a short question about their spending, or show a breakdown/comparison as a table.
 
 Reply with STRICT JSON and nothing else. No markdown, no text outside the JSON. Shape:
 {"action":"create_rule"|"answer","rule":{"match":{"field":"merchant"|"title"|"description","op":"contains"|"equals","value":"string"},"set":{"category":"string","sourceCategory":"string","type":"expense"|"income"|"transfer","merchant":"string"}},"explanation":"string"}
+{"action":"report","title":"string","columns":["string"],"rows":[["string or number", "..."]],"note":"string"}
 
 REQUIREMENTS:
 - "rule" is required when action is "create_rule", and must be omitted otherwise.
@@ -377,6 +384,16 @@ ANSWERING QUESTIONS ABOUT MONEY:
 - Quote figures from LEDGER TOTALS verbatim. Do not add, subtract, average or re-derive them; arithmetic across periods is the application's job, not yours.
 - If the totals do not cover what was asked — a period outside the span, a merchant outside the listed ones, a breakdown that is not there — say exactly what you do not have and name the closest figure you do. Never estimate, and never answer from general knowledge about what a merchant usually is.
 - "I do not have that broken down" is a correct and useful answer. A confident guess is not.
+
+REPORTS (tables) — use for breakdowns and comparisons:
+{"action":"report","title":"string","columns":["string"],"rows":[["string or number", "..."]],"note":"string"}
+- Use "report" instead of "answer" whenever the natural answer is a BREAKDOWN or a COMPARISON — "what did I spend this month, and on what", "compare July to August", "what are my top categories". Keep "answer" for a single number or a conversational reply; do not build a one-row table for those.
+- title: 1-80 characters, describing what the table shows (e.g. "Spending by category, August 2026").
+- columns: 1-6 column headers, each 1-24 characters.
+- rows: at most 30 rows. Every row must have EXACTLY as many cells as there are columns — never a shorter or longer row. Each cell is a plain string (at most 40 characters) or a plain number — never a formatted string like "$120.00" or "412.5%"; send 120 or 412.5 and let the app format it.
+- note: optional, at most 200 characters — one line the table itself can't show, such as what was left out of it.
+- report is DISPLAY ONLY. It never edits or saves anything and never gets an Apply button — omit "rule" and "explanation" entirely; they have no meaning on this action.
+- Every figure in a report must be copied from the CONTEXT below, the same rule as everywhere else in this prompt: never estimate and never invent a row. Simple arithmetic over numbers you can already see in CONTEXT (a sum, a difference, a percentage) is fine; nothing beyond that. If CONTEXT does not have what is needed to answer precisely — a period, a merchant, or a breakdown that is not there — say so with "answer" instead of guessing a table.
 
 IMAGES:
 - An attachment can be ANY financial screenshot, not only a transaction list: an installment plan, an account balance, a bank or card statement, an order history, a payment confirmation, anything financial.
@@ -532,6 +549,20 @@ function summaryLines(s: LedgerSummary | undefined): string[] {
       `- ${clip(c.category) || '(uncategorised)'} | ${money(c.spending)} | ${num(c.count)} txns`
     ),
     ...omitted(s.categoriesOmitted, 'categories'),
+    '',
+    // cashflow-mobile#25: "what did I spend this month, and on what" — a year-scoped
+    // breakdown cannot answer that precisely, so this is a separate, narrower total.
+    'SPENDING BY CATEGORY, THIS MONTH:',
+    ...(s.byCategoryThisMonth || []).slice(0, CAPS.catsMonth).map((c) =>
+      `- ${clip(c.category) || '(uncategorised)'} | ${money(c.spending)} | ${num(c.count)} txns`
+    ),
+    ...omitted(s.categoriesThisMonthOmitted, 'categories'),
+    '',
+    'SPENDING BY CATEGORY, LAST MONTH:',
+    ...(s.byCategoryLastMonth || []).slice(0, CAPS.catsMonth).map((c) =>
+      `- ${clip(c.category) || '(uncategorised)'} | ${money(c.spending)} | ${num(c.count)} txns`
+    ),
+    ...omitted(s.categoriesLastMonthOmitted, 'categories'),
     '',
     'TOP MERCHANTS, ALL TIME (spent | received | transferred | count | categories used | first..last):',
     '"transferred" is money moved to or from this name that is classified as a transfer,',

@@ -4,7 +4,7 @@
  * fix: totals cover every row, transfers are excluded, and every cap reports what it
  * dropped so the model can say "I don't have that" instead of inventing it.
  */
-import { PaymentAccount, Transaction } from '@/types';
+import { ExpenseCategory, PaymentAccount, Transaction } from '@/types';
 import { buildLedgerSummary } from '@/lib/chat-summary';
 
 const ACCOUNTS: PaymentAccount[] = [
@@ -146,5 +146,79 @@ describe('buildLedgerSummary', () => {
     expect(s.byMonth).toHaveLength(24);
     expect(s.monthsOmitted).toBe(16);
     expect(s.byMonth[0].period > s.byMonth[1].period).toBe(true);
+  });
+});
+
+/**
+ * cashflow-mobile#25: "what did I spend this month, and on what" needs a month-scoped
+ * category breakdown — byCategoryThisYear alone is a whole year, too coarse to answer
+ * it precisely. `today` is ALWAYS an injected string here, never wall time — a sibling
+ * test in this suite (buildLedgerSummary's own `today` parameter, above) flaked once on
+ * a real timestamp, and a month-boundary test is exactly where that would bite hardest.
+ */
+describe('buildLedgerSummary — byCategoryThisMonth / byCategoryLastMonth (cashflow-mobile#25)', () => {
+  it('buckets expenses into THIS month and LAST month, and excludes everything else', () => {
+    const s = buildLedgerSummary([
+      tx({ amount: 40, category: 'food', date: '2026-08-02' }),
+      tx({ amount: 60, category: 'food', date: '2026-08-15' }),
+      tx({ amount: 25, category: 'transportation', date: '2026-08-20' }),
+      tx({ amount: 90, category: 'shopping', date: '2026-07-10' }), // last month
+      tx({ amount: 999, category: 'food', date: '2026-06-01' }),   // two months back — excluded
+      tx({ amount: 999, category: 'food', date: '2025-08-01' }),   // same month, prior year — excluded
+    ], ACCOUNTS, '2026-08-21');
+
+    expect(s.byCategoryThisMonth).toEqual([
+      { category: 'Food & Dining', spending: 100, count: 2 },
+      { category: 'Transportation', spending: 25, count: 1 },
+    ]);
+    expect(s.byCategoryLastMonth).toEqual([
+      { category: 'Shopping', spending: 90, count: 1 },
+    ]);
+  });
+
+  it('crosses a YEAR boundary correctly: January\'s "last month" is December of the prior year', () => {
+    const s = buildLedgerSummary([
+      tx({ amount: 50, category: 'food', date: '2026-01-05' }),   // this month
+      tx({ amount: 70, category: 'food', date: '2025-12-28' }),   // last month, prior year
+      tx({ amount: 999, category: 'food', date: '2025-11-30' }),  // two months back — excluded
+    ], ACCOUNTS, '2026-01-15');
+
+    expect(s.byCategoryThisMonth).toEqual([{ category: 'Food & Dining', spending: 50, count: 1 }]);
+    expect(s.byCategoryLastMonth).toEqual([{ category: 'Food & Dining', spending: 70, count: 1 }]);
+  });
+
+  it('excludes income and transfers from both month buckets — FIN-LEDGER-001, same rule as every other total here', () => {
+    const s = buildLedgerSummary([
+      tx({ amount: 40, category: 'food', type: 'expense', date: '2026-08-02' }),
+      tx({ amount: 5000, type: 'income', date: '2026-08-03' }),
+      tx({ amount: 500, type: 'transfer', transferDirection: 'out', date: '2026-08-04' }),
+    ], ACCOUNTS, '2026-08-21');
+
+    expect(s.byCategoryThisMonth).toEqual([{ category: 'Food & Dining', spending: 40, count: 1 }]);
+  });
+
+  it('reports what the 15-category cap dropped, same convention as the year breakdown', () => {
+    // The 13 built-in categories plus 5 custom slugs (`as ExpenseCategory` — the same
+    // idiom the rest of this codebase uses for a runtime-valid, compile-time-foreign
+    // custom category value) — 18 distinct categories, comfortably over the 15-cap.
+    const builtIn: ExpenseCategory[] = [
+      'food', 'transportation', 'utilities', 'entertainment', 'shopping', 'healthcare',
+      'education', 'travel', 'subscriptions', 'rent', 'insurance', 'investments', 'other',
+    ];
+    const custom = ['vacations', 'gym', 'gifts', 'pets', 'kids'].map((c) => c as ExpenseCategory);
+    const categories = [...builtIn, ...custom];
+    const rows = categories.map((category, i) => tx({ amount: i + 1, category, date: '2026-08-05' }));
+    const s = buildLedgerSummary(rows, ACCOUNTS, '2026-08-21');
+
+    expect(s.byCategoryThisMonth).toHaveLength(15);
+    expect(s.categoriesThisMonthOmitted).toBe(categories.length - 15);
+  });
+
+  it('reports an empty ledger without inventing month buckets', () => {
+    const s = buildLedgerSummary([], ACCOUNTS, TODAY);
+    expect(s.byCategoryThisMonth).toEqual([]);
+    expect(s.categoriesThisMonthOmitted).toBe(0);
+    expect(s.byCategoryLastMonth).toEqual([]);
+    expect(s.categoriesLastMonthOmitted).toBe(0);
   });
 });
