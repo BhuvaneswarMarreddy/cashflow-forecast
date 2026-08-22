@@ -727,3 +727,38 @@ describe('DataChatSheet fetches the Bills register and includes it in the chat c
     expect(getBills).toHaveBeenCalledTimes(1);
   });
 });
+
+/**
+ * Regression: Navbar renders `<DataChatSheet open={isChatOpen} .../>` on EVERY page,
+ * unconditionally — `open` only gates the final `return null`, well after every hook
+ * (including the bills fetch) has already run. Fetching on mount meant a Firestore read
+ * on every page load even when the owner never opened the chat — caught by
+ * e2e/accounts-observability.spec.ts, which asserts no live backend call happens before
+ * the user acts. The fetch must be lazy: gated on `open`, not on mount.
+ */
+describe('DataChatSheet — the bills fetch is LAZY (gated on open, never on mount)', () => {
+  it('does not fetch bills while closed — mounted-but-closed is exactly how Navbar renders this on every page', async () => {
+    render(<DataChatSheet open={false} onClose={() => {}} />);
+    // Give any stray microtask a chance to run before asserting the negative.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(getBills).not.toHaveBeenCalled();
+  });
+
+  it('fetches once the sheet is actually opened', async () => {
+    const { rerender } = render(<DataChatSheet open={false} onClose={() => {}} />);
+    expect(getBills).not.toHaveBeenCalled();
+
+    rerender(<DataChatSheet open onClose={() => {}} />);
+    await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+  });
+
+  it('does not refetch on a later close/reopen — the already-loaded list is kept (Apply\'s local append covers dedupe)', async () => {
+    const { rerender } = render(<DataChatSheet open onClose={() => {}} />);
+    await waitFor(() => expect(getBills).toHaveBeenCalledTimes(1));
+
+    rerender(<DataChatSheet open={false} onClose={() => {}} />);
+    rerender(<DataChatSheet open onClose={() => {}} />);
+
+    expect(getBills).toHaveBeenCalledTimes(1);
+  });
+});

@@ -150,13 +150,24 @@ export default function DataChatSheet({ open, onClose, seed }: {
   // #22: the chat could WRITE bills (record_bill) but couldn't SEE them — "is X already
   // recorded" got "I have no information". Same read dashboard/page.tsx already does for
   // the same reason (UI-102's locked chip); DataChatSheet has no other route to bills.
+  //
+  // LAZY, not on mount: Navbar renders this component on every page, unconditionally —
+  // `open` only gates the final `return null` below, well after every hook has already
+  // run. Fetching here unconditionally meant every page load issued a Firestore read
+  // even when the owner never opened the chat (caught by e2e/accounts-observability.spec.ts,
+  // which asserts NO live backend call happens before the user acts). Gated on `open`
+  // instead, and `billsFetchedFor` skips re-fetching on every reopen — applyBill's local
+  // append (below) already keeps `bills` current for the same session/profile, so a
+  // reopen has nothing stale to correct.
   const [bills, setBills] = useState<Bill[]>([]);
+  const billsFetchedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!profile?.id) return;
+    if (!open || !profile?.id || billsFetchedFor.current === profile.id) return;
+    billsFetchedFor.current = profile.id;
     let alive = true;
     getBills(profile.id).then((rows) => { if (alive) setBills(rows); });
     return () => { alive = false; };
-  }, [profile?.id]);
+  }, [open, profile?.id]);
 
   // ---- resizable rail (desktop only; the mobile bottom sheet keeps its CSS) ----
   // `null` = the stylesheet default. A number is the owner's chosen width, persisted so
