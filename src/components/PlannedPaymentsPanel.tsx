@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { format, parseISO, startOfMonth, endOfMonth, addMonths, isSameMonth } from 'date-fns';
 import { 
   Plus, 
@@ -19,11 +19,12 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
-import { 
-  PlannedTransaction, 
+import {
+  PlannedTransaction,
   PlannedTransactionStatus,
   ExpenseCategory,
-  EXPENSE_CATEGORIES 
+  resolveCategories,
+  selectableCategories,
 } from '@/types';
 import { 
   addPlannedTransaction, 
@@ -57,6 +58,18 @@ export default function PlannedPaymentsPanel() {
     isRecurring: false,
     recurringFrequency: 'monthly' as 'weekly' | 'monthly' | 'yearly',
   });
+
+  // cashflow-mobile#24. handleEdit (below) loads an existing item's category into
+  // formData.category verbatim, so the current value must stay selectable even if
+  // it has since been archived — same reasoning as AddTransactionModal.
+  const resolvedCategories = useMemo(
+    () => resolveCategories(profile?.settings),
+    [profile?.settings]
+  );
+  const categoryOptions = useMemo(
+    () => selectableCategories(resolvedCategories, formData.category),
+    [resolvedCategories, formData.category]
+  );
 
   const fetchPlanned = useCallback(async () => {
     if (!user) return;
@@ -352,7 +365,7 @@ export default function PlannedPaymentsPanel() {
                 onChange={(e) => setFormData({ ...formData, category: e.target.value as ExpenseCategory })}
                 className="w-full px-3 py-2 bg-amber-900/20 border border-amber-500/30 rounded-control text-sm"
               >
-                {EXPENSE_CATEGORIES.map((cat) => (
+                {categoryOptions.map((cat) => (
                   <option key={cat.value} value={cat.value}>
                     {cat.icon} {cat.label}
                   </option>

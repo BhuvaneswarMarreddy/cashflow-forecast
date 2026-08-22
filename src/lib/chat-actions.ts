@@ -12,9 +12,10 @@
  */
 
 import {
-  EXPENSE_CATEGORIES,
   ExpenseCategory,
   PaymentAccount,
+  resolveCategories,
+  ResolvedCategory,
   Transaction,
   TransactionType,
 } from '@/types';
@@ -28,7 +29,10 @@ import { CARD_CREDIT_KINDS, CardCreditKind, LinkDraft, TxRef, validateLink } fro
 import { emit } from './obs/events';
 
 export interface ChatContext {
-  categories: ExpenseCategory[];
+  // cashflow-mobile#24: the owner's OWN set (defaults + custom, archived excluded) —
+  // a plain string, not ExpenseCategory, since a custom slug is never a member of
+  // that closed union.
+  categories: string[];
   merchants: string[];
   accounts: string[];
   recent: { title: string; merchant?: string; amount: number; category?: string }[];
@@ -128,6 +132,16 @@ export type ChatAction =
       nonNegotiable?: boolean;
       reason: string;
     }
+  /** cashflow-mobile#24. Proposes a NEW category. No `value` — the app derives a
+   *  unique slug from the label, never the model. */
+  | { action: 'add_category'; label: string; icon?: string; reason: string }
+  /** cashflow-mobile#24. Renames one of the OWNER'S OWN categories (never a
+   *  built-in default — `value` must be a CUSTOM entry the owner already has). */
+  | { action: 'rename_category'; value: string; label: string; reason: string }
+  /** cashflow-mobile#24. Removes one of the owner's own categories. reassignTo
+   *  always resolves to a concrete value (defaults to 'other') so every consumer
+   *  downstream of the parser can rely on it being present. */
+  | { action: 'remove_category'; value: string; reassignTo: string; reason: string }
   | RecoveryAction;
 
 /**
@@ -179,9 +193,15 @@ const MAX = {
   // bound the LIST length so a large register/ledger cannot grow the context unboundedly.
   bills: 60,
   recurring: 40,
+  // cashflow-mobile#24
+  categoryLabel: 40,
+  categoryValue: 32,
+  categoryIcon: 4,
 } as const;
 
-const CATEGORIES: readonly string[] = EXPENSE_CATEGORIES.map((c) => c.value);
+// The DEFAULT category set — used as the fallback everywhere a caller does not (yet)
+// have the owner's resolved one, so every existing call site keeps working unchanged.
+const DEFAULT_CATEGORIES: readonly ResolvedCategory[] = resolveCategories();
 const FIELDS: readonly string[] = ['merchant', 'title', 'description'];
 const OPS: readonly string[] = ['contains', 'equals'];
 const TYPES: readonly string[] = ['expense', 'income', 'transfer'];
@@ -201,7 +221,10 @@ const clip = (s: string, max: number = MAX.str) => s.trim().slice(0, max);
 export function buildChatContext(
   transactions: Transaction[],
   accounts: PaymentAccount[] = [],
-  bills: Bill[] = []
+  bills: Bill[] = [],
+  // cashflow-mobile#24. The owner's resolved set — defaults when the caller has
+  // none yet, so every existing 2/3-arg call site keeps behaving unchanged.
+  categories: readonly ResolvedCategory[] = DEFAULT_CATEGORIES
 ): ChatContext {
   const counts = new Map<string, number>();
   for (const t of transactions) {
@@ -227,7 +250,9 @@ export function buildChatContext(
   const today = new Date().toISOString().slice(0, 10);
 
   return {
-    categories: EXPENSE_CATEGORIES.map((c) => c.value),
+    // cashflow-mobile#24: ASSIGNABLE only — archived never appears in ALLOWED
+    // CATEGORIES, so the model can never propose filing a new row under one.
+    categories: categories.filter((c) => !c.archived).map((c) => c.value),
     merchants,
     accounts: accounts.slice(0, MAX.accounts).map((a) => clip(a.name || '')).filter(Boolean),
     recent,
@@ -278,7 +303,7 @@ function str(v: unknown, max: number): string | null {
   return s || null;
 }
 
-function parseRule(raw: unknown): NewMappingRule | null {
+function parseRule(raw: unknown, allowedCategories: readonly string[]): NewMappingRule | null {
   const r = record(raw, ['match', 'set']);
   if (!r) return null;
 
@@ -294,7 +319,9 @@ function parseRule(raw: unknown): NewMappingRule | null {
 
   const set: MappingRule['set'] = {};
   if (s.category !== undefined) {
-    if (typeof s.category !== 'string' || !CATEGORIES.includes(s.category)) return null;
+    // cashflow-mobile#24: closed over the OWNER's resolved, assignable set —
+    // still a fixed list, just not a hardcoded 13 anymore.
+    if (typeof s.category !== 'string' || !allowedCategories.includes(s.category)) return null;
     set.category = s.category as ExpenseCategory;
   }
   if (s.type !== undefined) {
@@ -549,8 +576,19 @@ function parseRecoveryAction(o: Record<string, unknown>, action: string, ctx?: R
  * `ctx` is required for the thirteen recovery actions and unused by the original two.
  * Without it a recovery action cannot be checked against the caller's own candidates and
  * ledger, so it is refused rather than trusted.
+ *
+ * `categories` (cashflow-mobile#24) is the owner's resolved set, used to validate
+ * create_rule's set.category and the three category verbs below. Omitted falls back
+ * to the 13 defaults — every existing call site (and every existing test) keeps
+ * working exactly as before; add_category/rename_category/remove_category, which
+ * have no meaning without a real owner set to check against, are refused outright
+ * when it is absent (same "no context, no action" contract `ctx` already has).
  */
-export function parseChatAction(raw: unknown, ctx?: RecoveryContext): ChatAction | null {
+export function parseChatAction(
+  raw: unknown,
+  ctx?: RecoveryContext,
+  categories?: readonly ResolvedCategory[]
+): ChatAction | null {
   // P3 first, over the whole payload, before any key is read.
   if (hasPollutedKey(raw)) return deny('P3');
 
@@ -679,6 +717,65 @@ export function parseChatAction(raw: unknown, ctx?: RecoveryContext): ChatAction
     };
   }
 
+  // cashflow-mobile#24: add_category. No `value` accepted from the model — the app
+  // derives a unique, collision-safe slug from label at apply time, never trusting
+  // a model-picked identifier.
+  if (action === 'add_category') {
+    const o = record(raw, ['action', 'label', 'icon', 'reason']);
+    if (!o) return null;
+    const label = str(o.label, MAX.categoryLabel);
+    const reason = str(o.reason, MAX.explanation);
+    if (!label || !reason) return null;
+    let icon: string | undefined;
+    if (o.icon !== undefined) {
+      const i = str(o.icon, MAX.categoryIcon);
+      if (!i) return null; // present but empty — the model said nothing, don't pretend it did
+      icon = i;
+    }
+    return { action: 'add_category', label, ...(icon !== undefined ? { icon } : {}), reason };
+  }
+
+  // rename_category / remove_category both require the OWNER's resolved set to
+  // check `value` against — refused outright with no context, the same "no
+  // context, no action" contract the recovery actions already have with no `ctx`.
+  if (action === 'rename_category') {
+    const o = record(raw, ['action', 'value', 'label', 'reason']);
+    if (!o) return null;
+    const value = str(o.value, MAX.categoryValue);
+    const label = str(o.label, MAX.categoryLabel);
+    const reason = str(o.reason, MAX.explanation);
+    if (!value || !label || !reason || !categories) return null;
+    // Only a CUSTOM category the owner already has can be renamed — never a
+    // built-in default. Renaming one of the 13 would need a data model for
+    // overriding a default, which this task deliberately does not build.
+    const isDefault = DEFAULT_CATEGORIES.some((c) => c.value === value);
+    if (isDefault || !categories.some((c) => c.value === value)) return null;
+    return { action: 'rename_category', value, label, reason };
+  }
+
+  if (action === 'remove_category') {
+    const o = record(raw, ['action', 'value', 'reassignTo', 'reason']);
+    if (!o) return null;
+    const value = str(o.value, MAX.categoryValue);
+    const reason = str(o.reason, MAX.explanation);
+    if (!value || !reason || !categories) return null;
+    const isDefault = DEFAULT_CATEGORIES.some((c) => c.value === value);
+    if (isDefault || !categories.some((c) => c.value === value)) return null;
+
+    let reassignTo = 'other';
+    if (o.reassignTo !== undefined) {
+      const r = str(o.reassignTo, MAX.categoryValue);
+      if (!r) return null;
+      reassignTo = r;
+    }
+    if (reassignTo === value) return null; // can't reassign to the thing being removed
+    // The target must be a live, assignable category — never archived, never the
+    // removed value itself (checked above).
+    if (!categories.some((c) => c.value === reassignTo && !c.archived)) return null;
+
+    return { action: 'remove_category', value, reassignTo, reason };
+  }
+
   if (action in CANDIDATE_ACTIONS || action in TRANSACTION_ACTIONS) {
     const allowed = [
       'action',
@@ -702,7 +799,10 @@ export function parseChatAction(raw: unknown, ctx?: RecoveryContext): ChatAction
   // P1 — anything outside the closed set. Never coerced, never guessed at.
   if (o.action !== 'create_rule') return null;
 
-  const rule = parseRule(o.rule);
+  // cashflow-mobile#24: the owner's resolved, assignable set — defaults when the
+  // caller has not supplied one, exactly today's behaviour.
+  const allowedCategories = (categories ?? DEFAULT_CATEGORIES).filter((c) => !c.archived).map((c) => c.value);
+  const rule = parseRule(o.rule, allowedCategories);
   if (!rule) return null;
 
   return {

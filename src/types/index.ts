@@ -444,6 +444,15 @@ export interface UserProfile {
      * write, not omission).
      */
     assumedMonthlySpend?: number | null;
+    /**
+     * cashflow-mobile#24. The owner's OWN category set, additive over the 13
+     * defaults below. ABSENT = the 13 defaults only; never written just to have
+     * a row. Written only via the chat verbs (add_category/rename_category/
+     * remove_category) — see resolveCategories() for how this resolves to the
+     * effective list every consumer (server validation, chat prompts, snapshot
+     * payload, pickers) reads.
+     */
+    categories?: CustomCategory[];
   };
 }
 
@@ -602,6 +611,116 @@ export const EXPENSE_CATEGORIES: { value: ExpenseCategory; label: string; icon: 
   { value: 'investments', label: 'Investments', icon: '📈' },
   { value: 'other', label: 'Other', icon: '📋' },
 ];
+
+/**
+ * cashflow-mobile#24. One entry in the owner's OWN category set, stored at
+ * `UserProfile.settings.categories`. `value` is a slug ([a-z0-9-]{1,32}),
+ * collision-safe against the 13 defaults AND every other entry — see
+ * `slugForCategoryLabel`. `archived` marks a REMOVED category: excluded from
+ * the assignable set (nothing new can be filed under it) but kept in
+ * `resolveCategories()`'s full list so a row still carrying the old value
+ * (before a rename/remove finishes reassigning it) can still show a label.
+ */
+export interface CustomCategory {
+  value: string;
+  label: string;
+  icon?: string;
+  archived?: boolean;
+}
+
+/** `resolveCategories()`'s output shape — a default or a custom entry, made uniform. */
+export interface ResolvedCategory {
+  value: string;
+  label: string;
+  icon: string;
+  archived: boolean;
+}
+
+/** No custom entry has set an icon of its own. Distinct from EXPENSE_CATEGORIES'
+ *  own 'other' icon, so a custom bucket never LOOKS like the built-in catch-all. */
+const CUSTOM_CATEGORY_FALLBACK_ICON = '🏷️';
+
+/**
+ * The owner's EFFECTIVE category set: the 13 built-in defaults, plus whatever
+ * they have added via chat (settings.categories — absent = none added yet).
+ * ONE home for this resolution, imported by both the server (functions/tsconfig.json
+ * already compiles this file) and the web app, so validation and display can never
+ * see two different answers to "what are this owner's categories".
+ *
+ * A custom entry whose `value` collides with a default, or with an earlier custom
+ * entry (corrupt/hand-edited settings), is dropped — defaults always win and every
+ * value in the result is unique. Archived entries stay IN this list (their label is
+ * still resolvable for a historical row) — callers that need only what a NEW row can
+ * be filed under must filter `!archived` themselves (validateOp, chat's ALLOWED
+ * CATEGORIES, pickers).
+ */
+export function resolveCategories(settings?: { categories?: CustomCategory[] }): ResolvedCategory[] {
+  const seen = new Set<string>(EXPENSE_CATEGORIES.map((c) => c.value));
+  const defaults: ResolvedCategory[] = EXPENSE_CATEGORIES.map((c) => ({
+    value: c.value, label: c.label, icon: c.icon, archived: false,
+  }));
+
+  // A hand-edited or corrupted profile document can hold ANYTHING under
+  // `categories` — an object, a string, a number. `for...of` throws outright on
+  // most of those (only a handful of iterables, arrays included, survive it),
+  // which would take down readLedger/homeSnapshot and DataChatSheet's render for
+  // that one owner. Fail SAFE to "no custom categories" instead — the 13
+  // defaults still resolve, exactly as if `categories` had been absent.
+  const container = Array.isArray(settings?.categories) ? settings.categories : [];
+
+  const custom: ResolvedCategory[] = [];
+  for (const c of container) {
+    if (!c || typeof c !== 'object' || typeof c.value !== 'string' || seen.has(c.value)) continue;
+    seen.add(c.value);
+    custom.push({
+      value: c.value,
+      label: c.label,
+      icon: c.icon || CUSTOM_CATEGORY_FALLBACK_ICON,
+      archived: c.archived ?? false,
+    });
+  }
+  return [...defaults, ...custom];
+}
+
+/**
+ * cashflow-mobile#24. What a NEW-selection picker (Add Transaction, Planned
+ * Payments, Receipt Scanner, Budget Settings, ...) offers: every ASSIGNABLE
+ * category — defaults plus non-archived custom ones, exactly resolveCategories()
+ * minus the archived entries — so a chat-created category is finally selectable
+ * by hand, and a removed one is not offered for anything new.
+ *
+ * `currentValue` is the row's OWN existing category, when editing one that
+ * already exists (a transaction, a planned payment, ...). It is always
+ * included even if archived: a `<select>` whose `value` is not among its own
+ * `<option>`s renders as if nothing were chosen, which would make editing any
+ * OTHER field on that row silently reset its category out from under it. A
+ * brand-new row (no currentValue) gets exactly the assignable set.
+ */
+export function selectableCategories(resolved: readonly ResolvedCategory[], currentValue?: string): ResolvedCategory[] {
+  const assignable = resolved.filter((c) => !c.archived);
+  if (!currentValue || assignable.some((c) => c.value === currentValue)) return assignable;
+  const current = resolved.find((c) => c.value === currentValue);
+  return current ? [...assignable, current] : assignable;
+}
+
+/**
+ * label -> a slug ([a-z0-9-]{1,32}), collision-safe against `taken` (the owner's
+ * current default + custom values). Used by add_category: the AI proposes a label,
+ * never a value — this is what turns "Vacations" into 'vacations' without ever
+ * letting a model invent or collide with a stored category value.
+ */
+export function slugForCategoryLabel(label: string, taken: ReadonlySet<string>): string {
+  const base = label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32) || 'category';
+  if (!taken.has(base)) return base;
+  // ponytail: linear collision probe — fine at personal-app scale (a handful of
+  // categories). Switch to a random suffix if this ever needs hundreds of entries.
+  for (let n = 2; n < 1000; n++) {
+    const suffix = `-${n}`;
+    const candidate = base.slice(0, 32 - suffix.length) + suffix;
+    if (!taken.has(candidate)) return candidate;
+  }
+  return `${base.slice(0, 26)}-${Date.now().toString(36).slice(-5)}`;
+}
 
 // Common merchants grouped by category
 export const COMMON_MERCHANTS: { name: string; category: ExpenseCategory; color: string }[] = [

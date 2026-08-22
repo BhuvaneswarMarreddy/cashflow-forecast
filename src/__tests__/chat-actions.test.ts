@@ -1,7 +1,7 @@
 import { buildChatContext, explanationOf, parseChatAction, fallbackText } from '@/lib/chat-actions';
 import { applyMappingRules, MappingRule } from '@/lib/mapping-rules';
 import type { Bill } from '@/lib/bills';
-import { PaymentAccount, Transaction } from '@/types';
+import { PaymentAccount, resolveCategories, Transaction } from '@/types';
 
 const txn = (over: Partial<Transaction> = {}): Transaction => ({
   id: Math.random().toString(36).slice(2),
@@ -547,5 +547,171 @@ describe('record_bill — nextDueDate (Defect 1: chat bills need an anchor)', ()
 
   it('is optional — omitting it still accepts the rest of the proposal', () => {
     expect(parseChatAction(valid)).toEqual(valid);
+  });
+});
+
+/**
+ * cashflow-mobile#24 — custom categories are CLOSED over the owner's own resolved
+ * set, not the hardcoded 13. buildChatContext's `categories` field is what the
+ * model sees as ALLOWED CATEGORIES; parseChatAction's optional `categories` param
+ * is what re-validates whatever the model sends back.
+ */
+describe('buildChatContext — the owner\'s resolved category set (cashflow-mobile#24)', () => {
+  it('defaults to the 13 built-ins when no categories are supplied', () => {
+    const ctx = buildChatContext([], []);
+    expect(ctx.categories).toContain('food');
+    expect(ctx.categories).toHaveLength(13);
+  });
+
+  it('includes a custom category the owner added', () => {
+    const resolved = resolveCategories({ categories: [{ value: 'vacations', label: 'Vacations' }] });
+    const ctx = buildChatContext([], [], [], resolved);
+    expect(ctx.categories).toContain('vacations');
+  });
+
+  it('excludes an archived category — the model can never propose filing a new row under it', () => {
+    const resolved = resolveCategories({ categories: [{ value: 'vacations', label: 'Vacations', archived: true }] });
+    const ctx = buildChatContext([], [], [], resolved);
+    expect(ctx.categories).not.toContain('vacations');
+  });
+});
+
+describe('create_rule — accepts a custom category when the owner\'s set is given (cashflow-mobile#24)', () => {
+  const rule = (category: string) => ({
+    action: 'create_rule',
+    rule: { match: { field: 'merchant', op: 'contains', value: 'X' }, set: { category } },
+    explanation: 'ok',
+  });
+
+  it('rejects a custom category when no owner set is given — same as today', () => {
+    expect(parseChatAction(rule('vacations'))).toBeNull();
+  });
+
+  it('accepts a custom category present in the given owner set', () => {
+    const resolved = resolveCategories({ categories: [{ value: 'vacations', label: 'Vacations' }] });
+    expect(parseChatAction(rule('vacations'), undefined, resolved)?.action).toBe('create_rule');
+  });
+
+  it('still rejects a category outside even the owner\'s custom set', () => {
+    const resolved = resolveCategories({ categories: [{ value: 'vacations', label: 'Vacations' }] });
+    expect(parseChatAction(rule('crypto'), undefined, resolved)).toBeNull();
+  });
+
+  it('rejects an ARCHIVED category — nothing new may be filed under it', () => {
+    const resolved = resolveCategories({ categories: [{ value: 'vacations', label: 'Vacations', archived: true }] });
+    expect(parseChatAction(rule('vacations'), undefined, resolved)).toBeNull();
+  });
+});
+
+describe('add_category — cashflow-mobile#24', () => {
+  const valid = { action: 'add_category', label: 'Vacations', icon: '🏖️', reason: 'You asked for a Vacations category.' };
+
+  it('accepts the full well-formed proposal verbatim, with no context needed', () => {
+    expect(parseChatAction(valid)).toEqual(valid);
+  });
+
+  it('accepts the minimal shape — icon is optional', () => {
+    const { icon, ...minimal } = valid;
+    expect(parseChatAction(minimal)).toEqual(minimal);
+  });
+
+  it('rejects an empty label or reason — a silent action', () => {
+    expect(parseChatAction({ ...valid, label: '' })).toBeNull();
+    expect(parseChatAction({ ...valid, label: '   ' })).toBeNull();
+    expect(parseChatAction({ ...valid, reason: '' })).toBeNull();
+  });
+
+  it('rejects an empty icon rather than treating it as absent', () => {
+    expect(parseChatAction({ ...valid, icon: '' })).toBeNull();
+  });
+
+  it('rejects an unknown top-level key', () => {
+    expect(parseChatAction({ ...valid, extra: 1 })).toBeNull();
+  });
+
+  it('never accepts a model-supplied value/slug — the shape has no such key', () => {
+    expect(parseChatAction({ ...valid, value: 'vacations' })).toBeNull();
+  });
+});
+
+describe('rename_category — cashflow-mobile#24', () => {
+  const owned = resolveCategories({ categories: [{ value: 'vacations', label: 'Vacations' }] });
+  const valid = { action: 'rename_category', value: 'vacations', label: 'Trips', reason: 'You asked to rename it.' };
+
+  it('accepts a well-formed rename of a category the owner actually has', () => {
+    expect(parseChatAction(valid, undefined, owned)).toEqual(valid);
+  });
+
+  it('rejects with no owner category context at all', () => {
+    expect(parseChatAction(valid)).toBeNull();
+  });
+
+  it('rejects a value the owner does not have', () => {
+    expect(parseChatAction({ ...valid, value: 'not-real' }, undefined, owned)).toBeNull();
+  });
+
+  it('rejects a BUILT-IN default — those cannot be renamed this way', () => {
+    expect(parseChatAction({ ...valid, value: 'food', label: 'Nom Nom' }, undefined, owned)).toBeNull();
+  });
+
+  it('rejects an empty label or reason', () => {
+    expect(parseChatAction({ ...valid, label: '' }, undefined, owned)).toBeNull();
+    expect(parseChatAction({ ...valid, reason: '' }, undefined, owned)).toBeNull();
+  });
+
+  it('rejects an unknown top-level key', () => {
+    expect(parseChatAction({ ...valid, extra: 1 }, undefined, owned)).toBeNull();
+  });
+});
+
+describe('remove_category — cashflow-mobile#24', () => {
+  const owned = resolveCategories({ categories: [{ value: 'vacations', label: 'Vacations' }] });
+  const valid = { action: 'remove_category', value: 'vacations', reason: 'You asked to remove it.' };
+
+  it('defaults reassignTo to "other" when the model does not name one', () => {
+    expect(parseChatAction(valid, undefined, owned)).toEqual({ ...valid, reassignTo: 'other' });
+  });
+
+  it('accepts an explicit reassignTo, copied verbatim', () => {
+    expect(parseChatAction({ ...valid, reassignTo: 'shopping' }, undefined, owned))
+      .toEqual({ ...valid, reassignTo: 'shopping' });
+  });
+
+  it('rejects with no owner category context at all', () => {
+    expect(parseChatAction(valid)).toBeNull();
+  });
+
+  it('rejects a value the owner does not have', () => {
+    expect(parseChatAction({ ...valid, value: 'not-real' }, undefined, owned)).toBeNull();
+  });
+
+  it('rejects a BUILT-IN default — those cannot be removed this way', () => {
+    expect(parseChatAction({ ...valid, value: 'food' }, undefined, owned)).toBeNull();
+  });
+
+  it('rejects reassigning to itself', () => {
+    expect(parseChatAction({ ...valid, reassignTo: 'vacations' }, undefined, owned)).toBeNull();
+  });
+
+  it('rejects a reassignTo that is not in the owner\'s set', () => {
+    expect(parseChatAction({ ...valid, reassignTo: 'not-real' }, undefined, owned)).toBeNull();
+  });
+
+  it('rejects a reassignTo that is ARCHIVED', () => {
+    const withArchivedOther = resolveCategories({
+      categories: [
+        { value: 'vacations', label: 'Vacations' },
+        { value: 'side-fund', label: 'Side fund', archived: true },
+      ],
+    });
+    expect(parseChatAction({ ...valid, reassignTo: 'side-fund' }, undefined, withArchivedOther)).toBeNull();
+  });
+
+  it('rejects an empty reason', () => {
+    expect(parseChatAction({ ...valid, reason: '' }, undefined, owned)).toBeNull();
+  });
+
+  it('rejects an unknown top-level key', () => {
+    expect(parseChatAction({ ...valid, extra: 1 }, undefined, owned)).toBeNull();
   });
 });

@@ -1,6 +1,9 @@
 import { getFirestore } from 'firebase-admin/firestore';
 
 import { applyDecisionCore, undoDecision, undoPatch, validateOp } from '../decisions';
+import { EXPENSE_CATEGORIES } from '@/types';
+
+const DEFAULT_CATEGORIES = new Set(EXPENSE_CATEGORIES.map((c) => c.value));
 
 // Only undoDecision (the callable) touches Firestore in this file — the mock
 // exists purely for its two tests below, same shape as rate-limit.test.ts.
@@ -38,6 +41,46 @@ it('builds the rule doc and counts exactly the rows the rule changes', () => {
   expect(summary.monthsAffected).toEqual(['2026-06', '2026-07']);
 });
 
+describe('applyDecisionCore — validates against the LEDGER\'s resolved categories (cashflow-mobile#24)', () => {
+  it('accepts a custom category present in ledger.categories', () => {
+    const withCustom = {
+      ...(ledger as unknown as Record<string, unknown>),
+      categories: [
+        ...EXPENSE_CATEGORIES.map((c) => ({ ...c, archived: false })),
+        { value: 'vacations', label: 'Vacations', icon: '🏖️', archived: false },
+      ],
+    };
+    expect(() =>
+      applyDecisionCore(withCustom as never, { ...op, set: { category: 'vacations' } } as never, '2026-08-21T00:00:00.000Z')
+    ).not.toThrow();
+  });
+
+  it('still rejects a category outside even the ledger\'s resolved set', () => {
+    expect(() =>
+      applyDecisionCore(ledger, { ...op, set: { category: 'not-a-real-category' } } as never, '2026-08-21T00:00:00.000Z')
+    ).toThrow();
+  });
+
+  it('rejects an ARCHIVED category — no new row may be filed under it', () => {
+    const withArchived = {
+      ...(ledger as unknown as Record<string, unknown>),
+      categories: [
+        ...EXPENSE_CATEGORIES.map((c) => ({ ...c, archived: false })),
+        { value: 'vacations', label: 'Vacations', icon: '🏖️', archived: true },
+      ],
+    };
+    expect(() =>
+      applyDecisionCore(withArchived as never, { ...op, set: { category: 'vacations' } } as never, '2026-08-21T00:00:00.000Z')
+    ).toThrow();
+  });
+
+  it('a ledger with no categories field falls back to the 13 defaults, exactly today\'s behaviour', () => {
+    expect(() =>
+      applyDecisionCore(ledger, { ...op, set: { category: 'food' } } as never, '2026-08-21T00:00:00.000Z')
+    ).not.toThrow();
+  });
+});
+
 it('rejects malformed ops with the rules-file constraints', () => {
   expect(() => validateOp({ kind: 'merchantRule', match: { field: 'x', op: 'contains', value: 'a' }, set: {} } as never)).toThrow();
   expect(() => validateOp({ ...op, match: { ...op.match, value: '' } } as never)).toThrow();
@@ -51,9 +94,32 @@ it('rejects a set key outside category/sourceCategory/type/merchant', () => {
   expect(() => validateOp({ ...op, set: { category: 'food', notAKey: 'x' } } as never)).toThrow();
 });
 
-it('rejects a category that is not a member of EXPENSE_CATEGORIES, including null', () => {
-  expect(() => validateOp({ ...op, set: { category: 'not-a-real-category' } } as never)).toThrow();
+// cashflow-mobile#24: `categories` omitted defers the membership check (see the one
+// after this), but a non-string category is ALWAYS malformed regardless.
+it('rejects a non-string category, including null, even with no categories set given', () => {
   expect(() => validateOp({ ...op, set: { category: null } } as never)).toThrow();
+  expect(() => validateOp({ ...op, set: { category: 3 } } as never)).toThrow();
+});
+
+// cashflow-mobile#24: validateOp is now closed over the OWNER's resolved set, not a
+// hardcoded one — a custom category the owner actually has is accepted, and one
+// they don't is still rejected. Omitting `categories` entirely (the pre-`readLedger`
+// cheap guard in `applyDecision`) skips this check rather than wrongly assuming the
+// 13 defaults are the only valid answer.
+describe('validateOp — the owner\'s resolved category set (cashflow-mobile#24)', () => {
+  it('rejects a category not in the given set', () => {
+    expect(() => validateOp({ ...op, set: { category: 'not-a-real-category' } } as never, DEFAULT_CATEGORIES)).toThrow();
+  });
+
+  it('accepts a custom category when it is in the given set, and still rejects one outside it', () => {
+    const owner = new Set(['food', 'other', 'vacations']);
+    expect(() => validateOp({ ...op, set: { category: 'vacations' } } as never, owner)).not.toThrow();
+    expect(() => validateOp({ ...op, set: { category: 'not-real' } } as never, owner)).toThrow();
+  });
+
+  it('omitted categories skips the membership check — deferred to the ledger-aware caller', () => {
+    expect(() => validateOp({ ...op, set: { category: 'a-category-nobody-has' } } as never)).not.toThrow();
+  });
 });
 
 it('rejects a type outside expense/income/transfer', () => {

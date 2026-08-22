@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { CategoryBudget, EXPENSE_CATEGORIES, ExpenseCategory } from '@/types';
+import React, { useState, useEffect, useMemo } from 'react';
+import { CategoryBudget, ExpenseCategory, resolveCategories, selectableCategories } from '@/types';
 import { getSuggestedBudgets } from '@/lib/budgets';
+import { useUserProfile } from '@/context/UserProfileContext';
 import { DollarSign, Check, Lightbulb, ToggleLeft, ToggleRight } from 'lucide-react';
 
 interface BudgetSettingsPanelProps {
@@ -16,24 +17,33 @@ export default function BudgetSettingsPanel({
   monthlyIncome,
   onSave,
 }: BudgetSettingsPanelProps) {
+  const { profile } = useUserProfile();
   const [localBudgets, setLocalBudgets] = useState<CategoryBudget[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [showSuggested, setShowSuggested] = useState(false);
-  
+
+  // cashflow-mobile#24. Setting a budget on a category is a NEW selection (the
+  // toggle creates a CategoryBudget row), so archived categories are excluded
+  // outright — no currentValue to preserve the way a single-row `<select>` needs.
+  const categoryOptions = useMemo(
+    () => selectableCategories(resolveCategories(profile?.settings)),
+    [profile?.settings]
+  );
+
   useEffect(() => {
     // Initialize with existing budgets or defaults
     if (budgets.length > 0) {
       setLocalBudgets(budgets);
     } else {
       // Create default budgets for all categories
-      const defaults = EXPENSE_CATEGORIES.map(cat => ({
+      const defaults = categoryOptions.map(cat => ({
         categoryId: cat.value as ExpenseCategory,
         monthlyLimit: 0,
         isEnabled: false,
       }));
       setLocalBudgets(defaults);
     }
-  }, [budgets]);
+  }, [budgets, categoryOptions]);
   
   const handleToggle = (categoryId: ExpenseCategory) => {
     setLocalBudgets(prev => 
@@ -131,7 +141,7 @@ export default function BudgetSettingsPanel({
       
       {/* Category List */}
       <div className="space-y-3 mb-6">
-        {EXPENSE_CATEGORIES.map(category => {
+        {categoryOptions.map(category => {
           const budget = localBudgets.find(b => b.categoryId === category.value);
           const isEnabled = budget?.isEnabled || false;
           const amount = budget?.monthlyLimit || 0;
@@ -148,7 +158,7 @@ export default function BudgetSettingsPanel({
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <button
-                    onClick={() => handleToggle(category.value)}
+                    onClick={() => handleToggle(category.value as ExpenseCategory)}
                     className="text-[var(--accent-primary)] transition-transform hover:scale-110"
                   >
                     {isEnabled ? (
@@ -170,7 +180,7 @@ export default function BudgetSettingsPanel({
                   <input
                     type="number"
                     value={amount || ''}
-                    onChange={(e) => handleAmountChange(category.value, e.target.value)}
+                    onChange={(e) => handleAmountChange(category.value as ExpenseCategory, e.target.value)}
                     placeholder="0"
                     disabled={!isEnabled}
                     className={`w-32 pl-8 pr-3 py-2 rounded-control border text-right font-medium ${

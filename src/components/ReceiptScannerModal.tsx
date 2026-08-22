@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { 
   X, 
   Camera, 
@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
-import { Transaction, EXPENSE_CATEGORIES, ExpenseCategory, PAYMENT_METHODS, PaymentMethod } from '@/types';
+import { Transaction, ExpenseCategory, PAYMENT_METHODS, PaymentMethod, resolveCategories, selectableCategories } from '@/types';
 import Sheet from '@/components/Sheet';
 import { parseReceiptCallable, callableErrorMessage } from '@/lib/callables';
 
@@ -86,6 +86,13 @@ export default function ReceiptScannerModal({ isOpen, onClose }: ReceiptScannerM
   const [detectedMerchant, setDetectedMerchant] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
+  // cashflow-mobile#24. Each parsed row keeps its own AI-guessed category as its
+  // current value — selectableCategories is applied per row in the render below,
+  // never dropping a row's already-set category even if it later gets archived.
+  const resolvedCategories = useMemo(
+    () => resolveCategories(profile?.settings),
+    [profile?.settings]
+  );
   const [importSuccess, setImportSuccess] = useState(false);
 
   // Map detected payment method to our payment methods
@@ -473,7 +480,7 @@ export default function ReceiptScannerModal({ isOpen, onClose }: ReceiptScannerM
                               onChange={(e) => updateTransaction(index, 'category', e.target.value)}
                               className="flex-1 px-3 py-2 rounded-control bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
                             >
-                              {EXPENSE_CATEGORIES.map((cat) => (
+                              {selectableCategories(resolvedCategories, txn.category).map((cat) => (
                                 <option key={cat.value} value={cat.value}>
                                   {cat.icon} {cat.label}
                                 </option>

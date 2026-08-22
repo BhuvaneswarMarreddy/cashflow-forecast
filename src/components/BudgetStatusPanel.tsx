@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import { CategoryBudget, CategoryBudgetStatus, PaymentAccount, Transaction, EXPENSE_CATEGORIES } from '@/types';
+import { CategoryBudget, CategoryBudgetStatus, PaymentAccount, Transaction, resolveCategories } from '@/types';
 import { calculateBudgetStatuses, getTopBudgetRisks } from '@/lib/budgets';
+import { useUserProfile } from '@/context/UserProfileContext';
 import { PieChart, AlertTriangle, CheckCircle2, TrendingUp } from 'lucide-react';
 
 interface BudgetStatusPanelProps {
@@ -20,6 +21,17 @@ export default function BudgetStatusPanel({
   accounts,
   compact = true,
 }: BudgetStatusPanelProps) {
+  const { profile } = useUserProfile();
+  // cashflow-mobile#24. DISPLAY lookup — the full resolved set (archived
+  // included): calculateBudgetStatuses (src/lib/budgets.ts) still falls back
+  // `categoryLabel` to the raw stored value for anything outside the 13
+  // defaults, but the icon lookups below had NO fallback at all and rendered
+  // blank for a custom category. This gives both a real label and a real icon.
+  const resolvedCategories = useMemo(
+    () => resolveCategories(profile?.settings),
+    [profile?.settings]
+  );
+
   const statuses = useMemo(() =>
     calculateBudgetStatuses(budgets, transactions, new Date(), accounts),
     [budgets, transactions, accounts]
@@ -100,13 +112,13 @@ export default function BudgetStatusPanel({
         
         <div className="space-y-2">
           {risks.map(status => {
-            const categoryInfo = EXPENSE_CATEGORIES.find(c => c.value === status.categoryId);
-            
+            const categoryInfo = resolvedCategories.find(c => c.value === status.categoryId);
+
             return (
               <div key={status.categoryId} className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm">{categoryInfo?.icon}</span>
-                  <span className="text-sm text-[var(--foreground)]">{status.categoryLabel}</span>
+                  <span className="text-sm">{categoryInfo?.icon || '🏷️'}</span>
+                  <span className="text-sm text-[var(--foreground)]">{categoryInfo?.label ?? status.categoryLabel}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-20 h-1.5 rounded-pill bg-[var(--background-tertiary)] overflow-hidden">
@@ -164,8 +176,8 @@ export default function BudgetStatusPanel({
       {/* Category Breakdown */}
       <div className="space-y-3">
         {statuses.map(status => {
-          const categoryInfo = EXPENSE_CATEGORIES.find(c => c.value === status.categoryId);
-          const progressColor = status.isOverBudget 
+          const categoryInfo = resolvedCategories.find(c => c.value === status.categoryId);
+          const progressColor = status.isOverBudget
             ? 'bg-amber-500' 
             : status.percentUsed >= 80 
               ? 'bg-amber-400' 
@@ -178,8 +190,8 @@ export default function BudgetStatusPanel({
             >
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
-                  <span className="text-lg">{categoryInfo?.icon}</span>
-                  <span className="font-medium text-[var(--foreground)]">{status.categoryLabel}</span>
+                  <span className="text-lg">{categoryInfo?.icon || '🏷️'}</span>
+                  <span className="font-medium text-[var(--foreground)]">{categoryInfo?.label ?? status.categoryLabel}</span>
                 </div>
                 <div className="text-right">
                   <span className={`font-medium ${status.isOverBudget ? 'text-amber-500' : 'text-[var(--foreground)]'}`}>

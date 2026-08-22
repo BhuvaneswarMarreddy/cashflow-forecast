@@ -43,6 +43,18 @@ describe('buildChatMessages', () => {
     expect(system.content).toContain('(none)');
   });
 
+  // cashflow-mobile#24: add/rename/remove_category are taught the same way every other
+  // verb is — a JSON shape line plus requirements, present on every system prompt.
+  it('teaches add_category/rename_category/remove_category', () => {
+    const [system] = buildChatMessages({ message: 'hi', context: ctx });
+    const text = asText(system.content);
+    expect(text).toContain('"action":"add_category"');
+    expect(text).toContain('"action":"rename_category"');
+    expect(text).toContain('"action":"remove_category"');
+    expect(text).toContain('the user\'s OWN set');
+    expect(text).toContain('never a built-in default');
+  });
+
   it('keeps the trailing history turns, in order, and drops junk roles', () => {
     const msgs = buildChatMessages({
       message: 'and Carvana is a car loan',
@@ -103,7 +115,10 @@ describe('buildChatMessages', () => {
     // paragraph grew to explain UPCOMING's absent-vs-empty distinction, and RECORD A BILL
     // gained one sentence on fuzzy vendor matching — both constant text, present on every
     // system prompt regardless of context. Measured worst-case went 17775 -> 18455 (+680).
-    expect(system.length).toBeLessThan(18700);
+    // Bumped again from 18700 (cashflow-mobile#24): the CATEGORIES block (prompts.ts)
+    // teaches add_category/rename_category/remove_category — constant text on every
+    // system prompt. Measured worst-case went 18455 -> 20450 (+1995 chars).
+    expect(system.length).toBeLessThan(20700);
   });
 
   it('survives a garbage context without throwing', () => {
@@ -300,7 +315,9 @@ describe('ChatContext — bills/upcoming/recurring sections (#22)', () => {
     const system = asText(msgs[0].content);
     // Measured 40346 with everything above maxed simultaneously. Bound set to 41000 —
     // modest headroom over the measured figure, not a round number picked in advance.
-    expect(system.length).toBeLessThan(41000);
+    // Bumped again (cashflow-mobile#24): the CATEGORIES block adds the same constant
+    // ~1995 chars as the test above. Measured 42341.
+    expect(system.length).toBeLessThan(42600);
   });
 
   it('caps bills/upcoming/recurring and reports what was left out, same convention as merchants/months', () => {

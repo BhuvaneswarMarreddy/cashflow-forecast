@@ -5,7 +5,7 @@ import { X, DollarSign, Calendar, CreditCard, Tag, FileText, Building2, Wallet, 
 import Sheet from '@/components/Sheet';
 import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
-import { PAYMENT_METHODS, EXPENSE_CATEGORIES, COMMON_MERCHANTS, Transaction, TransactionType, TransferDirection, PaymentMethod, ExpenseCategory, AccountType, suggestCategoryFromMerchant, getMerchantColor } from '@/types';
+import { PAYMENT_METHODS, COMMON_MERCHANTS, Transaction, TransactionType, TransferDirection, PaymentMethod, ExpenseCategory, AccountType, suggestCategoryFromMerchant, getMerchantColor, resolveCategories, selectableCategories } from '@/types';
 
 interface AddTransactionModalProps {
   isOpen: boolean;
@@ -43,6 +43,19 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
   const [merchantFilter, setMerchantFilter] = useState('');
   const merchantInputRef = useRef<HTMLInputElement>(null);
   const merchantDropdownRef = useRef<HTMLDivElement>(null);
+
+  // cashflow-mobile#24. defaults + the owner's own set (profile.settings.categories);
+  // categoryOptions is what a NEW selection may offer — archived excluded, except
+  // the row's own current value (editTransaction) if editing one that already
+  // carries an archived/custom category, so editing never yanks it out from under it.
+  const resolvedCategories = React.useMemo(
+    () => resolveCategories(profile?.settings),
+    [profile?.settings]
+  );
+  const categoryOptions = React.useMemo(
+    () => selectableCategories(resolvedCategories, editTransaction?.category),
+    [resolvedCategories, editTransaction?.category]
+  );
 
   // Get unique merchants from transaction history
   const recentMerchants = React.useMemo(() => {
@@ -581,7 +594,7 @@ export default function AddTransactionModal({ isOpen, onClose, defaultDate, edit
                 onChange={(e) => setFormData({ ...formData, category: e.target.value as ExpenseCategory })}
                 className="select-field pl-12"
               >
-                {EXPENSE_CATEGORIES.map((cat) => (
+                {categoryOptions.map((cat) => (
                   <option key={cat.value} value={cat.value}>
                     {cat.icon} {cat.label}
                   </option>
