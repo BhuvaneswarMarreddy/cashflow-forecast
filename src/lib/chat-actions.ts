@@ -18,7 +18,8 @@ import {
   Transaction,
   TransactionType,
 } from '@/types';
-import type { BillFrequency } from './bills';
+import { buildAssumptions } from './behavior';
+import { isCharging, PAYMENT_METHODS, type Bill, type BillFrequency } from './bills';
 import { buildLedgerSummary, LedgerSummary } from './chat-summary';
 import { describeRule, MappingRule, NewMappingRule } from './mapping-rules';
 import { MAX_PROPOSED_LINKS, ReviewCandidate } from './candidates';
@@ -32,6 +33,17 @@ export interface ChatContext {
   recent: { title: string; merchant?: string; amount: number; category?: string }[];
   /** App-computed totals over EVERY row — see chat-summary.ts. */
   summary?: LedgerSummary;
+  /**
+   * #22: the owner's recorded Bills register, filtered to current (not cancelled, not
+   * past its endDate — same `isCharging` rule billUpcomingEvents uses), so the chat can
+   * answer "is X already on my bills" instead of "I have no information". No `upcoming`
+   * counterpart on web: that is homeSnapshot's forecast-events + bill-events merge
+   * (functions/src/snapshot.ts), which nothing on the web client computes today.
+   */
+  bills: { vendor: string; amount: number; frequency: BillFrequency; nonNegotiable?: boolean; endDate?: string; installmentsRemaining?: number; method?: string }[];
+  /** #22: detected recurring merchants (behavior.ts's buildAssumptions().fixedBills),
+   *  separate from the owner-curated Bills register above. */
+  recurring: { merchant: string; amount: number; cadence: string }[];
 }
 
 /**
@@ -162,6 +174,10 @@ const MAX = {
   transactionId: 128,
   // firestore.rules' isValidString(vendor, 1, 200) — the same ceiling the write itself enforces.
   vendor: 200,
+  // #22 — breadth caps for the two new context sections, same idea as `merchants` above:
+  // bound the LIST length so a large register/ledger cannot grow the context unboundedly.
+  bills: 60,
+  recurring: 40,
 } as const;
 
 const CATEGORIES: readonly string[] = EXPENSE_CATEGORIES.map((c) => c.value);
@@ -183,7 +199,8 @@ const clip = (s: string, max: number = MAX.str) => s.trim().slice(0, max);
  */
 export function buildChatContext(
   transactions: Transaction[],
-  accounts: PaymentAccount[] = []
+  accounts: PaymentAccount[] = [],
+  bills: Bill[] = []
 ): ChatContext {
   const counts = new Map<string, number>();
   for (const t of transactions) {
@@ -206,6 +223,8 @@ export function buildChatContext(
       ...(t.category ? { category: t.category } : {}),
     }));
 
+  const today = new Date().toISOString().slice(0, 10);
+
   return {
     categories: EXPENSE_CATEGORIES.map((c) => c.value),
     merchants,
@@ -214,6 +233,26 @@ export function buildChatContext(
     // Totals over EVERY row. `recent` is 20 rows of raw text so the model can see what
     // bank feeds look like for rule-writing; it is NOT the evidence for any number.
     summary: buildLedgerSummary(transactions, accounts),
+    // #22: current bills only — same rule billUpcomingEvents applies, so a cancelled or
+    // expired row never reads as "still going" to the model. Capped/clipped like every
+    // other list here (`merchants` above) — a large register must not grow the prompt.
+    bills: bills
+      .filter((b) => isCharging(b, today))
+      .slice(0, MAX.bills)
+      .map((b) => ({
+        vendor: clip(b.vendor),
+        amount: b.amount,
+        frequency: b.frequency,
+        ...(b.nonNegotiable ? { nonNegotiable: true } : {}),
+        ...(b.endDate ? { endDate: b.endDate } : {}),
+        ...(b.installmentsRemaining !== undefined ? { installmentsRemaining: b.installmentsRemaining } : {}),
+        ...(PAYMENT_METHODS[b.paymentMethodId]?.label ? { method: PAYMENT_METHODS[b.paymentMethodId].label } : {}),
+      })),
+    // detectRecurring's own active set, via behavior.ts's buildAssumptions — one
+    // derivation, not a second copy of the pattern-matching rules.
+    recurring: buildAssumptions(transactions, accounts).fixedBills
+      .slice(0, MAX.recurring)
+      .map((r) => ({ merchant: clip(r.merchant), amount: r.amount, cadence: r.cadence })),
   };
 }
 
