@@ -20,6 +20,26 @@ const UNAVAILABLE = {
   explanation: 'AI chat is temporarily unavailable. You can add the rule by hand in Settings.',
 };
 
+/**
+ * Image turns are rare (rate-limited, personal app) and gpt-4o-mini's weaker vision is
+ * what users actually notice — a crisp Apple Card installment screenshot came back
+ * "I cannot read the details from the image." This is the receipt scanner's quality
+ * problem class solved at the source, for chat: pay for the stronger vision model only
+ * on the turns that carry an image; text-only turns keep the cheap configured model.
+ */
+export function modelFor(hasImage: boolean): string {
+  return hasImage ? 'gpt-4o' : AI_CONFIG.model;
+}
+
+/**
+ * Success-log fields — counts/booleans only, never merchant text, figures or base64.
+ * The narrow return type is the enforcement: a future field has to fit boolean | number,
+ * not free text.
+ */
+export function successLogFields(hasImage: boolean, durationMs: number): { hasImage: boolean; durationMs: number } {
+  return { hasImage, durationMs };
+}
+
 export const aiChat = onCall(
   {
     secrets: ['OPENAI_API_KEY'],
@@ -48,12 +68,14 @@ export const aiChat = onCall(
     // its real invalid-argument code instead of being flattened into the generic 'internal'
     // catch-all meant for OpenAI call failures.
     const messages = buildChatMessages(body);
+    const hasImage = Boolean(body.imageBase64);
+    const startedAt = Date.now();
 
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
     try {
       const completion = await openai.chat.completions.create({
-        model: AI_CONFIG.model,
+        model: modelFor(hasImage),
         temperature: 0,
         max_tokens: 500,
         response_format: { type: 'json_object' },
@@ -61,6 +83,9 @@ export const aiChat = onCall(
       });
 
       const content = completion.choices[0]?.message?.content || '';
+      // Counts only — never the message, merchant names or base64. See applyDecision's
+      // console.log for the same discipline elsewhere in this codebase.
+      console.log('aiChat', successLogFields(hasImage, Date.now() - startedAt));
       try {
         return { success: true, result: JSON.parse(content) };
       } catch {
