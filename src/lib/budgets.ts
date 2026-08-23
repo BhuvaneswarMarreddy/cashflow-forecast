@@ -7,7 +7,7 @@
 
 import { Transaction, PaymentAccount, CategoryBudget, CategoryBudgetStatus, ExpenseCategory, EXPENSE_CATEGORIES } from '@/types';
 import { startOfMonth, endOfMonth, format, parseISO, differenceInDays, isWithinInterval } from 'date-fns';
-import { interpretTransaction } from '@/lib/classify';
+import { interpretTransaction, IncomeContext } from '@/lib/classify';
 import { netCategorySpendingCents } from '@/lib/refunds';
 import { TransactionLink } from '@/lib/relations';
 
@@ -26,9 +26,15 @@ import { TransactionLink } from '@/lib/relations';
  * `accounts` is optional: without it a card-payment leg on a card cannot be
  * recognised, which is the pre-existing behaviour of every caller that has no
  * account list to hand.
+ *
+ * `income` is optional too, but its absence is not free: without it, `interpretTransaction`
+ * never sees the owner's review confirmations, so a transfer-typed row the owner has
+ * confirmed as e.g. `loan_repayment` (a real cost) falls back to the derived
+ * `type === 'transfer'` answer and is silently excluded — the exact gap every other
+ * screen (Flow, Dashboard, Forecast, mobile) closed by passing this context.
  */
-const countsAgainstBudget = (t: Transaction, accounts?: PaymentAccount[]) =>
-  interpretTransaction(t, accounts).budget === 'counted';
+const countsAgainstBudget = (t: Transaction, accounts?: PaymentAccount[], income?: IncomeContext) =>
+  interpretTransaction(t, accounts, income).budget === 'counted';
 
 /**
  * A confirmed refund reduces consumed budget. FIN-REFUND-001 exposed
@@ -45,11 +51,11 @@ const countsAgainstBudget = (t: Transaction, accounts?: PaymentAccount[]) =>
  * Gross is never destroyed to show net: the row keeps its full amount in History, and
  * `getAllCategorySpending(txns, month, accounts)` still answers gross for anyone who asks.
  */
-const inMonth = (transactions: Transaction[], month: Date, accounts?: PaymentAccount[]) => {
+const inMonth = (transactions: Transaction[], month: Date, accounts?: PaymentAccount[], income?: IncomeContext) => {
   const monthStart = startOfMonth(month);
   const monthEnd = endOfMonth(month);
   return transactions.filter(t =>
-    countsAgainstBudget(t, accounts) && isWithinInterval(parseISO(t.date), { start: monthStart, end: monthEnd })
+    countsAgainstBudget(t, accounts, income) && isWithinInterval(parseISO(t.date), { start: monthStart, end: monthEnd })
   );
 };
 
@@ -61,11 +67,12 @@ export function getCategorySpending(
   categoryId: ExpenseCategory,
   month: Date = new Date(),
   accounts?: PaymentAccount[],
-  links?: readonly TransactionLink[]
+  links?: readonly TransactionLink[],
+  income?: IncomeContext
 ): number {
-  if (links?.length) return getAllCategorySpending(transactions, month, accounts, links)[categoryId] ?? 0;
+  if (links?.length) return getAllCategorySpending(transactions, month, accounts, links, income)[categoryId] ?? 0;
 
-  return inMonth(transactions, month, accounts)
+  return inMonth(transactions, month, accounts, income)
     .filter(t => t.category === categoryId)
     .reduce((sum, t) => sum + t.amount, 0);
 }
@@ -77,9 +84,10 @@ export function getAllCategorySpending(
   transactions: Transaction[],
   month: Date = new Date(),
   accounts?: PaymentAccount[],
-  links?: readonly TransactionLink[]
+  links?: readonly TransactionLink[],
+  income?: IncomeContext
 ): Record<ExpenseCategory, number> {
-  const rows = inMonth(transactions, month, accounts);
+  const rows = inMonth(transactions, month, accounts, income);
 
   // Net path: integer cents throughout, then one division at the boundary.
   if (links?.length) {
@@ -131,9 +139,10 @@ export function calculateBudgetStatuses(
   transactions: Transaction[],
   month: Date = new Date(),
   accounts?: PaymentAccount[],
-  links?: readonly TransactionLink[]
+  links?: readonly TransactionLink[],
+  income?: IncomeContext
 ): CategoryBudgetStatus[] {
-  const spending = getAllCategorySpending(transactions, month, accounts, links);
+  const spending = getAllCategorySpending(transactions, month, accounts, links, income);
   
   return budgets
     .filter(b => b.isEnabled && b.monthlyLimit > 0)
@@ -168,9 +177,10 @@ export function getTopBudgetRisks(
   transactions: Transaction[],
   limit: number = 3,
   month: Date = new Date(),
-  accounts?: PaymentAccount[]
+  accounts?: PaymentAccount[],
+  income?: IncomeContext
 ): CategoryBudgetStatus[] {
-  const statuses = calculateBudgetStatuses(budgets, transactions, month, accounts);
+  const statuses = calculateBudgetStatuses(budgets, transactions, month, accounts, undefined, income);
   
   // Filter to categories that are over budget or at risk
   const atRisk = statuses.filter(s => s.isOverBudget || s.isAtRisk || s.percentUsed >= 80);
@@ -187,14 +197,15 @@ export function simulateBudgetImpact(
   categoryId: ExpenseCategory,
   amount: number,
   month: Date = new Date(),
-  accounts?: PaymentAccount[]
+  accounts?: PaymentAccount[],
+  income?: IncomeContext
 ): {
   currentStatus: CategoryBudgetStatus | null;
   afterSpend: CategoryBudgetStatus | null;
   wouldExceedBudget: boolean;
 } {
   const budget = budgets.find(b => b.categoryId === categoryId && b.isEnabled);
-  
+
   if (!budget) {
     return {
       currentStatus: null,
@@ -202,8 +213,8 @@ export function simulateBudgetImpact(
       wouldExceedBudget: false,
     };
   }
-  
-  const spending = getAllCategorySpending(transactions, month, accounts);
+
+  const spending = getAllCategorySpending(transactions, month, accounts, undefined, income);
   const currentSpent = spending[categoryId] || 0;
   const afterSpent = currentSpent + amount;
   
