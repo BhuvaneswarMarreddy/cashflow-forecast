@@ -87,7 +87,21 @@ export function monthlyAverages(
   // it are not.
   const sorted = [...observed].sort();
   const first = sorted[0];
-  const latest = [...window].sort().pop()!;
+  // BOTH ends come from `observed`, not from the window.
+  //
+  // Taking `latest` from the window applied the very bug this function's
+  // docstring exists to fix, mirrored to the other edge: months after a bank
+  // feed dies were averaged in as real zero-spend months. Feed dies in April
+  // with a June window and you divide three months of spending by six — burn
+  // reads half, and runway, being cash ÷ burn, reads double. It worsens every
+  // month the feed stays dead, and a Plaid item needing re-auth is the most
+  // common event in this product's life.
+  //
+  // Trade-off, deliberately taken: a genuinely spend-free most-recent month now
+  // shortens the divisor and overstates burn a little. That errs toward a
+  // SHORTER runway — the safe direction, and the one this docstring already
+  // argues for.
+  const latest = sorted[sorted.length - 1];
   const span = monthsBetweenInclusive(first, latest);
   const divisor = Math.min(Math.max(span, 1), months);
 

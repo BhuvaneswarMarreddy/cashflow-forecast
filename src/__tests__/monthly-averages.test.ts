@@ -157,3 +157,50 @@ describe('monthlyAverages', () => {
     expect(monthlyAverages(txns, A, 1, { sources: [{ ...EMPLOYER, isActive: false }] }).income).toBe(0);
   });
 });
+
+/**
+ * The SAME bug at the other end of the window.
+ *
+ * The divisor above was fixed for a truncated START — history shorter than the
+ * window. `latest` was still taken from the window rather than from what was
+ * observed, so a truncated END behaved exactly the way the start used to: months
+ * after a bank feed dies are counted as real zero-spend months.
+ *
+ * That is not a quiet month, it is absence of data — the distinction this file
+ * already draws. And it runs in the flattering direction, the one the comment
+ * above calls out: burn understated, runway overstated, worsening every month
+ * the feed stays dead. A Plaid item needing re-auth is the most common event in
+ * this product's life.
+ *
+ * Trade-off, deliberately taken: a genuinely spend-free most-recent month now
+ * shortens the divisor and overstates burn slightly. That errs toward a SHORTER
+ * runway. Given a real ledger essentially always has some row in the latest
+ * month, and given the documented worst failure here is telling someone they
+ * have more cushion than they do, that is the correct direction.
+ */
+describe('monthlyAverages — a dead feed is missing data, not frugality', () => {
+  const A = [acct({ id: 'b' })];
+
+  it('does not average over months the feed stopped reporting', () => {
+    // Present months 6..4 at $1,200/mo, then the feed dies. Months 3..1 are
+    // silent because nothing arrived, not because nothing was spent.
+    const txns = [
+      tx({ id: 'e6', amount: 1200, type: 'expense', accountId: 'b', date: m(6) }),
+      tx({ id: 'e5', amount: 1200, type: 'expense', accountId: 'b', date: m(5) }),
+      tx({ id: 'e4', amount: 1200, type: 'expense', accountId: 'b', date: m(4) }),
+    ];
+    // $3,600 over the three months actually observed — not ÷ 6, which would
+    // report $600 and double the runway built on it.
+    expect(monthlyAverages(txns, A, 6, { sources: [EMPLOYER] }).spending).toBe(1200);
+  });
+
+  it('still counts quiet months that sit BETWEEN observations', () => {
+    // The start-truncation rule must survive: months 3 and 2 are real zeros,
+    // because the user was demonstrably present on either side of them.
+    const txns = [
+      tx({ id: 'e4', amount: 800, type: 'expense', accountId: 'b', date: m(4) }),
+      tx({ id: 'e1', amount: 800, type: 'expense', accountId: 'b', date: m(1) }),
+    ];
+    expect(monthlyAverages(txns, A, 6, { sources: [EMPLOYER] }).spending).toBe(400); // 1600 / 4
+  });
+});
