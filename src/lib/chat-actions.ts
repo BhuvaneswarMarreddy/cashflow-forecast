@@ -699,7 +699,10 @@ export function parseChatAction(
     if (!reason) return null;
     // Finite, positive, and bounded: a model typo (25000 instead of 2500) would
     // otherwise pass straight through as the owner's own runway assumption.
-    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0 || amount > 1_000_000) return null;
+    // Floor at a cent, not just > 0: 0.004 would pass `amount > 0` here, then round
+    // to exactly 0 below — the card says "Saved" but writes 0, and
+    // sanitizeAssumedSpend(0) silently reverts to the derived average on next read.
+    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0.01 || amount > 1_000_000) return null;
     return { action: 'set_monthly_spend', amount: Math.round(amount * 100) / 100, reason };
   }
 
@@ -732,7 +735,10 @@ export function parseChatAction(
     if (!vendor || !reason) return null;
 
     const amount = o.amount;
-    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0 || amount > 100_000) return null;
+    // Floor at a cent, not just > 0: a sub-cent amount rounds to exactly 0 below and
+    // would save a bill of $0 while the card claims success — same failure mode as
+    // set_monthly_spend above.
+    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0.01 || amount > 100_000) return null;
 
     if (typeof o.frequency !== 'string' || !BILL_FREQUENCIES.includes(o.frequency)) return null;
     const frequency = o.frequency as BillFrequency;
