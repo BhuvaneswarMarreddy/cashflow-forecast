@@ -99,29 +99,35 @@ describe('FEEDLESS-CARD-001: the $800 Amazon payment reaches the mobile snapshot
     expect(card.balanceCents).toBe(120_000 - 80_000); // anchor 1200 - the payment
   });
 
-  it('the double-count guard: once the card has itemized rows, later payments stop counting', () => {
-    // #14 round 2: the guard is a PER-PAYMENT predicate — a payment stops counting
-    // once the card has a POSTED row of its own dated ON/BEFORE it (a real row
-    // already covers that period). Relative dates (not literal year strings), same
-    // reasoning as lastMonthDate above — deterministic whenever this suite runs.
-    const twoMonthsAgo = monthsAgo(2, 1);   // earlyPayment: before the card's own row
-    const itemizedDate = monthsAgo(1, 15);  // the card's own (only) row
-    const oneMonthAgoLater = monthsAgo(1, 20); // laterPayment: after the card's own row
+  it('the double-count guard: a payment stops counting ONLY in the same period as the card’s own row (#14 round 3)', () => {
+    // #14 round 3: the guard keys off the payment's OWN period, not "before/after
+    // the card's one qualifying row". Round 2 got this exact shape backwards — it
+    // guarded whichever payment was EARLIER than the itemized row, regardless of
+    // whether that payment's own month had any covering data at all. Here the
+    // itemized row and `laterPayment` share the SAME month; `earlyPayment` is a
+    // DIFFERENT, uncovered month two months back. Relative dates (not literal year
+    // strings), same reasoning as lastMonthDate above — deterministic whenever
+    // this suite runs.
+    const twoMonthsAgo = monthsAgo(2, 1);      // earlyPayment: a DIFFERENT, uncovered period
+    const itemizedDate = monthsAgo(1, 15);     // the card's own (only) row
+    const oneMonthAgoLater = monthsAgo(1, 20); // laterPayment: the SAME period as the itemized row
 
     const itemizedRow: Transaction = {
       id: 'own1', title: 'Household goods', amount: 45, type: 'expense', category: 'shopping',
       paymentMethod: 'other', date: itemizedDate, accountId: 'amzn',
     };
-    const earlyPayment: Transaction = { ...amazonPayment, id: 'pay1', date: twoMonthsAgo }; // guarded out
-    const laterPayment: Transaction = { ...amazonPayment, id: 'pay2', date: oneMonthAgoLater }; // still counts
+    const earlyPayment: Transaction = { ...amazonPayment, id: 'pay1', date: twoMonthsAgo }; // still counts — different period
+    const laterPayment: Transaction = { ...amazonPayment, id: 'pay2', date: oneMonthAgoLater }; // guarded out — same period as the row
 
     const transactions = [earlyPayment, itemizedRow, laterPayment];
     const { snapshot, accounts } = buildSnapshot({ ...baseLedger, transactions });
 
-    // earlyPayment is guarded out; laterPayment still counts — the itemized row's
-    // own $45 plus laterPayment's $800, not both payments plus the row.
+    // laterPayment is guarded out (its period is covered); earlyPayment still
+    // counts (its period is not) — the itemized row's own $45 plus earlyPayment's
+    // $800, not both payments plus the row. Same arithmetic either way round
+    // because both payments are $800, but WHICH one is guarded is the point.
     const card = accounts.find((a) => a.id === 'amzn')!;
-    expect(card.balanceCents).toBe(120_000 - 80_000 + 4_500); // anchor - laterPayment + purchase
+    expect(card.balanceCents).toBe(120_000 - 80_000 + 4_500); // anchor - earlyPayment + purchase
 
     // IMPORTANT-7: balanceCents alone cannot tell an INERT guard from a working
     // one when both payments are the same $800 — this whole suite passed with the
@@ -137,8 +143,8 @@ describe('FEEDLESS-CARD-001: the $800 Amazon payment reaches the mobile snapshot
     // payment must not silently keep projecting into the forecast baseline.
     const derived = withDerivedBalances([checking, amazonCard], transactions, POSTED_ONLY);
     const derivedAmzn = derived.find((a) => a.id === 'amzn')!;
-    expect(interpretTransaction(earlyPayment, [checking, derivedAmzn]).forecast).toBe('excluded');
-    expect(interpretTransaction(laterPayment, [checking, derivedAmzn]).forecast).toBe('counted');
+    expect(interpretTransaction(earlyPayment, [checking, derivedAmzn]).forecast).toBe('counted');
+    expect(interpretTransaction(laterPayment, [checking, derivedAmzn]).forecast).toBe('excluded');
   });
 });
 
