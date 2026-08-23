@@ -10,3 +10,4 @@ export { importCsv } from './importCsv';
 export { flowSnapshot, flowNodeDetail } from './flow';
 export { reviewQueue, resolveReview } from './review';
 export { applyDecision, undoDecision } from './decisions';
+export { removeCategory } from './categoryRemoval';
