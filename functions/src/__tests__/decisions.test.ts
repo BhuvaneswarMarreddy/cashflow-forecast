@@ -3,6 +3,7 @@ import { HttpsError } from 'firebase-functions/v2/https';
 
 import { applyDecision, applyDecisionCore, undoDecision, undoPatch, validateOp } from '../decisions';
 import { checkRateLimit } from '../rate-limit';
+import { readLedger } from '../snapshot';
 import { EXPENSE_CATEGORIES } from '@/types';
 
 const DEFAULT_CATEGORIES = new Set(EXPENSE_CATEGORIES.map((c) => c.value));
@@ -23,8 +24,14 @@ jest.mock('../rate-limit', () => ({
 // applyDecision's ledger read: mocked so the rate-limit wiring tests below
 // don't need a full Firestore-backed ledger fixture — a sentinel rejection is
 // enough to prove the call reached (or didn't reach) readLedger.
-const readLedgerMock = jest.fn();
-jest.mock('../snapshot', () => ({ readLedger: (...args: unknown[]) => readLedgerMock(...args) }));
+jest.mock('../snapshot', () => ({ readLedger: jest.fn() }));
+
+// (single ../snapshot mock above: both the rate-limit tests and the GAP-3
+// callable tests drive it — a second jest.mock would silently orphan the first.)
+// applyDecision's callable body calls readLedger before applyDecisionCore — GAP 3
+// (audit) found the callable itself had zero coverage, only its pure core did.
+// `readLedger` does nine parallel Firestore reads (see snapshot.ts, out of lane
+// for this fix), so it is mocked rather than exercised for real.
 
 const ledger = {
   transactions: [
@@ -161,6 +168,90 @@ it('accepts valid optional match qualifiers and every allowed set field', () => 
   ).not.toThrow();
 });
 
+// GAP 3 (audit): the callable body — auth check, readLedger, the rule write, the
+// audit write — had zero tests; only applyDecisionCore (the pure core) did. This
+// is the ONLY validated write path for rules (the Admin SDK bypasses firestore.rules),
+// so an unnoticed regression here (e.g. a swallowed write) would ship silently.
+describe('applyDecision (callable)', () => {
+  beforeEach(() => {
+    (readLedger as jest.Mock).mockReset();
+  });
+
+  it('rejects an unauthenticated caller before reading the ledger or touching Firestore', async () => {
+    const fakeDb = { collection: jest.fn() };
+    (getFirestore as jest.Mock).mockReturnValue(fakeDb);
+
+    await expect(
+      applyDecision.run({ auth: undefined, data: op } as never),
+    ).rejects.toMatchObject({ code: 'unauthenticated' });
+    expect(readLedger).not.toHaveBeenCalled();
+    expect(fakeDb.collection).not.toHaveBeenCalled();
+  });
+
+  it('writes the rule doc and the decision.applied audit entry with the expected shapes', async () => {
+    (readLedger as jest.Mock).mockResolvedValue(ledger);
+    let writtenRule: unknown;
+    const audits: unknown[] = [];
+    const fakeDb = {
+      collection: jest.fn(() => ({
+        doc: jest.fn(() => ({
+          collection: jest.fn((name: string) =>
+            name === 'rules'
+              ? {
+                  doc: jest.fn(() => ({
+                    id: 'rule1',
+                    set: jest.fn(async (doc: unknown) => { writtenRule = doc; }),
+                  })),
+                }
+              : { add: jest.fn(async (entry: unknown) => { audits.push(entry); }) },
+          ),
+        })),
+      })),
+    };
+    (getFirestore as jest.Mock).mockReturnValue(fakeDb);
+
+    const result = await applyDecision.run({ auth: { uid: 'u1' }, data: op } as never);
+
+    expect(result).toEqual({
+      decisionId: 'rule1',
+      changed: { transactionsMatched: 2, monthsAffected: ['2026-06', '2026-07'] },
+    });
+    expect(writtenRule).toEqual({
+      match: op.match, set: op.set, createdAt: expect.any(String), enabled: true,
+    });
+    expect(audits).toEqual([{ at: 'TS', actor: 'user', action: 'decision.applied', target: 'rules/rule1' }]);
+  });
+
+  it('surfaces a rejected rule write as an error — never a silent success', async () => {
+    (readLedger as jest.Mock).mockResolvedValue(ledger);
+    const audits: unknown[] = [];
+    const fakeDb = {
+      collection: jest.fn(() => ({
+        doc: jest.fn(() => ({
+          collection: jest.fn((name: string) =>
+            name === 'rules'
+              ? {
+                  doc: jest.fn(() => ({
+                    id: 'rule1',
+                    set: jest.fn(async () => { throw new Error('rule write rejected'); }),
+                  })),
+                }
+              : { add: jest.fn(async (entry: unknown) => { audits.push(entry); }) },
+          ),
+        })),
+      })),
+    };
+    (getFirestore as jest.Mock).mockReturnValue(fakeDb);
+
+    await expect(
+      applyDecision.run({ auth: { uid: 'u1' }, data: op } as never),
+    ).rejects.toThrow('rule write rejected');
+    // The audit entry follows the rule write; a rejected rule write must never
+    // leave a "this was applied" record behind.
+    expect(audits).toEqual([]);
+  });
+});
+
 describe('undoPatch', () => {
   it('is exactly {enabled: false} — disable, never delete, never touch other fields', () => {
     expect(undoPatch()).toEqual({ enabled: false });
@@ -235,8 +326,8 @@ describe('undoDecision', () => {
 describe('applyDecision — rate limiting', () => {
   beforeEach(() => {
     (checkRateLimit as jest.Mock).mockReset();
-    readLedgerMock.mockReset();
-    readLedgerMock.mockRejectedValue(new Error('READLEDGER_CALLED'));
+    (readLedger as jest.Mock).mockReset();
+    (readLedger as jest.Mock).mockRejectedValue(new Error('READLEDGER_CALLED'));
   });
 
   it('rejects over the limit with resource-exhausted, before touching Firestore or the ledger', async () => {
@@ -248,7 +339,7 @@ describe('applyDecision — rate limiting', () => {
       applyDecision.run({ auth: { uid: 'u1' }, data: op } as never),
     ).rejects.toMatchObject({ code: 'resource-exhausted' });
     expect(fakeDb.collection).not.toHaveBeenCalled();
-    expect(readLedgerMock).not.toHaveBeenCalled();
+    expect((readLedger as jest.Mock)).not.toHaveBeenCalled();
   });
 
   it('under the limit, checkRateLimit runs and the call proceeds to readLedger, unaffected', async () => {
@@ -258,6 +349,6 @@ describe('applyDecision — rate limiting', () => {
       applyDecision.run({ auth: { uid: 'u1' }, data: op } as never),
     ).rejects.toThrow('READLEDGER_CALLED');
     expect(checkRateLimit).toHaveBeenCalledWith('u1', 'applyDecision', 100);
-    expect(readLedgerMock).toHaveBeenCalledWith('u1');
+    expect((readLedger as jest.Mock)).toHaveBeenCalledWith('u1');
   });
 });

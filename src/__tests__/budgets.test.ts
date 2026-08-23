@@ -150,6 +150,61 @@ describe('Budget Calculations', () => {
     });
   });
   
+  describe('calculateBudgetStatuses — isAtRisk', () => {
+    // Fixed "today" so daysElapsed/totalDays are known: June 2026 has 30 days,
+    // day 10 of 30 → totalDays/daysElapsed = 3, so projectMonthEndSpending's
+    // Math.round never has to round — exact boundaries are reachable.
+    const TODAY = new Date('2026-06-10T12:00:00Z');
+    const budgets: CategoryBudget[] = [
+      { categoryId: 'food', monthlyLimit: 300, isEnabled: true },
+    ];
+
+    beforeEach(() => {
+      jest.useFakeTimers();
+      jest.setSystemTime(TODAY);
+    });
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('flags a budget on pace to exceed its limit, though nothing is spent yet in the OLD dead-code sense', () => {
+      // spent=101 by day 10 of 30 → projected = round(101/10*30) = 303 > 300, and not yet over.
+      const transactions = [mockTransaction('food', 101)];
+      const status = calculateBudgetStatuses(budgets, transactions, TODAY).find(s => s.categoryId === 'food')!;
+      expect(status.projectedMonthEnd).toBe(303);
+      expect(status.isOverBudget).toBe(false);
+      expect(status.isAtRisk).toBe(true);
+    });
+
+    it('is false once the projection lands exactly on the limit (needs strictly greater)', () => {
+      // spent=100 → projected = round(100/10*30) = 300, exactly the limit.
+      const transactions = [mockTransaction('food', 100)];
+      const status = calculateBudgetStatuses(budgets, transactions, TODAY).find(s => s.categoryId === 'food')!;
+      expect(status.projectedMonthEnd).toBe(300);
+      expect(status.isAtRisk).toBe(false);
+    });
+
+    it('is false once already over budget — isOverBudget and isAtRisk are exclusive', () => {
+      const transactions = [mockTransaction('food', 320)];
+      const status = calculateBudgetStatuses(budgets, transactions, TODAY).find(s => s.categoryId === 'food')!;
+      expect(status.isOverBudget).toBe(true);
+      expect(status.isAtRisk).toBe(false);
+    });
+
+    it('is false with nothing spent (the old `!spent` dead-code path)', () => {
+      const status = calculateBudgetStatuses(budgets, [], TODAY).find(s => s.categoryId === 'food')!;
+      expect(status.spent).toBe(0);
+      expect(status.isAtRisk).toBe(false);
+    });
+
+    it('is false when on pace to land comfortably under the limit', () => {
+      const transactions = [mockTransaction('food', 50)]; // projected = 150 < 300
+      const status = calculateBudgetStatuses(budgets, transactions, TODAY).find(s => s.categoryId === 'food')!;
+      expect(status.projectedMonthEnd).toBeLessThan(300);
+      expect(status.isAtRisk).toBe(false);
+    });
+  });
+
   describe('getTopBudgetRisks', () => {
     it('should return top N overspending risks', () => {
       const budgets: CategoryBudget[] = [
