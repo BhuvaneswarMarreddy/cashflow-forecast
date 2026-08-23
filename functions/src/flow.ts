@@ -38,6 +38,30 @@ const MONTHS = [
 const endOfMonth = (year: number, month: number): string =>
   new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
 
+const KEY_RE = /^\d{4}(-\d{2})?$/;
+
+/**
+ * `periodFor` runs AFTER readLedger in both callables below and builds a month
+ * key's date range with `key.split('-').map(Number)` — a `key` that isn't
+ * YYYY-MM/YYYY produces NaN, then `endOfMonth`'s `.toISOString()` throws an
+ * uncaught RangeError. That is a paid full-ledger read followed by a generic
+ * `internal` error. Reject a malformed key here, before readLedger, the same
+ * way flowNodeDetail already validates `nodeId` early.
+ */
+function validateKey(range: Range, key: string | undefined): void {
+  if (!key) return; // periodFor's own `&& key` gate — no key means "all time", unchanged.
+  if (!KEY_RE.test(key)) {
+    throw new HttpsError('invalid-argument', 'Malformed period key.');
+  }
+  const hasMonth = key.includes('-');
+  if (range === 'month' && !hasMonth) {
+    throw new HttpsError('invalid-argument', 'Malformed period key.');
+  }
+  if (range === 'year' && hasMonth) {
+    throw new HttpsError('invalid-argument', 'Malformed period key.');
+  }
+}
+
 function periodFor(range: Range, key: string | undefined, months: string[]) {
   if (range === 'month' && key) {
     const [y, m] = key.split('-').map(Number);
@@ -119,6 +143,7 @@ export const flowSnapshot = onCall({ cors: true, memory: '512MiB' }, async (requ
   }
 
   const { range = 'all', key } = (request.data ?? {}) as Request;
+  validateKey(range, key);
   const ledger = await readLedger(request.auth.uid);
 
   const policy: IncomeContext = {
@@ -183,6 +208,7 @@ export const flowNodeDetail = onCall({ cors: true, memory: '512MiB' }, async (re
 
   const { range = 'all', key, nodeId } = (request.data ?? {}) as Request & { nodeId?: string };
   if (!nodeId) throw new HttpsError('invalid-argument', 'Which node?');
+  validateKey(range, key);
 
   const ledger = await readLedger(request.auth.uid);
   const policy: IncomeContext = {
