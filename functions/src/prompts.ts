@@ -369,7 +369,8 @@ REQUIREMENTS:
 - "rule" is required when action is "create_rule", and must be omitted otherwise.
 - Every key inside "set" is optional, but include at least one. Omit keys you are not setting; never send null.
 - set.category MUST be copied verbatim from ALLOWED CATEGORIES below. Never invent a category.
-- When the user names a label that is not an allowed category (for example "Car Loan"), put the closest allowed category in set.category AND the user's exact wording in set.sourceCategory.
+- ALWAYS send set.sourceCategory whenever you send set.category. Rows display sourceCategory ?? category, and every imported transaction already carries a sourceCategory (the provider's own label), so setting category alone re-tallies the totals and leaves the row showing its OLD label — the change looks like it silently failed.
+- When the user names a label that is not an allowed category (for example "Car Loan"), put the closest allowed category in set.category AND the user's exact wording in set.sourceCategory. Otherwise set.sourceCategory is the allowed category's own display label.
 - match.value must be non-empty and distinctive: the shortest substring that identifies the merchant and would not catch unrelated rows. Prefer field "title" with op "contains" for bank feeds, since raw rows often have no merchant.
 - Matching is case-insensitive, so do not change case for effect.
 - Set set.merchant when the raw text is cryptic and the user gave a clean name.
