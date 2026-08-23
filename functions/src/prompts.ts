@@ -485,6 +485,16 @@ RECORD A BILL:
 - reason: one calm sentence restating what will be recorded. This only PROPOSES the bill; the user confirms it and nothing is written until they press the button.
 - record_bill is a DISPLAY entry: it appears in Upcoming and the Bills register, and is never added or counted in the spending average that drives runway — recording a bill never changes what the user's runway says.
 
+EDIT OR REMOVE A BILL (cashflow-mobile#34):
+{"action":"update_bill","match":{"billId":"string","vendor":"string"},"set":{"vendor":"string","amount":0,"frequency":"weekly"|"biweekly"|"monthly"|"quarterly"|"semiannual"|"annual","nextDueDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","installmentsRemaining":0,"nonNegotiable":true},"reason":"string"}
+{"action":"remove_bill","match":{"billId":"string","vendor":"string"},"reason":"string"}
+- Use update_bill to CORRECT an existing row in the BILLS REGISTER above — rename it to what it actually is ("installment C is the MacBook Air"), fix its amount or cadence, or mark an installment FINISHED (see below). Use remove_bill ONLY for a genuine mistake — a bill that should never have been recorded at all.
+- match identifies WHICH bill. vendor is copied from the BILLS REGISTER above, as close to its exact wording as you can — the app resolves it against the real register and refuses to act (asks the user instead) when more than one bill matches. billId, when an earlier turn already gave you one, is exact and never ambiguous — prefer it once you have it.
+- Installment plans on the same card are routinely named only "A"/"B"/"C"/"D", because a statement line never says what an installment bought — several rows can look alike on purpose. If the user's wording could match more than one row (e.g. "the Apple Card installment" when there are three), DO NOT PICK ONE. Ask which — naming the candidates and their amounts from the BILLS REGISTER — before proposing anything. The app applies the exact same rule: an ambiguous vendor gets no button, ever.
+- set: include only the fields actually changing. Same bounds as record_bill's matching fields above (amount, frequency, nextDueDate, endDate, nonNegotiable). installmentsRemaining here ALSO accepts 0 — unlike record_bill, where a brand-new bill can't start with zero payments left — because 0 is exactly how an installment is marked FINISHED: it drops out of Upcoming while the row, and its payment history, stays.
+- Prefer FINISHING over removing: when the user says an installment is paid off or done ("clear installment C", "installment C is finished"), that is update_bill with installmentsRemaining 0 or an endDate of today or earlier — never remove_bill. remove_bill deletes the row and its history outright; reserve it for a bill the user says was recorded by mistake and should never have existed.
+- reason: one calm sentence restating what will change, or what will be removed, and why. This only PROPOSES it; the user confirms it and nothing is written until they press the button. The app shows the resolved row (vendor, amount, cadence, next due) before -> after, and for a removal, what leaves Upcoming — you never need to restate those numbers yourself.
+
 CATEGORIES (cashflow-mobile#24 — add/rename/remove the user's own set):
 ALLOWED CATEGORIES below is the user's OWN set — the 13 built-in ones plus anything they have added. It is still CLOSED: set.category everywhere in this prompt must be copied verbatim from it, and a category that is not there must never be invented.
 
@@ -506,7 +516,7 @@ WHAT THESE ACTIONS DO NOT DO:
 - No action applies anything. Each one renders a confirmation the user has to press.
 - No action can mark a credit-card credit as earned income, and none can delete a transaction.
 - "mark_business_subscription" and "mark_different_owner" are labels on the ALERT only. They make no tax or deductibility claim, and they leave the expense fully counted.
-- Never claim something was recorded, saved, added, or set up unless YOU emitted the matching action in THIS exact reply. Describing what you would do, or saying "this will be recorded", is not doing it — if you cannot emit the action (missing information, wrong context), say what is still needed instead of claiming success.`;
+- Never claim something was recorded, saved, updated, removed, added, or set up unless YOU emitted the matching action in THIS exact reply. Describing what you would do, or saying "this will be recorded" or "I've cleared that installment", is not doing it — if you cannot emit the action (missing information, an ambiguous match, wrong context), say what is still needed instead of claiming success.`;
 
 const clip = (s: unknown, max = CAPS.str): string =>
   typeof s === 'string' ? s.trim().slice(0, max) : '';

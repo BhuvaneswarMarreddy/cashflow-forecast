@@ -570,6 +570,191 @@ describe('record_bill — nextDueDate (Defect 1: chat bills need an anchor)', ()
 });
 
 /**
+ * cashflow-mobile#34 — the chat verb that finally lets "clear the rest apple card
+ * instalment c b a" work. Owner scenario: an Apple Card installment shows as "C"
+ * because a statement line never says what an installment bought, so the owner wants
+ * it renamed to the real product, or marked finished. `match` is validated SHAPE-only
+ * here (parseBillMatch) — resolving it against the real register, and refusing an
+ * ambiguous vendor, is DataChatSheet.tsx's job (see data-chat-sheet.test.tsx).
+ */
+describe('update_bill — cashflow-mobile#34', () => {
+  const valid = {
+    action: 'update_bill',
+    match: { vendor: 'Apple Card installment C' },
+    set: { vendor: 'MacBook Air', amount: 108, frequency: 'monthly', installmentsRemaining: 8 },
+    reason: 'You said installment C is the MacBook Air, $108/mo, 8 payments left.',
+  };
+
+  it('accepts a well-formed proposal verbatim', () => {
+    expect(parseChatAction(valid)).toEqual(valid);
+  });
+
+  it('accepts matching by billId alone', () => {
+    const byId = { ...valid, match: { billId: 'bill-abc123' } };
+    expect(parseChatAction(byId)).toEqual(byId);
+  });
+
+  it('accepts a match carrying both billId and vendor', () => {
+    const both = { ...valid, match: { billId: 'bill-abc123', vendor: 'Apple Card installment C' } };
+    expect(parseChatAction(both)).toEqual(both);
+  });
+
+  it('rejects a match with neither billId nor vendor — nothing to resolve against', () => {
+    expect(parseChatAction({ ...valid, match: {} })).toBeNull();
+  });
+
+  it('rejects an empty billId or vendor rather than treating it as absent', () => {
+    expect(parseChatAction({ ...valid, match: { billId: '' } })).toBeNull();
+    expect(parseChatAction({ ...valid, match: { vendor: '' } })).toBeNull();
+    expect(parseChatAction({ ...valid, match: { vendor: '   ' } })).toBeNull();
+  });
+
+  it('rejects an unknown key inside match', () => {
+    expect(parseChatAction({ ...valid, match: { vendor: 'X', accountId: 'y' } })).toBeNull();
+  });
+
+  it('accepts a minimal single-field set — only the vendor rename', () => {
+    const rename = { action: 'update_bill', match: { vendor: 'Apple Card installment C' }, set: { vendor: 'MacBook Air' }, reason: 'Renamed to MacBook Air.' };
+    expect(parseChatAction(rename)).toEqual(rename);
+  });
+
+  it('rejects an empty set — an update that changes nothing', () => {
+    expect(parseChatAction({ ...valid, set: {} })).toBeNull();
+  });
+
+  it('rejects an unknown key inside set', () => {
+    expect(parseChatAction({ ...valid, set: { ...valid.set, category: 'food' } })).toBeNull();
+  });
+
+  it('rejects an unknown top-level key', () => {
+    expect(parseChatAction({ ...valid, extra: 1 })).toBeNull();
+  });
+
+  it('rejects an empty reason — a silent action', () => {
+    expect(parseChatAction({ ...valid, reason: '' })).toBeNull();
+  });
+
+  it('rounds set.amount to cents precision like record_bill', () => {
+    expect(parseChatAction({ ...valid, set: { ...valid.set, amount: 108.006 } }))
+      .toEqual({ ...valid, set: { ...valid.set, amount: 108.01 } });
+  });
+
+  it('rejects a sub-cent set.amount instead of rounding it down to a silent 0', () => {
+    expect(parseChatAction({ ...valid, set: { ...valid.set, amount: 0.004 } })).toBeNull();
+  });
+
+  it('rejects a bad set.amount rather than coercing it', () => {
+    expect(parseChatAction({ ...valid, set: { ...valid.set, amount: 'a lot' } })).toBeNull();
+    expect(parseChatAction({ ...valid, set: { ...valid.set, amount: Infinity } })).toBeNull();
+    expect(parseChatAction({ ...valid, set: { ...valid.set, amount: 0 } })).toBeNull();
+    expect(parseChatAction({ ...valid, set: { ...valid.set, amount: -5 } })).toBeNull();
+    expect(parseChatAction({ ...valid, set: { ...valid.set, amount: 100_001 } })).toBeNull();
+  });
+
+  it('rejects an unknown/invented set.frequency rather than coercing it', () => {
+    expect(parseChatAction({ ...valid, set: { ...valid.set, frequency: 'daily' } })).toBeNull();
+  });
+
+  it('accepts every closed BillFrequency value in set.frequency', () => {
+    for (const frequency of ['weekly', 'biweekly', 'monthly', 'quarterly', 'semiannual', 'annual']) {
+      const one = { action: 'update_bill', match: { billId: 'b1' }, set: { frequency }, reason: 'r' };
+      expect(parseChatAction(one)).toEqual(one);
+    }
+  });
+
+  it('rejects a malformed set.nextDueDate or set.endDate', () => {
+    expect(parseChatAction({ ...valid, set: { ...valid.set, installmentsRemaining: undefined, nextDueDate: '2027-1-1' } })).toBeNull();
+    expect(parseChatAction({ ...valid, set: { vendor: 'X', endDate: 'not a date' } })).toBeNull();
+  });
+
+  it('accepts set.installmentsRemaining at 0 — marking an installment FINISHED, unlike record_bill\'s 1..480 floor', () => {
+    const finished = { action: 'update_bill', match: { billId: 'b1' }, set: { installmentsRemaining: 0 }, reason: 'Paid off.' };
+    expect(parseChatAction(finished)).toEqual(finished);
+  });
+
+  it('rejects set.installmentsRemaining outside 0..480, or non-integer', () => {
+    expect(parseChatAction({ ...valid, set: { installmentsRemaining: -1 } })).toBeNull();
+    expect(parseChatAction({ ...valid, set: { installmentsRemaining: 481 } })).toBeNull();
+    expect(parseChatAction({ ...valid, set: { installmentsRemaining: 3.5 } })).toBeNull();
+  });
+
+  it('rejects BOTH set.endDate and set.installmentsRemaining together — pick one', () => {
+    expect(parseChatAction({ ...valid, set: { endDate: '2027-09-15', installmentsRemaining: 8 } })).toBeNull();
+  });
+
+  it('rejects a non-boolean set.nonNegotiable rather than coercing it', () => {
+    expect(parseChatAction({ ...valid, set: { ...valid.set, nonNegotiable: 'yes' } })).toBeNull();
+  });
+
+  it('rejects an empty set.vendor rather than treating it as absent', () => {
+    expect(parseChatAction({ ...valid, set: { ...valid.set, vendor: '' } })).toBeNull();
+  });
+
+  it('rejects hostile top-level shapes', () => {
+    expect(parseChatAction(null)).toBeNull();
+    expect(parseChatAction('update_bill')).toBeNull();
+    expect(parseChatAction([valid])).toBeNull();
+    expect(parseChatAction({ action: 'update_bill' })).toBeNull(); // missing match/set/reason
+  });
+
+  it('rejects a prototype-pollution shaped payload', () => {
+    expect(parseChatAction(JSON.parse(
+      '{"action":"update_bill","match":{"vendor":"X"},"set":{"vendor":"Y"},"reason":"r","__proto__":{"x":1}}'
+    ))).toBeNull();
+    expect(parseChatAction({
+      action: 'update_bill', match: JSON.parse('{"vendor":"X","__proto__":{"x":1}}'), set: { vendor: 'Y' }, reason: 'r',
+    })).toBeNull();
+  });
+});
+
+describe('remove_bill — cashflow-mobile#34', () => {
+  const valid = { action: 'remove_bill', match: { vendor: 'Apple Card installment C' }, reason: 'You said installment C was recorded by mistake.' };
+
+  it('accepts a well-formed proposal verbatim', () => {
+    expect(parseChatAction(valid)).toEqual(valid);
+  });
+
+  it('accepts matching by billId alone', () => {
+    const byId = { ...valid, match: { billId: 'bill-abc123' } };
+    expect(parseChatAction(byId)).toEqual(byId);
+  });
+
+  it('rejects a match with neither billId nor vendor', () => {
+    expect(parseChatAction({ ...valid, match: {} })).toBeNull();
+  });
+
+  it('rejects an empty vendor or billId rather than treating it as absent', () => {
+    expect(parseChatAction({ ...valid, match: { vendor: '' } })).toBeNull();
+    expect(parseChatAction({ ...valid, match: { billId: '   ' } })).toBeNull();
+  });
+
+  it('rejects an unknown top-level key — remove_bill carries no `set`', () => {
+    expect(parseChatAction({ ...valid, set: { vendor: 'X' } })).toBeNull();
+  });
+
+  it('rejects an unknown key inside match', () => {
+    expect(parseChatAction({ ...valid, match: { vendor: 'X', confirm: true } })).toBeNull();
+  });
+
+  it('rejects an empty reason — a silent action', () => {
+    expect(parseChatAction({ ...valid, reason: '' })).toBeNull();
+  });
+
+  it('rejects hostile top-level shapes', () => {
+    expect(parseChatAction(null)).toBeNull();
+    expect(parseChatAction('remove_bill')).toBeNull();
+    expect(parseChatAction([valid])).toBeNull();
+    expect(parseChatAction({ action: 'remove_bill' })).toBeNull(); // missing match/reason
+  });
+
+  it('rejects a prototype-pollution shaped payload', () => {
+    expect(parseChatAction(JSON.parse(
+      '{"action":"remove_bill","match":{"vendor":"X"},"reason":"r","__proto__":{"x":1}}'
+    ))).toBeNull();
+  });
+});
+
+/**
  * cashflow-mobile#24 — custom categories are CLOSED over the owner's own resolved
  * set, not the hardcoded 13. buildChatContext's `categories` field is what the
  * model sees as ALLOWED CATEGORIES; parseChatAction's optional `categories` param
