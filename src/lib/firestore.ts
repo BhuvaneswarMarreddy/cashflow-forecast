@@ -1291,16 +1291,32 @@ export async function getBills(userId: string): Promise<Bill[]> {
  * An explicit `endDate` always wins: `record_bill` sends at most one of the
  * two, and a caller that names a real end date means it.
  */
-function withInstallmentEnd<T extends Partial<Bill>>(bill: T): T {
-  if (typeof bill.installmentsRemaining !== 'number') return bill;
-  if (bill.endDate) return bill;
-  if (!bill.frequency) return bill;
-  const end = installmentEndFrom(
-    new Date().toISOString(),
-    bill.frequency,
-    bill.installmentsRemaining,
-  );
-  return end ? { ...bill, endDate: end } : bill;
+function withInstallmentEnd<T extends Partial<Bill>>(patch: T, stored?: Bill): T {
+  // Resolve against the STORED doc, not the patch alone. `update_bill`'s prompt
+  // says "include only the fields actually changing", so single-key patches are
+  // the normal path — and reading only the patch made this inert on exactly the
+  // two corrections it exists for:
+  //   set {installmentsRemaining: 20}  -> no `frequency` in the patch -> skipped
+  //   set {frequency: 'annual'}        -> no count in the patch      -> skipped
+  // Both left a stale `endDate` in place, retiring the bill EARLY and silently
+  // — the direction this whole fix exists to avoid.
+  const count = patch.installmentsRemaining ?? stored?.installmentsRemaining;
+  const frequency = patch.frequency ?? stored?.frequency;
+
+  // Re-stamp when the patch touches EITHER input. A patch that touches neither
+  // (a rename) must leave the stored end alone — that is the ratchet fix.
+  const touchesPlan =
+    patch.installmentsRemaining !== undefined || patch.frequency !== undefined;
+  if (!touchesPlan) return patch;
+
+  if (typeof count !== 'number' || !frequency) return patch;
+  // An explicit endDate in the SAME patch always wins: a caller naming a real
+  // end date means it. A previously stored one does not — it is what we are
+  // recomputing.
+  if (patch.endDate) return patch;
+
+  const end = installmentEndFrom(new Date().toISOString(), frequency, count);
+  return end ? { ...patch, endDate: end } : patch;
 }
 
 export async function addBill(
@@ -1323,8 +1339,15 @@ export async function updateBill(
 ): Promise<void> {
   const billRef = doc(db, 'users', userId, 'bills', billId);
   const { id: _id, createdAt: _c, updatedAt: _u, ...rest } = updates;
+  // Only read the stored doc when the patch actually touches the plan — a
+  // rename must not pay for a round trip, and must not re-stamp anything.
+  let stored: Bill | undefined;
+  if (rest.installmentsRemaining !== undefined || rest.frequency !== undefined) {
+    const snap = await getDoc(billRef);
+    if (snap.exists()) stored = { id: snap.id, ...snap.data() } as Bill;
+  }
   await updateDoc(billRef, {
-    ...removeUndefined(withInstallmentEnd(rest)),
+    ...removeUndefined(withInstallmentEnd(rest, stored)),
     updatedAt: serverTimestamp(),
   });
 }

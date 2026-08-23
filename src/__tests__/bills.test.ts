@@ -535,3 +535,63 @@ describe('installmentEndFrom — the write-time stamp', () => {
     expect(installmentEndFrom('not-a-date', 'monthly', 3)).toBeUndefined();
   });
 });
+
+/**
+ * The month-end anchors, duplicated VERBATIM in cashflow-mobile's
+ * accountsWrite.test.ts. If either port drifts, one of the two suites fails.
+ *
+ * The first version of these tests pinned only 2026-08-06 — the one anchor that
+ * cannot expose a clamp difference — and the PR claimed on that basis that the
+ * two clients could not drift. They already had: the mobile port used a bare
+ * `setMonth`, which overflows, against date-fns `addMonths`, which clamps.
+ */
+describe('installmentEndFrom — month-end anchors clamp', () => {
+  test('clamps to the shorter target month rather than overflowing', () => {
+    expect(installmentEndFrom('2026-01-31T12:00:00.000Z', 'monthly', 1)).toBe('2026-02-28');
+    expect(installmentEndFrom('2026-03-31T12:00:00.000Z', 'monthly', 1)).toBe('2026-04-30');
+    expect(installmentEndFrom('2026-08-31T12:00:00.000Z', 'monthly', 13)).toBe('2027-09-30');
+  });
+
+  test('leaves a leap February on the 29th', () => {
+    expect(installmentEndFrom('2028-01-31T12:00:00.000Z', 'monthly', 1)).toBe('2028-02-29');
+  });
+
+  test('still agrees on the ordinary anchor', () => {
+    expect(installmentEndFrom('2026-08-06T12:00:00.000Z', 'monthly', 13)).toBe('2027-09-06');
+  });
+});
+
+/**
+ * `withInstallmentEnd` resolves against the STORED bill, not the patch alone.
+ *
+ * `update_bill`'s prompt says "include only the fields actually changing", so
+ * single-key patches are the normal path. Reading only the patch made the
+ * write-time stamp inert on exactly the two corrections it exists for —
+ * correcting the count, and correcting the cadence — leaving a stale endDate
+ * that retired the bill EARLY and silently.
+ *
+ * The function is not exported (it is a firestore.ts internal), so this pins
+ * the arithmetic it delegates to and the rule it must follow.
+ */
+describe('re-stamping an installment plan on correction', () => {
+  const NOW = '2027-01-15T12:00:00.000Z';
+
+  test('a corrected COUNT re-dates the plan from now', () => {
+    // 20 payments from the correction, not 13 from the original recording.
+    expect(installmentEndFrom(NOW, 'monthly', 20)).toBe('2028-09-15');
+  });
+
+  test('a corrected CADENCE re-dates the plan from now', () => {
+    // The count survives from the stored doc; only the step changes.
+    expect(installmentEndFrom(NOW, 'annual', 13)).toBe('2040-01-15');
+  });
+
+  test('the stale stamp it replaces would have retired the bill years early', () => {
+    // What the original recording stamped, for contrast: both corrections above
+    // land far past it, so leaving it in place ends the bill too soon.
+    const original = installmentEndFrom('2026-08-06T12:00:00.000Z', 'monthly', 13);
+    expect(original).toBe('2027-09-06');
+    expect(original! < installmentEndFrom(NOW, 'monthly', 20)!).toBe(true);
+    expect(original! < installmentEndFrom(NOW, 'annual', 13)!).toBe(true);
+  });
+});
