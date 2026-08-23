@@ -84,46 +84,134 @@ describe('FEEDLESS-CARD-001: balance anchoring — anchor minus payments, no his
   });
 });
 
-describe('FEEDLESS-CARD-001: the double-count guard', () => {
+describe('FEEDLESS-CARD-001: the double-count guard is a PER-PAYMENT predicate (#14 round 2)', () => {
+  // CRITICAL-1: the guard trips per PAYMENT — once the card has a POSTED row of
+  // its OWN dated ON/AFTER that specific payment — not from a single "earliest
+  // row ever" floor shared by the account's whole life. A payment BEFORE the
+  // card's own row is the one that gets superseded (the row proves real data now
+  // covers it); a payment AFTER the card's own row has nothing covering it and
+  // must keep counting. See the next describe block for why the OLD "earliest
+  // row = floor forever after" version silently zeroed months with no covering
+  // data at all.
   const anchored: PaymentAccount = { ...feedlessCard, openingBalance: 1000, openingDate: '2026-01-01' };
   const payment = (id: string, date: string) =>
     txn({ id, title: 'DISCOVER PAYMENT ACH PMT', amount: 100, accountId: 'chk', date });
   const itemizedRow = txn({ id: 'own1', title: 'Some Merchant', amount: 40, accountId: 'amzn', date: '2026-04-05' });
 
-  it('a payment dated BEFORE the feed starts still counts as spend', () => {
+  it("a payment dated BEFORE the card's own row stops counting — the row supersedes it", () => {
     const [, card] = withDerivedBalances(
       [chk, anchored], [payment('before', '2026-04-04'), itemizedRow], POSTED_ONLY
     );
-    expect(card.feedStartsAt).toBe('2026-04-05');
+    expect(card.feedCoverageThrough).toBe('2026-04-05');
     const i = interpretTransaction(payment('before', '2026-04-04'), [chk, card]);
-    expect(i.expense).toBe('counted');
-    expect(i.financialMeaning).toBe('personal_expense');
+    expect(i.expense).toBe('excluded');
+    expect(i.financialMeaning).toBe('card_payment'); // reverts to the ordinary settlement reading
+    expect(i.reason).toMatch(/already has itemized rows through 2026-04-05/);
   });
 
-  it('a payment dated ON the feed-start day (inclusive boundary) stops counting as spend', () => {
+  it("a payment dated ON the row's own day (inclusive boundary) also stops counting", () => {
     const [, card] = withDerivedBalances(
       [chk, anchored], [payment('same-day', '2026-04-05'), itemizedRow], POSTED_ONLY
     );
     const onBoundary = interpretTransaction(payment('same-day', '2026-04-05'), [chk, card]);
     expect(onBoundary.expense).toBe('excluded');
-    expect(onBoundary.financialMeaning).toBe('card_payment'); // reverts to the ordinary settlement reading
-    expect(onBoundary.reason).toMatch(/flagged for review/);
+    expect(onBoundary.financialMeaning).toBe('card_payment');
   });
 
-  it('a payment dated AFTER the feed starts also stops counting as spend', () => {
+  it("a payment dated AFTER the card's own row still counts — nothing covers it", () => {
     const [, card] = withDerivedBalances(
       [chk, anchored], [payment('before', '2026-04-04'), itemizedRow], POSTED_ONLY
     );
     const after = interpretTransaction(payment('after', '2026-05-01'), [chk, card]);
-    expect(after.expense).toBe('excluded');
+    expect(after.expense).toBe('counted');
+    expect(after.financialMeaning).toBe('personal_expense');
   });
 
-  it('the guard also stops a post-feed payment from moving the card balance', () => {
+  it('the guard also decides which payment moves the card balance', () => {
     const txns = [payment('before', '2026-04-04'), itemizedRow, payment('after', '2026-05-01')];
     const accounts = [chk, anchored];
-    // before-payment counts (100), itemized purchase raises owed (+40), after-payment
-    // is guarded out entirely: owed = 1000 - 100 + 40 = 940.
+    // before-payment is guarded out; itemized purchase raises owed (+40); after-payment
+    // counts: owed = 1000 - 100 (after) + 40 (itemized) = 940.
     expect(deriveAccountBalance(anchored, txns, POSTED_ONLY, accounts)).toBe(940);
+  });
+});
+
+describe('FEEDLESS-CARD-001: a historical statement import guards only ITS OWN period (#14 round 2)', () => {
+  // The measured bug this whole round exists for: importing a January statement
+  // (viewed from March) used to floor on January (the earliest row) and zero
+  // EVERY later month forever — Feb, Mar, Apr, all of it — because the guard was
+  // one global "earliest row" value compared the wrong way. A statement import
+  // is a one-time backfill for a SPECIFIC period, not proof an ongoing feed now
+  // covers every month after it.
+  const anchored: PaymentAccount = { ...feedlessCard, openingBalance: 2000, openingDate: '2026-01-01' };
+  const monthlyPayment = (id: string, date: string) =>
+    txn({ id, title: 'DISCOVER PAYMENT ACH PMT', amount: 200, accountId: 'chk', date });
+  const statementRow = (id: string, date: string, opts: Partial<Transaction> = {}) =>
+    txn({ id, title: 'Some Merchant', amount: 30, accountId: 'amzn', date, ...opts });
+
+  const payJan = monthlyPayment('payJan', '2026-01-05');
+  const payFeb = monthlyPayment('payFeb', '2026-02-05');
+  const payMar = monthlyPayment('payMar', '2026-03-05');
+  const payApr = monthlyPayment('payApr', '2026-04-05');
+
+  it('a January-ONLY statement import guards January only — Feb/Mar/Apr keep counting', () => {
+    const janRows = [statementRow('j1', '2026-01-10'), statementRow('j2', '2026-01-28')];
+    const [, card] = withDerivedBalances(
+      [chk, anchored], [...janRows, payJan, payFeb, payMar, payApr], POSTED_ONLY
+    );
+    expect(card.feedCoverageThrough).toBe('2026-01-28');
+    const accs = [chk, card];
+    expect(interpretTransaction(payJan, accs).expense).toBe('excluded'); // covered by the Jan statement
+    expect(interpretTransaction(payFeb, accs).expense).toBe('counted'); // #14 round 2: no longer zeroed
+    expect(interpretTransaction(payMar, accs).expense).toBe('counted');
+    expect(interpretTransaction(payApr, accs).expense).toBe('counted');
+  });
+
+  it('a March-ONLY statement import guards January through March — not April', () => {
+    const marRows = [statementRow('m1', '2026-03-10'), statementRow('m2', '2026-03-28')];
+    const [, card] = withDerivedBalances(
+      [chk, anchored], [...marRows, payJan, payFeb, payMar, payApr], POSTED_ONLY
+    );
+    expect(card.feedCoverageThrough).toBe('2026-03-28');
+    const accs = [chk, card];
+    expect(interpretTransaction(payJan, accs).expense).toBe('excluded');
+    expect(interpretTransaction(payFeb, accs).expense).toBe('excluded');
+    expect(interpretTransaction(payMar, accs).expense).toBe('excluded');
+    expect(interpretTransaction(payApr, accs).expense).toBe('counted');
+  });
+
+  it('BOTH a January and a March import together guard through the LATER (March) date', () => {
+    const rows = [statementRow('j1', '2026-01-10'), statementRow('m1', '2026-03-15')];
+    const [, card] = withDerivedBalances(
+      [chk, anchored], [...rows, payJan, payFeb, payMar, payApr], POSTED_ONLY
+    );
+    expect(card.feedCoverageThrough).toBe('2026-03-15');
+    const accs = [chk, card];
+    expect(interpretTransaction(payJan, accs).expense).toBe('excluded');
+    expect(interpretTransaction(payFeb, accs).expense).toBe('excluded');
+    expect(interpretTransaction(payMar, accs).expense).toBe('excluded');
+    expect(interpretTransaction(payApr, accs).expense).toBe('counted');
+  });
+
+  it('a PENDING row never trips the guard, no matter its date', () => {
+    const pendingRow = statementRow('pend1', '2026-01-10', { pending: true });
+    const [, card] = withDerivedBalances([chk, anchored], [pendingRow, payJan, payFeb], POSTED_ONLY);
+    expect(card.feedCoverageThrough).toBeUndefined();
+    const accs = [chk, card];
+    expect(interpretTransaction(payJan, accs).expense).toBe('counted');
+    expect(interpretTransaction(payFeb, accs).expense).toBe('counted');
+  });
+
+  it('a FUTURE-DATED row never trips the guard for earlier (already-happened) payments', () => {
+    const futureRow = statementRow('future1', '2030-06-01'); // posted, but has not happened yet
+    const [, card] = withDerivedBalances(
+      [chk, anchored], [futureRow, payJan, payFeb, payMar], POSTED_ONLY
+    );
+    expect(card.feedCoverageThrough).toBeUndefined();
+    const accs = [chk, card];
+    expect(interpretTransaction(payJan, accs).expense).toBe('counted');
+    expect(interpretTransaction(payFeb, accs).expense).toBe('counted');
+    expect(interpretTransaction(payMar, accs).expense).toBe('counted');
   });
 });
 

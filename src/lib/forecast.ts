@@ -17,7 +17,7 @@ import {
 } from '@/types';
 import { addDays, format, parseISO, startOfDay, isBefore, isAfter, isSameDay } from 'date-fns';
 import { isPositive, classifyTransaction, interpretTransaction, isPosted, IncomeContext, feedlessCardTargetOf } from '@/lib/classify';
-import { currentOf, earliestRowDate } from '@/lib/accounts';
+import { currentOf } from '@/lib/accounts';
 import { buildAssumptions, behaviorEvents, AssumptionOverrides } from '@/lib/behavior';
 import { normalizeMerchant } from '@/lib/flows';
 
@@ -101,6 +101,29 @@ function monthsBetweenInclusive(from: string, to: string): number {
   return (ty - fy) * 12 + (tm - fm) + 1;
 }
 
+/**
+ * The double-count guard boundary for a FEEDLESS card (#14 round 2): the LATEST
+ * date the card has a POSTED row of its own, dated on/before today. Pending rows
+ * (not yet settled) and future-dated rows (not yet happened) are not evidence of
+ * anything and are excluded — either one, left in, could silently supersede a real
+ * payment that has nothing else standing in for it.
+ *
+ * Deliberately the LATEST row, not the earliest: see the field doc on
+ * `PaymentAccount.feedCoverageThrough` (src/types/index.ts) for why a single
+ * historical statement import must not guard every month after it forever.
+ */
+function feedCoverageThrough(accountId: string, transactions: readonly Transaction[]): string | undefined {
+  const todayKey = format(new Date(), 'yyyy-MM-dd');
+  let latest: string | undefined;
+  for (const t of transactions) {
+    if (t.accountId !== accountId || !isPosted(t)) continue;
+    const day = t.date.slice(0, 10);
+    if (day > todayKey) continue; // not yet happened — not evidence
+    if (!latest || day > latest) latest = day;
+  }
+  return latest;
+}
+
 export function calculateCurrentCash(accounts: PaymentAccount[]): number {
   return accounts
     .filter(a => a.type === 'bank_account' || a.type === 'debit_card' || a.type === 'cash')
@@ -141,11 +164,11 @@ export function deriveAccountBalance(
     const day = t.date.split('T')[0];
     return day <= todayKey && day >= openingKey; // future/pre-anchor excluded
   };
-  // A feedless card's OWN rows (once a feed connects) are the guard boundary: a
-  // payment dated on/after this stops standing in for them. Reuses earliestRowDate
-  // (src/lib/accounts.ts) instead of re-deriving "the earliest own row" a second way.
+  // A feedless card's OWN rows are the guard boundary: a payment dated ON/BEFORE
+  // the LATEST of them is superseded (see feedCoverageThrough's doc for why LATEST,
+  // not earliest — a per-PAYMENT predicate, not one floor for the account's whole life).
   const feedless = !!account.feedless && account.type === 'credit_card';
-  const feedStart = feedless ? earliestRowDate(account.id, transactions) : undefined;
+  const feedThrough = feedless ? feedCoverageThrough(account.id, transactions) : undefined;
 
   const net = transactions.reduce((sum, t) => {
     if (t.accountId === account.id) {
@@ -157,14 +180,31 @@ export function deriveAccountBalance(
     // shows and the spend the payment counts as never disagree.
     if (!feedless || !allAccounts || !inWindow(t)) return sum;
     const day = t.date.split('T')[0];
-    if (feedStart !== undefined && day >= feedStart) return sum; // guard: own rows take over
+    if (feedThrough !== undefined && day <= feedThrough) return sum; // guard: a real row already covers it
     if (feedlessCardTargetOf(t, allAccounts)?.id !== account.id) return sum;
     return sum + t.amount; // a payment always reduces debt
   }, 0);
   const opening = account.openingBalance || 0;
   // Debt is stored as a positive amount owed: a purchase (signedEffect < 0) raises it,
   // a payment (signedEffect > 0) lowers it — the opposite sign to a cash account.
-  return isDebt ? opening - net : opening + net;
+  const owed = isDebt ? opening - net : opening + net;
+
+  // CRITICAL-1/3 (#14): a feedless card's derived balance only ever moves DOWN —
+  // payments reduce owed, and there is no feed to ever raise it back up — so an
+  // UNANCHORED feedless card (opening = 0 by construction, #83) goes NEGATIVE the
+  // moment any payment is recorded. A negative "owed" is not a real credit balance;
+  // it SUBTRACTS from every other card's debt in Cards-owed and INFLATES net worth,
+  // exactly the #83 class of bug (history measured against an invented zero).
+  //
+  // The real fix is upstream: a feedless card should never be SAVED without an
+  // anchor in the first place (accounts/page.tsx refuses that save). This is the
+  // defensive floor for every account that predates that guard, or reached this
+  // state some other way. Ponytail choice: CLAMP rather than throw/refuse here —
+  // this function returns a `number` to dozens of callers that sum, sort and
+  // render it, and a mid-render exception is worse than a floor of $0 ("we don't
+  // owe less than nothing"). Clamping never HIDES money: it only stops an
+  // impossible negative from being invented in the first place.
+  return feedless ? Math.max(0, owed) : owed;
 }
 
 /**
@@ -184,9 +224,9 @@ export function withDerivedBalances(
     // itself so interpretTransaction() — which only ever sees `accounts`, never
     // the full transaction list — can see it too, wherever these derived
     // accounts get passed on from here.
-    const feedStartsAt =
-      a.feedless && a.type === 'credit_card' ? earliestRowDate(a.id, transactions) : undefined;
-    const withGuard = feedStartsAt ? { ...a, feedStartsAt } : a;
+    const coverageThrough =
+      a.feedless && a.type === 'credit_card' ? feedCoverageThrough(a.id, transactions) : undefined;
+    const withGuard = coverageThrough ? { ...a, feedCoverageThrough: coverageThrough } : a;
     return { ...withGuard, currentBalance: deriveAccountBalance(withGuard, transactions, policy, accounts) };
   });
 }

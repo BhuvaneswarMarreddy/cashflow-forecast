@@ -200,14 +200,21 @@ export interface PaymentAccount {
    */
   feedless?: boolean;
   /**
-   * DERIVED in memory by withDerivedBalances(); never stored. Earliest date this
-   * FEEDLESS account has ITEMIZED rows of its own (a feed connected, or a CSV
-   * import) — the double-count guard boundary (#14). A payment naming this card
-   * stops counting as spend once ITS OWN date reaches this one: the real
-   * itemized rows are the truth from there on. Undefined = still no feed, so
-   * every payment still counts.
+   * DERIVED in memory by withDerivedBalances(); never stored. The LATEST date
+   * this FEEDLESS account has a POSTED, already-happened row of its own (a feed
+   * connected, a CSV import, a single synced charge) — the double-count guard
+   * boundary (#14 round 2). A payment naming this card stops counting as spend
+   * once ITS OWN date is on/before this one: a real row already covers it, so
+   * the itemized row is the truth instead. Undefined = no qualifying row yet,
+   * so every payment still counts.
+   *
+   * Deliberately the LATEST, not the earliest: a single historical statement
+   * import (rows clustered in one past month) must guard only payments up
+   * through that import's own last row, not every month after it forever —
+   * see the per-payment predicate in classify.ts/forecast.ts for what using
+   * the earliest row as a permanent floor got wrong (#14 round 2).
    */
-  feedStartsAt?: string;
+  feedCoverageThrough?: string;
   // Payment linking - which account pays this card/loan
   paymentFromAccountId?: string; // ID of the account that pays this credit card or loan
   // Loan specific fields

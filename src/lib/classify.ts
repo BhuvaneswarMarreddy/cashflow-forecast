@@ -454,16 +454,18 @@ export function interpretTransaction(
   const settlement = type === 'transfer' && isCardSettlement(t, accounts);
   const pending: 'posted' | 'pending' = t.pending ? 'pending' : 'posted';
 
-  // FEEDLESS-CARD-001 (#14). A payment naming a FEEDLESS card stands in for its
-  // missing itemized feed — UNLESS the guard has tripped: that card already has
-  // rows of its own (feedStartsAt, attached by withDerivedBalances) on/after
-  // THIS payment's date, in which case the real rows are the truth and this
-  // reverts to the ordinary settlement reading below. Inclusive boundary: a
-  // payment dated the SAME day the feed's first row appears already has a real
-  // row to double with.
+  // FEEDLESS-CARD-001 (#14 round 2). A payment naming a FEEDLESS card stands in for
+  // its missing itemized feed — UNLESS the guard has tripped: that card already has
+  // a POSTED row of its own (feedCoverageThrough, attached by withDerivedBalances)
+  // dated ON/AFTER this specific payment, in which case a real row already covers
+  // it and this reverts to the ordinary settlement reading below. Per-PAYMENT, not
+  // one floor for the account's whole life — see feedCoverageThrough's doc
+  // (src/lib/forecast.ts) for why the boundary is the LATEST qualifying row, not
+  // the earliest. Inclusive boundary: a payment dated the SAME day a real row
+  // appears already has a real row to double with.
   const feedlessTarget = settlement ? feedlessCardTargetOf(t, accounts) : undefined;
   const feedGuardTripped =
-    !!feedlessTarget?.feedStartsAt && t.date.slice(0, 10) >= feedlessTarget.feedStartsAt;
+    !!feedlessTarget?.feedCoverageThrough && t.date.slice(0, 10) <= feedlessTarget.feedCoverageThrough;
   const feedless = feedlessTarget && !feedGuardTripped ? feedlessTarget : undefined;
 
   // Refund/reward only on a debt account for the inbound case, mirroring how
@@ -586,7 +588,7 @@ export function interpretTransaction(
   // payment that would otherwise count as spend does not, once the card it
   // names already has itemized rows of its own for this period.
   if (feedGuardTripped) {
-    reason += `; ${feedlessTarget!.name} already has itemized rows on/after ${feedlessTarget!.feedStartsAt} — this payment is excluded to avoid double-counting, flagged for review`;
+    reason += `; ${feedlessTarget!.name} already has itemized rows through ${feedlessTarget!.feedCoverageThrough} — this payment is excluded to avoid double-counting, flagged for review`;
   }
 
   // A CONFIRMED meaning decides its own treatment; a DERIVED one still defers to the
