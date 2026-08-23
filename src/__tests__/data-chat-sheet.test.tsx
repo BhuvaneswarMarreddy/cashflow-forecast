@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import DataChatSheet, { resolveBillPaymentMethod, resolveBillAnchor } from '@/components/DataChatSheet';
+import DataChatSheet, { resolveBillPaymentMethod, resolveBillAnchor, resolveBill, describeBillUpdate } from '@/components/DataChatSheet';
 import { applyMappingRules, rulePreview, MappingRule } from '@/lib/mapping-rules';
 import { billUpcomingEvents, Bill } from '@/lib/bills';
 import { ExpenseCategory, Transaction } from '@/types';
@@ -15,12 +15,16 @@ const aiChat = jest.fn();
 const addRule = jest.fn();
 const addBill = jest.fn();
 const getBills = jest.fn();
+// cashflow-mobile#34
 const updateBill = jest.fn();
-const updateTransactionAwaited = jest.fn();
-const updateRuleCategoryAwaited = jest.fn();
+const deleteBill = jest.fn();
+// cashflow-mobile#28: the server-side sweep — replaces the old per-row
+// updateTransactionAwaited/updateRuleCategoryAwaited/updateBill mocks below.
+const removeCategory = jest.fn();
 
 jest.mock('@/lib/callables', () => ({
   aiChat: (...args: unknown[]) => aiChat(...args),
+  removeCategory: (...args: unknown[]) => removeCategory(...args),
   callableErrorMessage: () => 'AI request failed. Please try again.',
 }));
 
@@ -28,6 +32,7 @@ jest.mock('@/lib/firestore', () => ({
   addBill: (...args: unknown[]) => addBill(...args),
   getBills: (...args: unknown[]) => getBills(...args),
   updateBill: (...args: unknown[]) => updateBill(...args),
+  deleteBill: (...args: unknown[]) => deleteBill(...args),
 }));
 
 const txn = (id: string, title: string, merchant: string): Transaction => ({
@@ -61,8 +66,6 @@ jest.mock('@/context/TransactionContext', () => ({
     transactions: [...TRANSACTIONS, ...EXTRA_TRANSACTIONS],
     addRule,
     rules: RULES,
-    updateTransactionAwaited: (...args: unknown[]) => updateTransactionAwaited(...args),
-    updateRuleCategoryAwaited: (...args: unknown[]) => updateRuleCategoryAwaited(...args),
   }),
 }));
 
@@ -106,8 +109,8 @@ beforeEach(() => {
   addBill.mockReset().mockResolvedValue('new-bill-id');
   getBills.mockReset().mockResolvedValue([]);
   updateBill.mockReset().mockResolvedValue(undefined);
-  updateTransactionAwaited.mockReset().mockResolvedValue(true);
-  updateRuleCategoryAwaited.mockReset().mockResolvedValue(true);
+  deleteBill.mockReset().mockResolvedValue(undefined);
+  removeCategory.mockReset().mockResolvedValue({ moved: { transactions: 0, rules: 0, bills: 0, budgets: 0, plannedTransactions: 0 } });
   updateProfile.mockReset().mockResolvedValue(undefined);
   PROFILE_SETTINGS = {};
   RULES = [];
@@ -670,6 +673,220 @@ describe('the record_bill card and Defect 1 — nextDueDate wires anchorDate thr
 });
 
 /**
+ * cashflow-mobile#34. The owner scenario this closes: "clear the rest apple card
+ * instalment c b a" — the chat could record_bill but had no way to edit or remove
+ * one, so a finished installment sat in Upcoming forever and an installment named
+ * only "A"/"B"/"C"/"D" (a statement line never says what it bought) could never be
+ * renamed to the real product. RESOLUTION is the hard part: a vendor match that
+ * could mean more than one row must refuse, never guess.
+ */
+describe('update_bill / remove_bill — cashflow-mobile#34', () => {
+  const installmentA = {
+    id: 'bill-a', vendor: 'Apple Card Installment A', amount: 45.79, frequency: 'monthly' as const,
+    paymentMethodId: 'apple-card', migrationStatus: 'to-review' as const, lifecycleStatus: 'active' as const,
+    installmentsRemaining: 5, autopayDay: 1, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+  const installmentB = { ...installmentA, id: 'bill-b', vendor: 'Apple Card Installment B', amount: 32.5, installmentsRemaining: 3 };
+  const installmentC = { ...installmentA, id: 'bill-c', vendor: 'Apple Card Installment C', amount: 108, installmentsRemaining: 9 };
+  const installmentD = { ...installmentA, id: 'bill-d', vendor: 'Apple Card Installment D', amount: 59, installmentsRemaining: 2 };
+  const INSTALLMENTS = [installmentA, installmentB, installmentC, installmentD];
+
+  beforeEach(() => {
+    getBills.mockResolvedValue(INSTALLMENTS);
+  });
+
+  describe('resolveBill — the resolution the cards are built on', () => {
+    it('billId resolves exactly, even when the vendor field alone would be ambiguous', () => {
+      expect(resolveBill({ billId: 'bill-c', vendor: 'Apple Card Installment' }, INSTALLMENTS)).toBe(installmentC);
+    });
+
+    it('an exact (case-insensitive) vendor match resolves', () => {
+      expect(resolveBill({ vendor: 'apple card installment c' }, INSTALLMENTS)).toBe(installmentC);
+    });
+
+    it('an ambiguous vendor substring refuses — never guesses between similarly-named installments', () => {
+      expect(resolveBill({ vendor: 'Apple Card Installment' }, INSTALLMENTS)).toBeNull();
+    });
+
+    it('a vendor matching nothing resolves to null', () => {
+      expect(resolveBill({ vendor: 'Netflix' }, INSTALLMENTS)).toBeNull();
+    });
+
+    it('an empty match resolves to null', () => {
+      expect(resolveBill({}, INSTALLMENTS)).toBeNull();
+    });
+
+    /**
+     * "Prove teeth": if the ambiguity guard degenerated to "just take the first
+     * match" (contains[0] instead of requiring contains.length === 1), this is the
+     * test that goes red — exactly the failure mode that would have let the chat
+     * silently rename the WRONG installment.
+     */
+    it('would go red if the ambiguity guard were weakened to "pick the first match"', () => {
+      const wouldPickFirst = INSTALLMENTS.filter((b) => b.vendor.toLowerCase().includes('apple card installment'))[0];
+      expect(resolveBill({ vendor: 'Apple Card Installment' }, INSTALLMENTS)).not.toBe(wouldPickFirst);
+    });
+  });
+
+  describe('the update_bill card', () => {
+    const proposal = (over: Record<string, unknown> = {}) => ({
+      success: true,
+      result: {
+        action: 'update_bill',
+        match: { vendor: 'Apple Card Installment C' },
+        set: { vendor: 'MacBook Air', amount: 108, installmentsRemaining: 8 },
+        reason: 'Got it — installment C is the MacBook Air.',
+        ...over,
+      },
+    });
+
+    it('resolves the exact row and shows before -> after — writes NOTHING until Apply', async () => {
+      aiChat.mockResolvedValue(proposal());
+      render(<DataChatSheet open onClose={() => {}} />);
+      await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+      send('installment C is the MacBook Air');
+
+      expect(await screen.findByText('Apple Card Installment C — $108.00 monthly → MacBook Air — $108.00 monthly')).toBeInTheDocument();
+      expect(screen.getByText(/8 payments left/)).toBeInTheDocument();
+      expect(updateBill).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+      await waitFor(() => expect(updateBill).toHaveBeenCalledTimes(1));
+      expect(updateBill).toHaveBeenCalledWith('user-1', 'bill-c', {
+        vendor: 'MacBook Air', amount: 108, installmentsRemaining: 8,
+      });
+      expect(await screen.findByText('Saved — Apple Card Installment C → MacBook Air, $108.00 monthly, 8 payments left.')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+    });
+
+    it('an ambiguous vendor gets words and NO button — never guesses between similarly-named installments', async () => {
+      aiChat.mockResolvedValue(proposal({ match: { vendor: 'Apple Card Installment' } }));
+      render(<DataChatSheet open onClose={() => {}} />);
+      await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+      send('clear the rest of the apple card installments');
+
+      expect(await screen.findByText(/couldn't match .Apple Card Installment. to exactly one of your bills/)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+      expect(updateBill).not.toHaveBeenCalled();
+    });
+
+    it('billId resolves exactly and applies, even though the vendor field alone would be ambiguous', async () => {
+      aiChat.mockResolvedValue(proposal({ match: { billId: 'bill-c', vendor: 'Apple Card Installment' } }));
+      render(<DataChatSheet open onClose={() => {}} />);
+      await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+      send('installment C is the MacBook Air');
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Apply' }));
+      await waitFor(() => expect(updateBill).toHaveBeenCalledWith('user-1', 'bill-c', expect.anything()));
+    });
+
+    it('marking installmentsRemaining 0 finishes the bill and says so — preserves history, leaves Upcoming', async () => {
+      aiChat.mockResolvedValue(proposal({
+        match: { vendor: 'Apple Card Installment A' },
+        set: { installmentsRemaining: 0 },
+        reason: 'Installment A is paid off.',
+      }));
+      render(<DataChatSheet open onClose={() => {}} />);
+      await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+      send('installment A is paid off');
+
+      expect(await screen.findByText(/finished — leaves Upcoming/)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+      await waitFor(() => expect(updateBill).toHaveBeenCalledWith('user-1', 'bill-a', { installmentsRemaining: 0 }));
+      expect(await screen.findByText(/No longer in Upcoming/)).toBeInTheDocument();
+    });
+
+    it('a match resolving to nothing gets words and NO button — unknown, not a guess', async () => {
+      aiChat.mockResolvedValue(proposal({ match: { vendor: 'Netflix' } }));
+      render(<DataChatSheet open onClose={() => {}} />);
+      await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+      send('netflix installment is the MacBook Air');
+
+      expect(await screen.findByText(/couldn't match .Netflix. to exactly one of your bills/)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+    });
+
+    it('Cancel drops the proposal without writing anything', async () => {
+      aiChat.mockResolvedValue(proposal());
+      render(<DataChatSheet open onClose={() => {}} />);
+      await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+      send('installment C is the MacBook Air');
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+      expect(updateBill).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('the remove_bill card', () => {
+    const proposal = (over: Record<string, unknown> = {}) => ({
+      success: true,
+      result: {
+        action: 'remove_bill',
+        match: { vendor: 'Apple Card Installment D' },
+        reason: 'Installment D was recorded by mistake.',
+        ...over,
+      },
+    });
+
+    it('names exactly what will disappear — writes NOTHING until Apply', async () => {
+      aiChat.mockResolvedValue(proposal());
+      render(<DataChatSheet open onClose={() => {}} />);
+      await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+      send('installment D was a mistake, remove it');
+
+      expect(await screen.findByText('Remove Apple Card Installment D — $59.00 monthly, permanently')).toBeInTheDocument();
+      expect(deleteBill).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+      await waitFor(() => expect(deleteBill).toHaveBeenCalledWith('user-1', 'bill-d'));
+      expect(await screen.findByText('Saved — Apple Card Installment D removed. $59.00 monthly is no longer in Upcoming.')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+    });
+
+    it('an ambiguous vendor gets words and NO button', async () => {
+      aiChat.mockResolvedValue(proposal({ match: { vendor: 'Apple Card Installment' } }));
+      render(<DataChatSheet open onClose={() => {}} />);
+      await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+      send('remove the apple card installment');
+
+      expect(await screen.findByText(/couldn't match .Apple Card Installment. to exactly one of your bills/)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+      expect(deleteBill).not.toHaveBeenCalled();
+    });
+
+    it('Cancel drops the proposal without deleting anything', async () => {
+      aiChat.mockResolvedValue(proposal());
+      render(<DataChatSheet open onClose={() => {}} />);
+      await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+      send('remove installment D');
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+      expect(deleteBill).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('describeBillUpdate — the before -> after applied message', () => {
+    it('states vendor rename, amount, cadence and payments left', () => {
+      expect(describeBillUpdate(installmentC, { ...installmentC, vendor: 'MacBook Air', amount: 108, installmentsRemaining: 8 }))
+        .toBe('Saved — Apple Card Installment C → MacBook Air, $108.00 monthly, 8 payments left.');
+    });
+
+    it('marks a bill finished and says it left Upcoming, when installmentsRemaining hits 0', () => {
+      expect(describeBillUpdate(installmentA, { ...installmentA, installmentsRemaining: 0 }))
+        .toBe('Saved — Apple Card Installment A, $45.79 monthly, finished. No longer in Upcoming.');
+    });
+
+    it('leaves the vendor out of the arrow when only the amount changes', () => {
+      expect(describeBillUpdate(installmentA, { ...installmentA, amount: 50 }))
+        .toBe('Saved — Apple Card Installment A, $50.00 monthly, 5 payments left.');
+    });
+  });
+});
+
+/**
  * #22 (cashflow-mobile). The chat could WRITE a bill (record_bill above) but could not
  * SEE the register it had just written to — asked "is it existing?" it said "I do not
  * have that information". This is the fetch that closes the gap: the SAME getBills()
@@ -894,10 +1111,13 @@ describe('the rename_category proposal card', () => {
 });
 
 /**
- * cashflow-mobile#24 — remove_category. The one card with real stakes: it MUST
- * show the exact counts (transactions/rules/bills) BEFORE applying, and the
- * apply path must move exactly what was previewed, then archive the category —
- * never orphaning a value. Fixture below carries one live row of each kind.
+ * cashflow-mobile#24/#28 — remove_category. The preview (planCategoryRemoval,
+ * client-side, unchanged) MUST show the exact counts BEFORE applying; Apply
+ * now calls the removeCategory callable (functions/src/categoryRemoval.ts)
+ * instead of sweeping transactions/rules/bills one write at a time — the
+ * whole sweep happens server-side, atomically, and this component only
+ * reports the counts the server hands back. Fixture below carries one live
+ * row of each kind, matching what the preview shows.
  */
 describe('the remove_category proposal card', () => {
   // 'vacations' is a CUSTOM category — not a member of the closed ExpenseCategory
@@ -931,22 +1151,21 @@ describe('the remove_category proposal card', () => {
     RULES = [vacationRule];
     EXTRA_TRANSACTIONS = [vacationTxn];
     getBills.mockResolvedValue([vacationBill]);
+    removeCategory.mockResolvedValue({ moved: { transactions: 1, rules: 1, bills: 1, budgets: 0, plannedTransactions: 0 } });
   });
 
-  it('shows the exact counts BEFORE applying, and writes NOTHING until Apply', async () => {
+  it('shows the exact counts BEFORE applying, and calls NOTHING until Apply', async () => {
     aiChat.mockResolvedValue(proposal());
     render(<DataChatSheet open onClose={() => {}} />);
     await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
     send('remove the Vacations category');
 
     expect(await screen.findByText('Remove "Vacations" — 1 transaction, 1 rule, 1 bill will move to Other')).toBeInTheDocument();
-    expect(updateTransactionAwaited).not.toHaveBeenCalled();
-    expect(updateRuleCategoryAwaited).not.toHaveBeenCalled();
-    expect(updateBill).not.toHaveBeenCalled();
+    expect(removeCategory).not.toHaveBeenCalled();
     expect(updateProfile).not.toHaveBeenCalled();
   });
 
-  it('Apply moves exactly what was previewed, archives the category, and reports what moved', async () => {
+  it('Apply calls removeCategory, archives the category locally, and reports the SERVER\'s counts', async () => {
     aiChat.mockResolvedValue(proposal());
     render(<DataChatSheet open onClose={() => {}} />);
     await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
@@ -955,15 +1174,62 @@ describe('the remove_category proposal card', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 
-    await waitFor(() => expect(updateTransactionAwaited).toHaveBeenCalledWith('vac-1', { category: 'other' }));
-    expect(updateRuleCategoryAwaited).toHaveBeenCalledWith('rule-vac', 'other');
-    expect(updateBill).toHaveBeenCalledWith('user-1', 'bill-vac', { category: 'other' });
+    await waitFor(() => expect(removeCategory).toHaveBeenCalledWith('vacations', 'other'));
     // Archived, not deleted — never orphaning the value for a row still mid-flight.
     expect(updateProfile).toHaveBeenCalledWith({
       settings: { categories: [{ value: 'vacations', label: 'Vacations', archived: true }] },
     });
-    expect(await screen.findByText('Saved — 1 transaction, 1 rule, 1 bill moved to Other.')).toBeInTheDocument();
+    // The server's counts, not a client-side recount — this message would lie
+    // if it echoed the PREVIEW instead of `result.moved`. Preview and server
+    // agree here (fixture matches the mock 1-for-1), so no divergence note.
+    expect(await screen.findByText('Saved — 1 transaction, 1 rule, 1 bill, 0 budgets, 0 planned payments moved to Other.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+  });
+
+  /**
+   * cashflow-mobile#28-followup: the sweep now covers categoryBudgets and
+   * plannedTransactions too — the applied message must report those counts,
+   * not just transactions/rules/bills.
+   */
+  it('reports non-zero budget and planned-payment counts the preview never showed', async () => {
+    removeCategory.mockResolvedValue({ moved: { transactions: 1, rules: 1, bills: 1, budgets: 2, plannedTransactions: 3 } });
+    aiChat.mockResolvedValue(proposal());
+    render(<DataChatSheet open onClose={() => {}} />);
+    await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+    send('remove the Vacations category');
+    await screen.findByText(/will move to Other/);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    expect(await screen.findByText('Saved — 1 transaction, 1 rule, 1 bill, 2 budgets, 3 planned payments moved to Other.')).toBeInTheDocument();
+  });
+
+  /**
+   * FIN-SETTLEMENT-003: the preview reads local state (bills fetched once per
+   * profile, never refreshed); the server recomputes fresh at click time. When
+   * they genuinely disagree, the applied message must say so — never let the
+   * server's number silently stand in for what the owner actually approved.
+   */
+  it('names the preview\'s numbers when the server moved a different count than the preview showed', async () => {
+    // Preview (fixture) shows 1 transaction, 1 rule, 1 bill. The server
+    // reports 3 transactions moved — new activity arrived between preview and
+    // Apply (e.g. another Cabo charge landed in the meantime).
+    removeCategory.mockResolvedValue({ moved: { transactions: 3, rules: 1, bills: 1, budgets: 0, plannedTransactions: 0 } });
+    aiChat.mockResolvedValue(proposal());
+    render(<DataChatSheet open onClose={() => {}} />);
+    await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+    send('remove the Vacations category');
+    await screen.findByText('Remove "Vacations" — 1 transaction, 1 rule, 1 bill will move to Other');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    // The actual (server) counts lead the sentence...
+    expect(await screen.findByText(
+      /Saved — 3 transactions, 1 rule, 1 bill, 0 budgets, 0 planned payments moved to Other\./
+    )).toBeInTheDocument();
+    // ...and the divergence note names the preview's own number and why it changed.
+    expect(screen.getByText(/The preview showed 1 transaction, 1 rule, 1 bill/)).toBeInTheDocument();
+    expect(screen.getByText(/activity between the preview and Apply changed that/)).toBeInTheDocument();
   });
 
   it('reassigns to an explicit target when the model named one, instead of the "other" default', async () => {
@@ -974,10 +1240,10 @@ describe('the remove_category proposal card', () => {
 
     expect(await screen.findByText(/will move to Shopping/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
-    await waitFor(() => expect(updateTransactionAwaited).toHaveBeenCalledWith('vac-1', { category: 'shopping' }));
+    await waitFor(() => expect(removeCategory).toHaveBeenCalledWith('vacations', 'shopping'));
   });
 
-  it('Cancel drops the proposal without writing anything', async () => {
+  it('Cancel drops the proposal without calling removeCategory or writing anything', async () => {
     aiChat.mockResolvedValue(proposal());
     render(<DataChatSheet open onClose={() => {}} />);
     await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
@@ -986,13 +1252,14 @@ describe('the remove_category proposal card', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(updateProfile).not.toHaveBeenCalled();
-    expect(updateTransactionAwaited).not.toHaveBeenCalled();
+    expect(removeCategory).not.toHaveBeenCalled();
   });
 
   it('a category with nothing filed under it still previews and applies cleanly — zero everywhere', async () => {
     RULES = [];
     EXTRA_TRANSACTIONS = [];
     getBills.mockResolvedValue([]);
+    removeCategory.mockResolvedValue({ moved: { transactions: 0, rules: 0, bills: 0, budgets: 0, plannedTransactions: 0 } });
     aiChat.mockResolvedValue(proposal());
     render(<DataChatSheet open onClose={() => {}} />);
     await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
@@ -1001,20 +1268,17 @@ describe('the remove_category proposal card', () => {
     expect(await screen.findByText('Remove "Vacations" — 0 transactions, 0 rules, 0 bills will move to Other')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     await waitFor(() => expect(updateProfile).toHaveBeenCalledTimes(1));
-    expect(updateTransactionAwaited).not.toHaveBeenCalled();
+    expect(removeCategory).toHaveBeenCalledWith('vacations', 'other');
   });
 
   /**
-   * The reviewed finding: updateTransaction/updateRuleCategory's promises always
-   * resolve (fire-and-forget with .catch(console.warn)), and updateProfile
-   * swallows too, so "Saved — N moved" used to be printed whether or not
-   * anything actually reached Firestore. These three prove the honest version:
-   * full success only when every write confirmed; a partial failure reports the
-   * true counts and leaves Apply live for a genuine retry; a failed write is
-   * never counted as moved.
+   * cashflow-mobile#28: the sweep is now server-side and chunked-atomic — there
+   * is no client-visible partial-success state to reconcile anymore. A failed
+   * call throws, nothing local is mutated, and the same Apply button stays up
+   * for a genuine retry (which simply calls removeCategory again).
    */
-  it('reports partial failure honestly when a write does not confirm, and leaves Apply live to retry', async () => {
-    updateTransactionAwaited.mockResolvedValue(false); // the write "failed" — never counted as moved
+  it('a failed call writes nothing locally and leaves Apply live to retry', async () => {
+    removeCategory.mockRejectedValueOnce(new Error('unavailable'));
     aiChat.mockResolvedValue(proposal());
     render(<DataChatSheet open onClose={() => {}} />);
     await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
@@ -1023,40 +1287,14 @@ describe('the remove_category proposal card', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 
-    expect(await screen.findByText(
-      '0 transactions, 1 rule, 1 bill moved to Other; 1 could not be saved. Press Apply again to move the rest.'
-    )).toBeInTheDocument();
-    // The category is still archived — a straggler stays targetable by its own
-    // stored `category` value regardless, so archiving does not orphan it.
-    expect(updateProfile).toHaveBeenCalledWith({
-      settings: { categories: [{ value: 'vacations', label: 'Vacations', archived: true }] },
-    });
+    expect(await screen.findByText('That could not be saved. Please try again.')).toBeInTheDocument();
+    expect(updateProfile).not.toHaveBeenCalled();
     // Not marked applied: the same Apply button is still there to retry.
     expect(screen.getByRole('button', { name: 'Apply' })).toBeInTheDocument();
-  });
 
-  it('a bill that failed to move stays out of local state, so a retry does not skip it', async () => {
-    // This component's own `bills` state (unlike the mocked transactions/rules
-    // context) only advances for a CONFIRMED write — the same guarantee
-    // planCategoryRemoval's retry sweep depends on for every write channel.
-    updateBill.mockRejectedValueOnce(new Error('permission-denied'));
-    aiChat.mockResolvedValue(proposal());
-    render(<DataChatSheet open onClose={() => {}} />);
-    await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
-    send('remove the Vacations category');
-    await screen.findByText(/will move to Other/);
-
+    removeCategory.mockResolvedValue({ moved: { transactions: 1, rules: 1, bills: 1, budgets: 0, plannedTransactions: 0 } });
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
-    expect(await screen.findByText(
-      '1 transaction, 1 rule, 0 bills moved to Other; 1 could not be saved. Press Apply again to move the rest.'
-    )).toBeInTheDocument();
-
-    updateBill.mockClear().mockResolvedValue(undefined);
-    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
-
-    // The bill still shows 'vacations' locally (the failed write never advanced
-    // it), so it is still in the retried plan and gets attempted again.
-    await waitFor(() => expect(updateBill).toHaveBeenCalledWith('user-1', 'bill-vac', { category: 'other' }));
+    await waitFor(() => expect(updateProfile).toHaveBeenCalledTimes(1));
   });
 });
 

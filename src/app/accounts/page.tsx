@@ -42,6 +42,24 @@ import {
   RefreshCw,
 } from 'lucide-react';
 
+/**
+ * #68 (UX-002): distinguishes "the owner typed a budget in", "no budget typed
+ * in but 6 months of spending gives a typical figure", and "nothing to show
+ * yet" — mirrors runwayLabel()'s hasBurn contract in lib/home.ts. A brand-new
+ * account (no monthlyBudget, no transaction history) must never fall through
+ * to a $0.00 labeled "your set budget" — that is the value nobody entered.
+ */
+export type BudgetDisplay =
+  | { status: 'set'; amount: number }
+  | { status: 'derived'; amount: number }
+  | { status: 'unset' };
+
+export function resolveBudgetDisplay(monthlyBudget: number | undefined, derivedSpending: number): BudgetDisplay {
+  if ((monthlyBudget || 0) > 0) return { status: 'set', amount: monthlyBudget! };
+  if (derivedSpending > 0) return { status: 'derived', amount: derivedSpending };
+  return { status: 'unset' };
+}
+
 export default function AccountsPage() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const { 
@@ -461,8 +479,7 @@ export default function AccountsPage() {
   const derivedMonthly = monthlyAverages(transactions, derivedAccounts, 6, incomeContext);
   const monthlyIncome = incomeFromSources > 0 ? incomeFromSources : derivedMonthly.income;
   const incomeIsDerived = incomeFromSources === 0 && derivedMonthly.income > 0;
-  const effectiveBudget = (profile?.monthlyBudget || 0) > 0 ? profile!.monthlyBudget! : derivedMonthly.spending;
-  const budgetIsDerived = !((profile?.monthlyBudget || 0) > 0) && effectiveBudget > 0;
+  const budgetDisplay = resolveBudgetDisplay(profile?.monthlyBudget, derivedMonthly.spending);
 
   return (
     <div className="min-h-screen relative">
@@ -606,10 +623,26 @@ export default function AccountsPage() {
               <span className="text-[var(--foreground-secondary)] text-sm">Monthly Budget</span>
               <DollarSign className="w-5 h-5 text-[var(--accent-warning)]" />
             </div>
-            <p className="text-2xl font-bold text-[var(--foreground)]">
-              {formatMoney(effectiveBudget, 'USD', 2)}
-            </p>
-            <p className="text-xs text-[var(--foreground-muted)]">{budgetIsDerived ? 'typical monthly spend' : 'your set budget'}</p>
+            {budgetDisplay.status === 'unset' ? (
+              <>
+                <p className="text-2xl font-bold text-[var(--foreground-muted)]">Not set</p>
+                <button
+                  onClick={() => setActiveTab('budgets')}
+                  className="text-xs text-[var(--accent-primary)] underline hover:no-underline"
+                >
+                  Set a budget
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-2xl font-bold text-[var(--foreground)]">
+                  {formatMoney(budgetDisplay.amount, 'USD', 2)}
+                </p>
+                <p className="text-xs text-[var(--foreground-muted)]">
+                  {budgetDisplay.status === 'derived' ? 'typical monthly spend' : 'your set budget'}
+                </p>
+              </>
+            )}
           </div>
         </div>
         {/* Tabs */}

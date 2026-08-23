@@ -147,6 +147,33 @@ export type ChatAction =
       nonNegotiable?: boolean;
       reason: string;
     }
+  /** cashflow-mobile#34. Proposes editing an EXISTING Bill row — rename an
+   *  installment to what it actually bought (the Apple Card's A/B/C/D naming
+   *  problem: a statement line never says what an installment bought), fix
+   *  its amount/cadence, or mark it FINISHED (installmentsRemaining 0 or an
+   *  endDate) without losing its history. `match` resolves CLIENT-side
+   *  against the owner's real bills register — same unresolvable/ambiguous-
+   *  means-no-button contract as set_account_balance's accountName and
+   *  record_bill's accountName: the parser only checks shape here. */
+  | {
+      action: 'update_bill';
+      match: { billId?: string; vendor?: string };
+      set: {
+        vendor?: string;
+        amount?: number;
+        frequency?: BillFrequency;
+        nextDueDate?: string;
+        endDate?: string;
+        installmentsRemaining?: number;
+        nonNegotiable?: boolean;
+      };
+      reason: string;
+    }
+  /** cashflow-mobile#34. Proposes REMOVING a Bill row outright — for a
+   *  genuine mistake, never for a finished installment (update_bill's
+   *  installmentsRemaining 0 / endDate keeps that row's history; this
+   *  deletes it). Same match/resolve contract as update_bill above. */
+  | { action: 'remove_bill'; match: { billId?: string; vendor?: string }; reason: string }
   /** cashflow-mobile#24. Proposes a NEW category. No `value` — the app derives a
    *  unique slug from the label, never the model. */
   | { action: 'add_category'; label: string; icon?: string; reason: string }
@@ -204,6 +231,9 @@ const MAX = {
   transactionId: 128,
   // firestore.rules' isValidString(vendor, 1, 200) — the same ceiling the write itself enforces.
   vendor: 200,
+  // cashflow-mobile#34: a Firestore auto-id is ~20 chars; same generous ceiling as
+  // transactionId/candidateId above rather than a tight, easily-outgrown one.
+  billId: 128,
   // #22 — breadth caps for the two new context sections, same idea as `merchants` above:
   // bound the LIST length so a large register/ledger cannot grow the context unboundedly.
   bills: 60,
@@ -336,6 +366,33 @@ function boundedStr(v: unknown, min: number, max: number): string | null {
   if (typeof v !== 'string') return null;
   const s = v.trim();
   return s.length >= min && s.length <= max ? s : null;
+}
+
+/**
+ * cashflow-mobile#34. `{billId?, vendor?}` — at least one identifying field, or the
+ * proposal names nothing to act on. Resolution against the owner's REAL bills register
+ * is a CLIENT-side concern (DataChatSheet.tsx's resolveBill) — same split record_bill's
+ * accountName and set_account_balance's accountName already use: this only checks shape.
+ */
+function parseBillMatch(raw: unknown): { billId?: string; vendor?: string } | null {
+  const m = record(raw, ['billId', 'vendor']);
+  if (!m) return null;
+
+  let billId: string | undefined;
+  if (m.billId !== undefined) {
+    const b = str(m.billId, MAX.billId);
+    if (!b) return null; // present but empty — not a real reference
+    billId = b;
+  }
+  let vendor: string | undefined;
+  if (m.vendor !== undefined) {
+    const v = str(m.vendor, MAX.vendor);
+    if (!v) return null;
+    vendor = v;
+  }
+  if (billId === undefined && vendor === undefined) return null; // nothing to resolve against
+
+  return { ...(billId !== undefined ? { billId } : {}), ...(vendor !== undefined ? { vendor } : {}) };
 }
 
 function parseRule(raw: unknown, allowedCategories: readonly string[]): NewMappingRule | null {
@@ -699,7 +756,10 @@ export function parseChatAction(
     if (!reason) return null;
     // Finite, positive, and bounded: a model typo (25000 instead of 2500) would
     // otherwise pass straight through as the owner's own runway assumption.
-    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0 || amount > 1_000_000) return null;
+    // Floor at a cent, not just > 0: 0.004 would pass `amount > 0` here, then round
+    // to exactly 0 below — the card says "Saved" but writes 0, and
+    // sanitizeAssumedSpend(0) silently reverts to the derived average on next read.
+    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0.01 || amount > 1_000_000) return null;
     return { action: 'set_monthly_spend', amount: Math.round(amount * 100) / 100, reason };
   }
 
@@ -732,7 +792,10 @@ export function parseChatAction(
     if (!vendor || !reason) return null;
 
     const amount = o.amount;
-    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0 || amount > 100_000) return null;
+    // Floor at a cent, not just > 0: a sub-cent amount rounds to exactly 0 below and
+    // would save a bill of $0 while the card claims success — same failure mode as
+    // set_monthly_spend above.
+    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0.01 || amount > 100_000) return null;
 
     if (typeof o.frequency !== 'string' || !BILL_FREQUENCIES.includes(o.frequency)) return null;
     const frequency = o.frequency as BillFrequency;
@@ -796,6 +859,115 @@ export function parseChatAction(
       ...(nonNegotiable !== undefined ? { nonNegotiable } : {}),
       reason,
     };
+  }
+
+  // cashflow-mobile#34: update_bill. Corrects an EXISTING Bill row — rename an
+  // installment to what it actually bought, fix its amount/cadence, or mark it
+  // FINISHED. Validated as strictly as record_bill's own fields; `match` is shape-only
+  // here (see parseBillMatch) — resolving it against the real register, and refusing
+  // an ambiguous vendor, is DataChatSheet.tsx's job (same split as accountName above).
+  if (action === 'update_bill') {
+    const o = record(raw, ['action', 'match', 'set', 'reason']);
+    if (!o) return null;
+
+    const reason = str(o.reason, MAX.explanation);
+    if (!reason) return null;
+
+    const match = parseBillMatch(o.match);
+    if (!match) return null;
+
+    const s = record(o.set, [
+      'vendor', 'amount', 'frequency', 'nextDueDate', 'endDate', 'installmentsRemaining', 'nonNegotiable',
+    ]);
+    if (!s) return null;
+
+    let vendor: string | undefined;
+    if (s.vendor !== undefined) {
+      const v = str(s.vendor, MAX.vendor);
+      if (!v) return null;
+      vendor = v;
+    }
+
+    let amount: number | undefined;
+    if (s.amount !== undefined) {
+      // Same floor-at-a-cent reasoning as record_bill's amount: a sub-cent value
+      // rounds to a silent 0 below.
+      if (typeof s.amount !== 'number' || !Number.isFinite(s.amount) || s.amount < 0.01 || s.amount > 100_000) return null;
+      amount = Math.round(s.amount * 100) / 100;
+    }
+
+    let frequency: BillFrequency | undefined;
+    if (s.frequency !== undefined) {
+      if (typeof s.frequency !== 'string' || !BILL_FREQUENCIES.includes(s.frequency)) return null;
+      frequency = s.frequency as BillFrequency;
+    }
+
+    let nextDueDate: string | undefined;
+    if (s.nextDueDate !== undefined) {
+      if (typeof s.nextDueDate !== 'string' || !isNextDueDateInRange(s.nextDueDate)) return null;
+      nextDueDate = s.nextDueDate;
+    }
+
+    let endDate: string | undefined;
+    if (s.endDate !== undefined) {
+      if (typeof s.endDate !== 'string' || !isIsoDate(s.endDate)) return null;
+      endDate = s.endDate;
+    }
+
+    let installmentsRemaining: number | undefined;
+    if (s.installmentsRemaining !== undefined) {
+      // cashflow-mobile#34: 0 IS valid here — unlike record_bill's 1..480 floor, this
+      // is exactly how a FINISHED installment is marked done. billUpcomingEvents
+      // (bills.ts) slices its projection to zero future events on installmentsRemaining
+      // 0, so the row (and its history) stays while it drops out of Upcoming.
+      if (
+        typeof s.installmentsRemaining !== 'number' ||
+        !Number.isInteger(s.installmentsRemaining) ||
+        s.installmentsRemaining < 0 ||
+        s.installmentsRemaining > 480
+      ) return null;
+      installmentsRemaining = s.installmentsRemaining;
+    }
+
+    // Either an end date or a payment count, never both — same "one answer to when
+    // this stops" rule as record_bill.
+    if (endDate !== undefined && installmentsRemaining !== undefined) return null;
+
+    let nonNegotiable: boolean | undefined;
+    if (s.nonNegotiable !== undefined) {
+      if (typeof s.nonNegotiable !== 'boolean') return null;
+      nonNegotiable = s.nonNegotiable;
+    }
+
+    const set = {
+      ...(vendor !== undefined ? { vendor } : {}),
+      ...(amount !== undefined ? { amount } : {}),
+      ...(frequency !== undefined ? { frequency } : {}),
+      ...(nextDueDate !== undefined ? { nextDueDate } : {}),
+      ...(endDate !== undefined ? { endDate } : {}),
+      ...(installmentsRemaining !== undefined ? { installmentsRemaining } : {}),
+      ...(nonNegotiable !== undefined ? { nonNegotiable } : {}),
+    };
+    if (!Object.keys(set).length) return null; // an update that changes nothing
+
+    return { action: 'update_bill', match, set, reason };
+  }
+
+  // cashflow-mobile#34: remove_bill. Genuine deletion — for a bill that should never
+  // have been recorded, never for a finished installment (update_bill's
+  // installmentsRemaining 0 / endDate keeps that history). Same shape-only match as
+  // update_bill above.
+  if (action === 'remove_bill') {
+    const o = record(raw, ['action', 'match', 'reason']);
+    if (!o) return null;
+
+    const reason = str(o.reason, MAX.explanation);
+    if (!reason) return null;
+
+    const match = parseBillMatch(o.match);
+    if (!match) return null;
+
+    return { action: 'remove_bill', match, reason };
   }
 
   // cashflow-mobile#24: add_category. No `value` accepted from the model — the app

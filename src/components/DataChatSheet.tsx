@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Loader2, Send, Sparkles, X } from 'lucide-react';
-import { aiChat, callableErrorMessage } from '@/lib/callables';
+import { aiChat, callableErrorMessage, removeCategory as removeCategoryCallable } from '@/lib/callables';
 import { parseChatAction, buildChatContext, explanationOf, fallbackText } from '@/lib/chat-actions';
 import { describeRule, rulePreview, MappingRule, NewMappingRule } from '@/lib/mapping-rules';
 import { useTransactions } from '@/context/TransactionContext';
@@ -12,11 +12,10 @@ import { formatMoney } from '@/lib/money';
 import { sanitizeAssumedSpend } from '@/lib/profile-settings';
 import { matchIncomeDeposits } from '@/lib/ask';
 import { deriveAccountBalance, monthlyAverages } from '@/lib/forecast';
-import { addBill, getBills, updateBill } from '@/lib/firestore';
+import { addBill, deleteBill, getBills, updateBill } from '@/lib/firestore';
 import { Bill, BillFrequency, PAYMENT_METHODS } from '@/lib/bills';
 import type { IncomeContext } from '@/lib/classify';
 import {
-  ExpenseCategory,
   PaymentAccount,
   resolveCategories,
   ResolvedCategory,
@@ -68,6 +67,22 @@ interface ChatMessage {
     installmentsRemaining?: number;
     nonNegotiable?: boolean;
   };
+  /** cashflow-mobile#34: set when the assistant proposed editing an EXISTING bill —
+   *  match resolves against the live `bills` state, same contract as `balance` above. */
+  billEdit?: {
+    match: { billId?: string; vendor?: string };
+    set: {
+      vendor?: string;
+      amount?: number;
+      frequency?: BillFrequency;
+      nextDueDate?: string;
+      endDate?: string;
+      installmentsRemaining?: number;
+      nonNegotiable?: boolean;
+    };
+  };
+  /** cashflow-mobile#34: set when the assistant proposed REMOVING a bill outright. */
+  billRemoval?: { match: { billId?: string; vendor?: string } };
   /** cashflow-mobile#24: set when the assistant proposed adding, renaming or
    *  removing one of the owner's own categories. */
   category?:
@@ -115,6 +130,67 @@ export function resolveBillPaymentMethod(name: string | undefined): string | nul
   if (exact.length === 1) return exact[0][0];
   const contains = entries.filter(([, m]) => m.label.toLowerCase().includes(n));
   return contains.length === 1 ? contains[0][0] : null;
+}
+
+/**
+ * cashflow-mobile#34. `match` -> the ONE existing Bill it names, or null. Same
+ * exact-then-unique-substring algorithm as resolveAccount/resolveBillPaymentMethod
+ * above, run against the owner's real bills register instead of accounts or the
+ * bundled payment-method registry.
+ *
+ * billId, when present, is exact — it came from an earlier turn of THIS conversation
+ * (the model copying an id the app already showed it), never a guess, so it is looked
+ * up directly and never falls through to the vendor path even when vendor is also set.
+ *
+ * vendor is where the ambiguity that matters actually lives: an owner's Apple Card
+ * installments are routinely named only "A"/"B"/"C"/"D" (a statement line never says
+ * what an installment bought), so "the Apple Card installment" can legitimately match
+ * three rows at once. Ambiguous or unknown resolves to null — the card renders words
+ * and no button, same contract as resolveAccount: the model never gets to guess which
+ * row it meant.
+ */
+export function resolveBill(match: { billId?: string; vendor?: string }, bills: readonly Bill[]): Bill | null {
+  if (match.billId) return bills.find((b) => b.id === match.billId) ?? null;
+  if (!match.vendor) return null;
+  const n = match.vendor.trim().toLowerCase();
+  if (!n) return null;
+  const exact = bills.filter((b) => b.vendor.trim().toLowerCase() === n);
+  if (exact.length === 1) return exact[0];
+  const contains = bills.filter((b) => b.vendor.toLowerCase().includes(n));
+  return contains.length === 1 ? contains[0] : null;
+}
+
+/** "Your bills: A ($45.79 monthly), B (...), ..." — what an unresolved match's card
+ *  shows instead of guessing, so the owner can see exactly what to say instead. */
+const describeBills = (bills: readonly Bill[], money: (n: number) => string): string =>
+  bills.map((b) => `${b.vendor} (${money(b.amount)} ${b.frequency})`).join(', ') || '(none)';
+
+/** yyyy-MM-dd for "today" — matches bills.ts's own TODAY(), for the same plain-string
+ *  comparison against Bill.endDate. */
+const todayISO = (): string => new Date().toISOString().slice(0, 10);
+
+/**
+ * cashflow-mobile#34. The one truthful sentence a chat-applied bill edit gets: BEFORE
+ * -> AFTER, in the owner's own numbers — never "updated" or "saved" with no figures,
+ * which is exactly the overpromise record_bill's own applied message was built to
+ * avoid. Pure and exported so the exact wording is testable without mounting the
+ * component (see data-chat-sheet.test.tsx).
+ */
+export function describeBillUpdate(before: Bill, after: Bill, currency?: string): string {
+  const m2 = (n: number) => formatMoney(n, currency, 2);
+  const head = after.vendor === before.vendor ? after.vendor : `${before.vendor} → ${after.vendor}`;
+  const finished = after.installmentsRemaining === 0 || (after.endDate !== undefined && after.endDate < todayISO());
+  const tail = [
+    `${m2(after.amount)} ${after.frequency}`,
+    after.installmentsRemaining !== undefined
+      ? after.installmentsRemaining === 0
+        ? 'finished'
+        : `${after.installmentsRemaining} payment${after.installmentsRemaining === 1 ? '' : 's'} left`
+      : null,
+    after.endDate ? `ends ${after.endDate}` : null,
+    after.nonNegotiable ? 'locked — reserved first in every plan' : null,
+  ].filter(Boolean).join(', ');
+  return `Saved — ${head}, ${tail}.${finished ? ' No longer in Upcoming.' : ''}`;
 }
 
 /**
@@ -176,13 +252,42 @@ export function planCategoryRemoval(
   };
 }
 
+/**
+ * FIN-SETTLEMENT-003 (see BalanceProposalCard's comment above for the same
+ * rule): "the confirmation must show the figure actually being moved." The
+ * preview above reads local state — `bills` is fetched once per profile, never
+ * refreshed (see the effect near the top of this component) — while the
+ * server (functions/src/categoryRemoval.ts) recomputes from a fresh ledger at
+ * the moment Apply is clicked. Those two can genuinely disagree: the owner
+ * approves what the preview showed, the server moves what is actually there.
+ * `null` when they match — nothing to say. Otherwise names the preview's
+ * numbers (the server's are already in the main "Saved —" sentence) and why.
+ */
+export function describeRemovalDivergence(
+  previewed: { transactions: number; rules: number; bills: number },
+  moved: { transactions: number; rules: number; bills: number }
+): string | null {
+  if (
+    previewed.transactions === moved.transactions &&
+    previewed.rules === moved.rules &&
+    previewed.bills === moved.bills
+  ) {
+    return null;
+  }
+  return `The preview showed ${previewed.transactions} transaction${previewed.transactions === 1 ? '' : 's'}, ${
+    previewed.rules
+  } rule${previewed.rules === 1 ? '' : 's'}, ${previewed.bills} bill${
+    previewed.bills === 1 ? '' : 's'
+  } — activity between the preview and Apply changed that, so the counts above are what actually moved.`;
+}
+
 export default function DataChatSheet({ open, onClose, seed }: {
   open: boolean;
   onClose: () => void;
   /** A question to ask on open — set when the owner clicked a specific node or group. */
   seed?: string;
 }) {
-  const { transactions, addRule, rules, updateTransactionAwaited, updateRuleCategoryAwaited } = useTransactions();
+  const { transactions, addRule, rules } = useTransactions();
   const { profile, reconcileAccount, addIncomeSource, incomeContext, updateProfile } = useUserProfile();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -359,6 +464,16 @@ export default function DataChatSheet({ open, onClose, seed }: {
                 },
                 status: 'pending',
               })
+          : reply?.action === 'update_bill'
+            ? mk('assistant', reply.reason, {
+                billEdit: { match: reply.match, set: reply.set },
+                status: 'pending',
+              })
+          : reply?.action === 'remove_bill'
+            ? mk('assistant', reply.reason, {
+                billRemoval: { match: reply.match },
+                status: 'pending',
+              })
           : reply?.action === 'add_category'
             ? mk('assistant', reply.reason, {
                 category: { kind: 'add', label: reply.label, icon: reply.icon },
@@ -414,7 +529,7 @@ export default function DataChatSheet({ open, onClose, seed }: {
   };
 
   const dismiss = (id: string) =>
-    setMessages((prev) => prev.map((x) => (x.id === id ? { ...x, rule: undefined, balance: undefined, income: undefined, spend: undefined, bill: undefined, category: undefined, status: undefined } : x)));
+    setMessages((prev) => prev.map((x) => (x.id === id ? { ...x, rule: undefined, balance: undefined, income: undefined, spend: undefined, bill: undefined, billEdit: undefined, billRemoval: undefined, category: undefined, status: undefined } : x)));
 
   /** THE one path from a balance proposal to the store — a button press, same
    *  reconcile() the accounts screen used before its manual knob was removed. */
@@ -544,6 +659,82 @@ export default function DataChatSheet({ open, onClose, seed }: {
     }
   };
 
+  /**
+   * cashflow-mobile#34. update_bill -> updateBill() (src/lib/firestore.ts) against the
+   * row `resolveBill` picks out — re-resolved here rather than trusted from the card,
+   * mirroring applyBill's own re-derivation of resolveBillAnchor above: Apply can never
+   * fire against a row the card's own resolution rejected. When the frequency is
+   * changing (or a new nextDueDate was given) the anchor is recomputed the same way
+   * record_bill's card does; otherwise the bill's existing schedule is left untouched.
+   */
+  const applyUpdateBill = async (m: ChatMessage) => {
+    if (!m.billEdit || busy || !profile?.id) return;
+    const before = resolveBill(m.billEdit.match, bills);
+    if (!before) return;
+    const { set } = m.billEdit;
+    const effectiveFrequency = set.frequency ?? before.frequency;
+    const frequencyChanging = set.frequency !== undefined && set.frequency !== before.frequency;
+    let anchor: { autopayDay?: number; anchorDate?: string } | undefined;
+    if (set.nextDueDate !== undefined || frequencyChanging) {
+      const resolved = resolveBillAnchor({ frequency: effectiveFrequency, nextDueDate: set.nextDueDate });
+      // Mirrors the card's own gate (UpdateBillProposalCard, below) — unreachable in
+      // practice, since Apply is never rendered without a resolvable anchor.
+      if (!resolved) return;
+      anchor = resolved;
+    }
+    setBusy(true);
+    try {
+      const updates: Partial<Bill> = {
+        ...(set.vendor !== undefined ? { vendor: set.vendor } : {}),
+        ...(set.amount !== undefined ? { amount: set.amount } : {}),
+        ...(set.frequency !== undefined ? { frequency: set.frequency } : {}),
+        ...(set.endDate !== undefined ? { endDate: set.endDate } : {}),
+        ...(set.installmentsRemaining !== undefined ? { installmentsRemaining: set.installmentsRemaining } : {}),
+        ...(set.nonNegotiable !== undefined ? { nonNegotiable: set.nonNegotiable } : {}),
+        ...(anchor?.autopayDay !== undefined ? { autopayDay: anchor.autopayDay } : {}),
+        ...(anchor?.anchorDate !== undefined ? { anchorDate: anchor.anchorDate } : {}),
+      };
+      await updateBill(profile.id, before.id, updates);
+      const after: Bill = { ...before, ...updates };
+      // Mirrors applyBill's own local-append reasoning: `bills` is fetched once per
+      // profile and never re-read, so the next turn ("is C still $45.79?") must see
+      // this write immediately, not after a reopen.
+      setBills((prev) => prev.map((b) => (b.id === before.id ? after : b)));
+      setMessages((prev) => [
+        ...prev.map((x) => (x.id === m.id ? { ...x, status: 'applied' as const } : x)),
+        mk('assistant', describeBillUpdate(before, after, profile?.currency)),
+      ]);
+    } catch {
+      setMessages((prev) => [...prev, mk('assistant', 'That could not be saved. Please try again.')]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * cashflow-mobile#34. remove_bill -> deleteBill() (src/lib/firestore.ts) — a genuine
+   * deletion, unlike update_bill's installmentsRemaining-0/endDate path, which keeps
+   * the row's history. Re-resolves `match` for the same reason applyUpdateBill does.
+   */
+  const applyRemoveBill = async (m: ChatMessage) => {
+    if (!m.billRemoval || busy || !profile?.id) return;
+    const target = resolveBill(m.billRemoval.match, bills);
+    if (!target) return;
+    setBusy(true);
+    try {
+      await deleteBill(profile.id, target.id);
+      setBills((prev) => prev.filter((b) => b.id !== target.id));
+      setMessages((prev) => [
+        ...prev.map((x) => (x.id === m.id ? { ...x, status: 'applied' as const } : x)),
+        mk('assistant', `Saved — ${target.vendor} removed. ${formatMoney(target.amount, profile?.currency, 2)} ${target.frequency} is no longer in Upcoming.`),
+      ]);
+    } catch {
+      setMessages((prev) => [...prev, mk('assistant', 'That could not be saved. Please try again.')]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   /** The "Back to derived" affordance: clears the override regardless of what
    *  amount was proposed — an alternative to Apply, not a variant of it. */
   const clearSpend = async (m: ChatMessage) => {
@@ -567,10 +758,16 @@ export default function DataChatSheet({ open, onClose, seed }: {
    * remove_category to the store — settings.categories via the SAME
    * updateProfile round trip FIN-SPEND-001 uses, no new write path.
    *
-   * remove_category additionally reassigns every transaction, rule and bill
-   * currently filed under the removed value BEFORE archiving it, using the
-   * exact same planCategoryRemoval() the card previewed — never orphaning a
-   * category value.
+   * cashflow-mobile#28: remove_category no longer sweeps client-side (N
+   * transaction writes + M rule writes + bill writes + the settings archive,
+   * none of it atomic, none of it reachable from mobile). It now calls
+   * removeCategory (functions/src/categoryRemoval.ts), which does the whole
+   * sweep server-side in one request — five stores now, not three; see that
+   * file's own doc comment — and hands back the real counts. The local
+   * settings/bills mirroring below is NOT a second write path — the server
+   * already wrote both — it just keeps THIS session's state (neither
+   * UserProfileContext nor this component's own `bills` state has a live
+   * listener) from reading stale until the next reload.
    */
   const applyCategory = async (m: ChatMessage) => {
     if (!m.category || busy || !profile?.id) return;
@@ -597,72 +794,49 @@ export default function DataChatSheet({ open, onClose, seed }: {
         ]);
       } else {
         const { value, reassignTo } = m.category;
-        const plan = planCategoryRemoval(value, transactions, rules, bills);
 
-        // Each write is genuinely awaited and its real outcome kept — never
-        // assumed. updateTransaction/updateRuleCategory (TransactionContext)
-        // fire the Firestore write with `.catch(console.warn)` and never await
-        // it, so their promises always resolve regardless of what actually
-        // landed; updateTransactionAwaited/updateRuleCategoryAwaited exist
-        // ONLY for this sweep, for exactly that reason. updateBill (below)
-        // already throws on a real failure, so it needs no awaited twin.
-        const txOutcomes = await Promise.all(
-          plan.transactionIds.map((id) => updateTransactionAwaited(id, { category: reassignTo as ExpenseCategory }))
-        );
-        const ruleOutcomes = await Promise.all(
-          plan.ruleIds.map((id) => updateRuleCategoryAwaited(id, reassignTo))
-        );
-        const billOutcomes = await Promise.all(
-          plan.billIds.map((id) =>
-            updateBill(profile.id, id, { category: reassignTo })
-              .then(() => true)
-              .catch((err) => { console.warn('Bill category update failed:', err); return false; })
-          )
-        );
+        // FIN-SETTLEMENT-003: recomputed from the SAME live state the card
+        // just rendered, so this is exactly what the owner approved — the
+        // basis for the divergence check below, once the server answers.
+        const previewPlan = planCategoryRemoval(value, transactions, rules, bills);
+        const previewed = {
+          transactions: previewPlan.transactionIds.length,
+          rules: previewPlan.ruleIds.length,
+          bills: previewPlan.billIds.length,
+        };
 
-        // Local `bills` state (this component's own, not context-managed) only
-        // moves for bills that actually confirmed — a bill whose write failed
-        // must keep showing the removed category, or planCategoryRemoval would
-        // never find it again on a repeat sweep.
-        const movedBillIds = plan.billIds.filter((_, i) => billOutcomes[i]);
-        if (movedBillIds.length) {
-          setBills((prev) => prev.map((b) => (movedBillIds.includes(b.id) ? { ...b, category: reassignTo } : b)));
-        }
+        // cashflow-mobile#28: ONE server-side callable does the whole sweep —
+        // five stores now (see categoryRemoval.ts's doc comment), then the
+        // settings archive — as chunked Firestore batches, atomically per
+        // chunk. Either this resolves with the real counts, or it throws;
+        // there is no client-visible partial-success state to reconcile.
+        const result = await removeCategoryCallable(value, reassignTo);
+        const {
+          transactions: txMoved, rules: ruleMoved, bills: billMoved,
+          budgets: budgetMoved, plannedTransactions: plannedMoved,
+        } = result.moved;
 
-        const txMoved = txOutcomes.filter(Boolean).length;
-        const ruleMoved = ruleOutcomes.filter(Boolean).length;
-        const billMoved = billOutcomes.filter(Boolean).length;
-        const totalPlanned = plan.transactionIds.length + plan.ruleIds.length + plan.billIds.length;
-        const totalMoved = txMoved + ruleMoved + billMoved;
-        const allMoved = totalMoved === totalPlanned;
-
-        // Archived, not deleted — the value stays resolvable for any row still
-        // showing it mid-reassignment, same reasoning resolveCategories documents.
-        // This proceeds even on a partial failure above: archiving only touches
-        // settings.categories, never the transactions/rules/bills themselves, and
-        // planCategoryRemoval matches on THEIR stored `category`/`set.category`
-        // field, not on whether the settings entry is archived — so a straggler
-        // stays targetable and a repeat of this same proposal (the Apply button
-        // stays live below when anything failed) sweeps it up.
+        // Mirrors the server's own writes into local state — see the doc
+        // comment above applyCategory for why this isn't a second write path.
         const next = current.map((c) => (c.value === value ? { ...c, archived: true } : c));
         await updateProfile({ settings: { categories: next } });
+        setBills((prev) => prev.map((b) => (b.category === value ? { ...b, category: reassignTo } : b)));
 
         const reassignLabel = resolvedCategories.find((c) => c.value === reassignTo)?.label ?? reassignTo;
         const parts = [
           `${txMoved} transaction${txMoved === 1 ? '' : 's'}`,
           `${ruleMoved} rule${ruleMoved === 1 ? '' : 's'}`,
           `${billMoved} bill${billMoved === 1 ? '' : 's'}`,
+          `${budgetMoved} budget${budgetMoved === 1 ? '' : 's'}`,
+          `${plannedMoved} planned payment${plannedMoved === 1 ? '' : 's'}`,
         ];
+        // FIN-SETTLEMENT-003: when the preview and the server disagree, say
+        // so plainly instead of letting the server's number silently stand in
+        // for what was actually approved.
+        const divergence = describeRemovalDivergence(previewed, { transactions: txMoved, rules: ruleMoved, bills: billMoved });
         setMessages((prev) => [
-          // Only marked 'applied' — which hides the Apply button — once every
-          // planned write actually confirmed. A partial failure leaves the card
-          // pending so the SAME Apply button re-runs this path: plan is
-          // recomputed fresh from current state next time, which by now only
-          // still shows the rows that never moved.
-          ...prev.map((x) => (x.id === m.id ? { ...x, status: allMoved ? ('applied' as const) : x.status } : x)),
-          mk('assistant', allMoved
-            ? `Saved — ${parts.join(', ')} moved to ${reassignLabel}.`
-            : `${parts.join(', ')} moved to ${reassignLabel}; ${totalPlanned - totalMoved} could not be saved. Press Apply again to move the rest.`),
+          ...prev.map((x) => (x.id === m.id ? { ...x, status: 'applied' as const } : x)),
+          mk('assistant', `Saved — ${parts.join(', ')} moved to ${reassignLabel}.${divergence ? ` ${divergence}` : ''}`),
         ]);
       }
     } catch {
@@ -796,6 +970,28 @@ export default function DataChatSheet({ open, onClose, seed }: {
                   pending={m.status === 'pending'}
                   busy={busy}
                   onApply={() => applyBill(m)}
+                  onCancel={() => dismiss(m.id)}
+                />
+              )}
+              {m.billEdit && (
+                <UpdateBillProposalCard
+                  proposal={m.billEdit}
+                  bills={bills}
+                  currency={profile?.currency}
+                  pending={m.status === 'pending'}
+                  busy={busy}
+                  onApply={() => applyUpdateBill(m)}
+                  onCancel={() => dismiss(m.id)}
+                />
+              )}
+              {m.billRemoval && (
+                <RemoveBillProposalCard
+                  proposal={m.billRemoval}
+                  bills={bills}
+                  currency={profile?.currency}
+                  pending={m.status === 'pending'}
+                  busy={busy}
+                  onApply={() => applyRemoveBill(m)}
                   onCancel={() => dismiss(m.id)}
                 />
               )}
@@ -1135,6 +1331,140 @@ function BillProposalCard({ proposal, currency, pending, busy, onApply, onCancel
         {[methodLabel, anchor.anchorDate ? `next ${anchor.anchorDate}` : null, end, proposal.nonNegotiable ? 'locked — reserved first in every plan' : null]
           .filter(Boolean)
           .join(' · ')}
+      </p>
+      {pending ? (
+        <div className="flex gap-2 mt-3">
+          <button type="button" onClick={onApply} disabled={busy} className="btn-primary min-h-[44px] px-4 text-sm disabled:opacity-50">Apply</button>
+          <button type="button" onClick={onCancel} disabled={busy} className="min-h-[44px] px-4 text-sm rounded-card border border-[var(--border-color)] text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] transition-colors disabled:opacity-50">Cancel</button>
+        </div>
+      ) : (
+        <p className="mt-3 text-xs text-[var(--accent-success)]">Applied</p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * cashflow-mobile#34. What's about to change on an EXISTING bill. `match` resolves
+ * CLIENT-side against the live bills register (resolveBill, above) — an unresolved or
+ * ambiguous match renders words and NO button, same contract as BalanceProposalCard's
+ * accountName: never guess between the Apple Card's similarly-named installments.
+ * Once resolved, the card shows the row it found (vendor, amount, cadence, next due)
+ * and exactly what changes, before -> after, so Apply can never surprise the owner
+ * with a different row than the one they meant.
+ */
+function UpdateBillProposalCard({ proposal, bills, currency, pending, busy, onApply, onCancel }: {
+  proposal: NonNullable<ChatMessage['billEdit']>;
+  bills: readonly Bill[];
+  currency?: string;
+  pending: boolean;
+  busy: boolean;
+  onApply: () => void;
+  onCancel: () => void;
+}) {
+  const m2 = (n: number) => formatMoney(n, currency, 2);
+  const resolved = resolveBill(proposal.match, bills);
+
+  if (!resolved) {
+    const named = proposal.match.vendor ?? proposal.match.billId ?? '';
+    return (
+      <p className="mt-3 text-xs text-[var(--foreground-muted)]">
+        I couldn&apos;t match &ldquo;{named}&rdquo; to exactly one of your bills, so nothing is offered.
+        Your bills: {describeBills(bills, m2)}.
+      </p>
+    );
+  }
+
+  const { set } = proposal;
+  const effectiveFrequency = set.frequency ?? resolved.frequency;
+  const frequencyChanging = set.frequency !== undefined && set.frequency !== resolved.frequency;
+  // Only recompute the anchor when the schedule itself might be changing — same
+  // "unreachable in practice, gated here" split as record_bill's BillProposalCard.
+  const anchor = set.nextDueDate !== undefined || frequencyChanging
+    ? resolveBillAnchor({ frequency: effectiveFrequency, nextDueDate: set.nextDueDate })
+    : undefined;
+
+  if (anchor === null) {
+    return (
+      <p className="mt-3 text-xs text-[var(--foreground-muted)]">
+        I don&apos;t have a next due date for a {effectiveFrequency} schedule, so {resolved.vendor} can&apos;t be updated to it yet — tell me when the next payment is due.
+      </p>
+    );
+  }
+
+  const after: Bill = {
+    ...resolved,
+    ...(set.vendor !== undefined ? { vendor: set.vendor } : {}),
+    ...(set.amount !== undefined ? { amount: set.amount } : {}),
+    ...(set.frequency !== undefined ? { frequency: set.frequency } : {}),
+    ...(set.endDate !== undefined ? { endDate: set.endDate } : {}),
+    ...(set.installmentsRemaining !== undefined ? { installmentsRemaining: set.installmentsRemaining } : {}),
+    ...(set.nonNegotiable !== undefined ? { nonNegotiable: set.nonNegotiable } : {}),
+    ...(anchor?.autopayDay !== undefined ? { autopayDay: anchor.autopayDay } : {}),
+    ...(anchor?.anchorDate !== undefined ? { anchorDate: anchor.anchorDate } : {}),
+  };
+
+  const row = (b: Bill) => `${b.vendor} — ${m2(b.amount)} ${b.frequency}${b.anchorDate ? `, next ${b.anchorDate}` : ''}`;
+
+  return (
+    <div className="mt-3 rounded-card border border-[var(--border-color)] bg-[var(--background)] p-3">
+      <p className="font-medium text-[var(--foreground)]">{row(resolved)} → {row(after)}</p>
+      <p className="text-xs text-[var(--foreground-muted)] mt-1">
+        {[
+          after.installmentsRemaining !== undefined
+            ? (after.installmentsRemaining === 0 ? 'finished — leaves Upcoming' : `${after.installmentsRemaining} payment${after.installmentsRemaining === 1 ? '' : 's'} left`)
+            : null,
+          after.endDate ? `ends ${after.endDate}` : null,
+          after.nonNegotiable ? 'locked — reserved first in every plan' : null,
+        ].filter(Boolean).join(' · ') || 'The rest of this bill is unchanged.'}
+      </p>
+      {pending ? (
+        <div className="flex gap-2 mt-3">
+          <button type="button" onClick={onApply} disabled={busy} className="btn-primary min-h-[44px] px-4 text-sm disabled:opacity-50">Apply</button>
+          <button type="button" onClick={onCancel} disabled={busy} className="min-h-[44px] px-4 text-sm rounded-card border border-[var(--border-color)] text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] transition-colors disabled:opacity-50">Cancel</button>
+        </div>
+      ) : (
+        <p className="mt-3 text-xs text-[var(--accent-success)]">Applied</p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * cashflow-mobile#34. What will disappear, plainly, before it does. Genuine deletion —
+ * prefers update_bill's installmentsRemaining-0/endDate path for a FINISHED
+ * installment, which keeps the row's history; this is for a bill that should never
+ * have been recorded. Same unresolvable-means-no-button contract as every card above.
+ */
+function RemoveBillProposalCard({ proposal, bills, currency, pending, busy, onApply, onCancel }: {
+  proposal: NonNullable<ChatMessage['billRemoval']>;
+  bills: readonly Bill[];
+  currency?: string;
+  pending: boolean;
+  busy: boolean;
+  onApply: () => void;
+  onCancel: () => void;
+}) {
+  const m2 = (n: number) => formatMoney(n, currency, 2);
+  const resolved = resolveBill(proposal.match, bills);
+
+  if (!resolved) {
+    const named = proposal.match.vendor ?? proposal.match.billId ?? '';
+    return (
+      <p className="mt-3 text-xs text-[var(--foreground-muted)]">
+        I couldn&apos;t match &ldquo;{named}&rdquo; to exactly one of your bills, so nothing is offered.
+        Your bills: {describeBills(bills, m2)}.
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-3 rounded-card border border-[var(--border-color)] bg-[var(--background)] p-3">
+      <p className="font-medium text-[var(--foreground)]">
+        {`Remove ${resolved.vendor} — ${m2(resolved.amount)} ${resolved.frequency}, permanently`}
+      </p>
+      <p className="text-xs text-[var(--foreground-muted)] mt-1">
+        Deletes the row and its history, and it leaves Upcoming. For a finished installment, ending it instead keeps the record.
       </p>
       {pending ? (
         <div className="flex gap-2 mt-3">

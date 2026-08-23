@@ -18,6 +18,7 @@ import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { applyMappingRules, definedSet, type MappingRule, type RuleMatch } from '@/lib/mapping-rules';
 import { EXPENSE_CATEGORIES, type ResolvedCategory, type TransactionType } from '@/types';
 
+import { checkRateLimit, LIMITS } from './rate-limit';
 import { readLedger, type Ledger } from './snapshot';
 
 /**
@@ -225,6 +226,12 @@ export const applyDecision = onCall({ cors: true }, async (request) => {
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Sign in to apply a decision.');
   }
+  // Same slot as aiDecision/aiChat/parseReceipt: right after auth, before any
+  // work. See LIMITS.applyDecision for why this one is rate-limited too — a
+  // retrying client can otherwise create unbounded duplicate rule docs, and
+  // EVERY future readLedger re-applies every rule to every transaction, so
+  // the cost compounds permanently rather than being a one-time write.
+  await checkRateLimit(request.auth.uid, 'applyDecision', LIMITS.applyDecision);
 
   const op = (request.data ?? {}) as DecisionOp;
   // Validate before paying for `readLedger`'s nine parallel reads — a

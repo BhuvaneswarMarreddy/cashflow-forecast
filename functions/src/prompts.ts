@@ -377,8 +377,7 @@ REQUIREMENTS:
 - If the message is a question, or too vague to name a merchant, use action "answer" with no "rule" and put the reply in explanation.
 
 ANSWERING QUESTIONS ABOUT MONEY:
-- BILLS REGISTER and DETECTED RECURRING MERCHANTS are computed by the application, not samples, and always appear below. Answer questions about current bills or recurring monthly obligations directly from them — never say you have no information when these sections are present.
-- UPCOMING (bills and forecasted payments due soon) is computed by only some clients. If the UPCOMING section does not appear anywhere below, THIS client cannot see it — say exactly that ("I can't see upcoming payments on this client") rather than "you have no upcoming payments", which is a different, unverified claim. If the UPCOMING section DOES appear, it is complete and computed the same as the other two: answer from it directly, and "(none)" there genuinely means no upcoming payments.
+- BILLS REGISTER, DETECTED RECURRING MERCHANTS and UPCOMING (bills and forecasted payments due soon) are each computed by only some clients, never a sample — answer questions about current bills, recurring monthly obligations, or upcoming payments directly from whichever of these sections appear below. If a section does not appear anywhere below, THIS client cannot see it — say exactly that (for example "I can't see detected recurring merchants on this client", or "I can't see upcoming payments on this client") rather than "you have none", which is a different, unverified claim. If a section DOES appear, it is complete: answer from it directly, and "(none recorded)"/"(none detected)"/"(none)" there genuinely means there are none.
 - The LEDGER TOTALS section is computed by the application over EVERY transaction the user has, not a sample. When it covers the question, it is complete — answer from it directly and give the figure.
 - RECENT TRANSACTIONS is a 20-row sample shown so you can see what raw bank text looks like when writing a rule. It is NEVER evidence for a total, a count, or "you had no X". Never generalise from it.
 - Quote figures from LEDGER TOTALS verbatim. Do not add, subtract, average or re-derive them; arithmetic across periods is the application's job, not yours.
@@ -486,6 +485,16 @@ RECORD A BILL:
 - reason: one calm sentence restating what will be recorded. This only PROPOSES the bill; the user confirms it and nothing is written until they press the button.
 - record_bill is a DISPLAY entry: it appears in Upcoming and the Bills register, and is never added or counted in the spending average that drives runway — recording a bill never changes what the user's runway says.
 
+EDIT OR REMOVE A BILL (cashflow-mobile#34):
+{"action":"update_bill","match":{"billId":"string","vendor":"string"},"set":{"vendor":"string","amount":0,"frequency":"weekly"|"biweekly"|"monthly"|"quarterly"|"semiannual"|"annual","nextDueDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","installmentsRemaining":0,"nonNegotiable":true},"reason":"string"}
+{"action":"remove_bill","match":{"billId":"string","vendor":"string"},"reason":"string"}
+- Use update_bill to CORRECT an existing row in the BILLS REGISTER above — rename it to what it actually is ("installment C is the MacBook Air"), fix its amount or cadence, or mark an installment FINISHED (see below). Use remove_bill ONLY for a genuine mistake — a bill that should never have been recorded at all.
+- match identifies WHICH bill. vendor is copied from the BILLS REGISTER above, as close to its exact wording as you can — the app resolves it against the real register and refuses to act (asks the user instead) when more than one bill matches. billId, when an earlier turn already gave you one, is exact and never ambiguous — prefer it once you have it.
+- Installment plans on the same card are routinely named only "A"/"B"/"C"/"D", because a statement line never says what an installment bought — several rows can look alike on purpose. If the user's wording could match more than one row (e.g. "the Apple Card installment" when there are three), DO NOT PICK ONE. Ask which — naming the candidates and their amounts from the BILLS REGISTER — before proposing anything. The app applies the exact same rule: an ambiguous vendor gets no button, ever.
+- set: include only the fields actually changing. Same bounds as record_bill's matching fields above (amount, frequency, nextDueDate, endDate, nonNegotiable). installmentsRemaining here ALSO accepts 0 — unlike record_bill, where a brand-new bill can't start with zero payments left — because 0 is exactly how an installment is marked FINISHED: it drops out of Upcoming while the row, and its payment history, stays.
+- Prefer FINISHING over removing: when the user says an installment is paid off or done ("clear installment C", "installment C is finished"), that is update_bill with installmentsRemaining 0 or an endDate of today or earlier — never remove_bill. remove_bill deletes the row and its history outright; reserve it for a bill the user says was recorded by mistake and should never have existed.
+- reason: one calm sentence restating what will change, or what will be removed, and why. This only PROPOSES it; the user confirms it and nothing is written until they press the button. The app shows the resolved row (vendor, amount, cadence, next due) before -> after, and for a removal, what leaves Upcoming — you never need to restate those numbers yourself.
+
 CATEGORIES (cashflow-mobile#24 — add/rename/remove the user's own set):
 ALLOWED CATEGORIES below is the user's OWN set — the 13 built-in ones plus anything they have added. It is still CLOSED: set.category everywhere in this prompt must be copied verbatim from it, and a category that is not there must never be invented.
 
@@ -507,7 +516,7 @@ WHAT THESE ACTIONS DO NOT DO:
 - No action applies anything. Each one renders a confirmation the user has to press.
 - No action can mark a credit-card credit as earned income, and none can delete a transaction.
 - "mark_business_subscription" and "mark_different_owner" are labels on the ALERT only. They make no tax or deductibility claim, and they leave the expense fully counted.
-- Never claim something was recorded, saved, added, or set up unless YOU emitted the matching action in THIS exact reply. Describing what you would do, or saying "this will be recorded", is not doing it — if you cannot emit the action (missing information, wrong context), say what is still needed instead of claiming success.`;
+- Never claim something was recorded, saved, updated, removed, added, or set up unless YOU emitted the matching action in THIS exact reply. Describing what you would do, or saying "this will be recorded" or "I've cleared that installment", is not doing it — if you cannot emit the action (missing information, an ambiguous match, wrong context), say what is still needed instead of claiming success.`;
 
 const clip = (s: unknown, max = CAPS.str): string =>
   typeof s === 'string' ? s.trim().slice(0, max) : '';
@@ -604,6 +613,22 @@ export function buildChatMessages(
     return `- ${clip(r.title) || '(no title)'} | ${clip(r.merchant) || '-'} | ${amount} | ${clip(r.category) || '-'}`;
   });
 
+  /**
+   * ABSENT vs EMPTY, applied uniformly to all three app-computed sections. A client that
+   * never sends the key (`undefined`) has never computed that section at all — "this
+   * client cannot see it". A client that sends a real `[]` computed it and there are
+   * genuinely none. Collapsing the two (the old behaviour, for bills/recurring) let a
+   * client's silence read as a confident "you have no bills" / "no subscriptions
+   * detected" — worse than an honest "I can't see that here". Mobile has no recurring-
+   * merchant detector at all, so `recurring` is always absent from mobile; the fix for
+   * that gap lives here (the model is told, never a fabricated `bills`/`recurring` in
+   * every client), not in mobile — see cashflow-mobile's chat.ts for the bills/upcoming
+   * half, which mobile DOES compute and now gates the same way on its own side.
+   * Each `*Provided` flag below gates whether its section renders at all, so an absent
+   * client omits the section instead of rendering a false "(none recorded)"/"(none
+   * detected)"/"(none)".
+   */
+  const billsProvided = ctx.bills !== undefined;
   // #22 — bills the app has already recorded, so "is X already on my bills" and "what
   // do I pay monthly" are answerable, and record_bill can check for a duplicate first.
   const billRows = ctx.bills || [];
@@ -618,18 +643,13 @@ export function buildChatMessages(
     return `- ${clip(b?.vendor) || '(unnamed)'} | ${money(b?.amount)} | ${clip(b?.frequency) || '-'}${flags ? ` | ${flags}` : ''}`;
   });
 
-  // Web never supplies `upcoming` at all (only mobile's homeSnapshot computes forecast
-  // events + bill events) — `undefined` here means ABSENT ("this client cannot see this"),
-  // which is a different claim from `[]`, EMPTY ("computed, and there are genuinely
-  // none"). Collapsing the two let the model read a client's silence as "you have no
-  // upcoming payments". `upcomingProvided` gates whether the section renders at all,
-  // below, so an absent client omits the section instead of rendering a false "(none)".
   const upcomingProvided = ctx.upcoming !== undefined;
   const upcomingRows = ctx.upcoming || [];
   const upcoming = upcomingRows.slice(0, CAPS.upcoming).map((u) =>
     `- ${clip(u?.name) || '(unnamed)'} | ${clip(u?.dueDate, 10) || '?'} | ${money(u?.amount)}`
   );
 
+  const recurringProvided = ctx.recurring !== undefined;
   const recurringRows = ctx.recurring || [];
   const recurring = recurringRows.slice(0, CAPS.recurring).map((r) =>
     `- ${clip(r?.merchant) || '(unnamed)'} | ${money(r?.amount)} | ${clip(r?.cadence) || '-'}`
@@ -649,20 +669,24 @@ export function buildChatMessages(
     'FREQUENT MERCHANTS AND DESCRIPTIONS:',
     merchants.length ? merchants.join('\n') : '(none)',
     '',
-    'BILLS REGISTER — recorded recurring obligations, computed by the app (vendor | amount each | frequency | flags). Complete, not a sample.',
-    bills.length ? bills.join('\n') : '(none recorded)',
-    ...omitted(Math.max(0, billRows.length - CAPS.bills), 'bills'),
-    '',
+    ...(billsProvided ? [
+      'BILLS REGISTER — recorded recurring obligations, computed by the app (vendor | amount each | frequency | flags). Complete, not a sample.',
+      bills.length ? bills.join('\n') : '(none recorded)',
+      ...omitted(Math.max(0, billRows.length - CAPS.bills), 'bills'),
+      '',
+    ] : []),
     ...(upcomingProvided ? [
       'UPCOMING — bills and forecasted payments due within the horizon (name | due date | amount). Complete, not a sample.',
       upcoming.length ? upcoming.join('\n') : '(none)',
       ...omitted(Math.max(0, upcomingRows.length - CAPS.upcoming), 'upcoming items'),
       '',
     ] : []),
-    'DETECTED RECURRING MERCHANTS — pattern detection over transaction history, separate from the Bills register above (merchant | amount each | cadence):',
-    recurring.length ? recurring.join('\n') : '(none detected)',
-    ...omitted(Math.max(0, recurringRows.length - CAPS.recurring), 'recurring merchants'),
-    '',
+    ...(recurringProvided ? [
+      'DETECTED RECURRING MERCHANTS — pattern detection over transaction history, separate from the Bills register above (merchant | amount each | cadence):',
+      recurring.length ? recurring.join('\n') : '(none detected)',
+      ...omitted(Math.max(0, recurringRows.length - CAPS.recurring), 'recurring merchants'),
+      '',
+    ] : []),
     'LEDGER TOTALS — computed by the app over EVERY transaction. Complete, not a sample.',
     ...summaryLines(ctx.summary),
     '',

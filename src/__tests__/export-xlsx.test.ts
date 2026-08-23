@@ -94,6 +94,7 @@ describe('buildExportWorkbook — DebtPlan sheet discloses an unanchored debt (r
     totalInterestPaid: 50,
     totalMonths: 6,
     interestSaved: 20,
+    hasUnknownApr: false,
     debts: [{
       accountId: 'Card', accountName: 'Card', originalBalance: 300, apr: 24.99,
       payoffOrder: 1, payoffDate: '2026-08-01', totalInterestPaid: 50, monthsToPayoff: 6,

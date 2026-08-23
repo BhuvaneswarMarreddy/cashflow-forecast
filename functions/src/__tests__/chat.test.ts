@@ -136,7 +136,12 @@ describe('buildChatMessages', () => {
     // CATEGORY, THIS MONTH / LAST MONTH) — this fixture supplies no `summary`, so those
     // render as empty-list headers only, not maxed rows. Measured worst-case went
     // 20450 -> 22245 (+1795 chars).
-    expect(system.length).toBeLessThan(22500);
+    // Two changes landed on this bound at once and both are real: main's
+    // absent-section gating REMOVED ~355 chars (BILLS/RECURRING now omit their
+    // header entirely when the client sends nothing), and cashflow-mobile#34's
+    // EDIT OR REMOVE A BILL block ADDED ~2839. Re-measured after the merge rather
+    // than picking one side's number.
+    expect(system.length).toBeLessThan(25300);
   });
 
   it('survives a garbage context without throwing', () => {
@@ -232,6 +237,51 @@ describe('the record_bill action travels with the contract', () => {
 });
 
 /**
+ * cashflow-mobile#34. The scene this fixes: the owner asked the chat on his phone to
+ * "clear the rest apple card instalment c b a" and it could not — record_bill existed,
+ * nothing else did. His installments are named A/B/C/D because a statement line never
+ * says what an installment bought; he wants them renamed to the real products and the
+ * finished ones removed from Upcoming. update_bill/remove_bill are the fix.
+ */
+describe('the update_bill / remove_bill actions travel with the contract (cashflow-mobile#34)', () => {
+  it('teaches the model both shapes and the six closed frequency values', () => {
+    const system = buildChatMessages({ message: 'installment C is the MacBook Air' })[0].content;
+    expect(system).toContain('"action":"update_bill"');
+    expect(system).toContain('"action":"remove_bill"');
+    expect(system).toContain('"weekly"|"biweekly"|"monthly"|"quarterly"|"semiannual"|"annual"');
+  });
+
+  it('teaches the model to ASK rather than pick when a vendor reference could match more than one bill', () => {
+    const system = buildChatMessages({ message: 'clear the rest apple card instalment c b a' })[0].content;
+    expect(system).toMatch(/do not pick one/i);
+    expect(system).toMatch(/ask which/i);
+    expect(system).toMatch(/A.\/.B.\/.C.\/.D./); // the actual naming problem, named explicitly
+  });
+
+  it('teaches installmentsRemaining 0 as the way to finish an installment, distinct from record_bill\'s 1..480 floor', () => {
+    const system = buildChatMessages({ message: 'installment C is finished' })[0].content;
+    expect(system).toMatch(/installmentsRemaining here also accepts 0/i);
+    expect(system).toMatch(/marked finished/i);
+  });
+
+  it('teaches the model to prefer FINISHING (update_bill) over REMOVING for a paid-off installment', () => {
+    const system = buildChatMessages({ message: 'installment C is finished' })[0].content;
+    expect(system).toMatch(/prefer finishing over removing/i);
+    expect(system).toMatch(/never remove_bill/i);
+  });
+
+  it('teaches remove_bill is reserved for a genuine recording mistake, not a finished bill', () => {
+    const system = buildChatMessages({ message: 'installment C is finished' })[0].content;
+    expect(system).toMatch(/recorded by mistake/i);
+  });
+
+  it('extends the existing overpromise rule to cover updated/removed, not just recorded/saved/added', () => {
+    const system = buildChatMessages({ message: 'installment C is finished' })[0].content;
+    expect(system).toMatch(/never claim.*updated.*removed/i);
+  });
+});
+
+/**
  * #22 (cashflow-mobile). The chat could WRITE bills (record_bill above) but could not
  * SEE them: "is X already on my bills" and "what are my current recurring payments"
  * both got "I do not have that information" because ChatContext never carried the
@@ -263,11 +313,20 @@ describe('ChatContext — bills/upcoming/recurring sections (#22)', () => {
     expect(system).toContain('15.49');
   });
 
-  it('says so explicitly when no bills/upcoming/recurring were supplied', () => {
+  /**
+   * The device-reported gap, closed for BILLS/RECURRING too, not just UPCOMING: a client
+   * that never sends a section must never be told it's "(none recorded)"/"(none
+   * detected)" — that's a confident, false claim of emptiness, not "unavailable". Before
+   * this fix these two sections rendered their placeholder even when wholly absent from
+   * `context` (see the ABSENT-vs-EMPTY describe blocks below for the replacement
+   * behaviour, mirroring UPCOMING's existing gate).
+   */
+  it('omits all three app-computed sections, and says so, when none were supplied at all', () => {
     const system = buildChatMessages({ message: 'hi' })[0].content;
-    expect(system).toContain('BILLS REGISTER');
-    expect(system).toMatch(/\(none recorded\)/);
-    expect(system).toMatch(/\(none detected\)/);
+    expect(system).not.toContain('BILLS REGISTER — recorded recurring obligations');
+    expect(system).not.toContain('DETECTED RECURRING MERCHANTS — pattern detection');
+    expect(system).not.toContain('UPCOMING — bills and forecasted payments');
+    expect(system).toMatch(/a section does not appear.*this client cannot see it/i);
   });
 
   /**
@@ -283,7 +342,7 @@ describe('ChatContext — bills/upcoming/recurring sections (#22)', () => {
       const system = buildChatMessages({ message: 'what are my upcoming payments', context: ctx })[0].content;
       expect(system).not.toContain('UPCOMING — bills and forecasted payments');
       // The teaching text always travels, so the model knows what an absent section means.
-      expect(system).toMatch(/UPCOMING section does not appear.*this client cannot see it/i);
+      expect(system).toMatch(/a section does not appear.*this client cannot see it/i);
       expect(system).toMatch(/say exactly that.*I can't see upcoming payments on this client/i);
     });
 
@@ -300,6 +359,46 @@ describe('ChatContext — bills/upcoming/recurring sections (#22)', () => {
       expect(system).toContain('UPCOMING — bills and forecasted payments');
       expect(system).toContain('Verizon Wireless');
       expect(system).toContain('2026-09-01');
+    });
+  });
+
+  /**
+   * Same gate as UPCOMING, applied to BILLS REGISTER — mobile always computes this one
+   * (chat.ts's buildContext), but a hand-rolled request or a future client that doesn't
+   * must get an honest "unavailable" instead of a confident "(none recorded)".
+   */
+  describe('BILLS REGISTER — absent vs empty are different claims', () => {
+    it('omits the section entirely when the context has no `bills` key at all', () => {
+      const system = buildChatMessages({ message: 'what bills do I have', context: ctx })[0].content;
+      expect(system).not.toContain('BILLS REGISTER — recorded recurring obligations');
+      expect(system).toMatch(/a section does not appear.*this client cannot see it/i);
+    });
+
+    it('renders the section, reading "(none recorded)", when the client supplies an empty array', () => {
+      const system = buildChatMessages({ message: 'what bills do I have', context: { ...ctx, bills: [] } })[0].content;
+      expect(system).toMatch(/BILLS REGISTER — recorded recurring obligations[\s\S]*?\(none recorded\)/);
+    });
+  });
+
+  /**
+   * Same gate, applied to DETECTED RECURRING MERCHANTS — this is the device-reported
+   * fault's other half: mobile has no recurring-merchant detector at all (cashflow-mobile
+   * audit), so this section is ALWAYS absent from a mobile request. Before this fix the
+   * prompt called it "computed by the application... always appear[ing] below", so the
+   * model could confidently say "you have no subscriptions detected" having never been
+   * told anything about them.
+   */
+  describe('DETECTED RECURRING MERCHANTS — absent vs empty are different claims', () => {
+    it('omits the section entirely when the context has no `recurring` key at all (mobile shape — no detector)', () => {
+      const system = buildChatMessages({ message: 'what are my subscriptions', context: ctx })[0].content;
+      expect(system).not.toContain('DETECTED RECURRING MERCHANTS — pattern detection');
+      expect(system).toMatch(/a section does not appear.*this client cannot see it/i);
+      expect(system).toMatch(/say exactly that.*I can't see detected recurring merchants on this client/i);
+    });
+
+    it('renders the section, reading "(none detected)", when the client supplies an empty array', () => {
+      const system = buildChatMessages({ message: 'what are my subscriptions', context: { ...ctx, recurring: [] } })[0].content;
+      expect(system).toMatch(/DETECTED RECURRING MERCHANTS — pattern detection[\s\S]*?\(none detected\)/);
     });
   });
 
@@ -338,7 +437,10 @@ describe('ChatContext — bills/upcoming/recurring sections (#22)', () => {
     // Bumped again (cashflow-mobile#25): the same +1795 chars as the test above — this
     // fixture supplies no `summary` either, so the new sections are still headers only.
     // Measured 44136.
-    expect(system.length).toBeLessThan(44400);
+    // Bumped again (cashflow-mobile#34): the same +2839 chars as the test above — EDIT
+    // OR REMOVE A BILL is constant text, unaffected by how many bills are in context.
+    // Measured 46975.
+    expect(system.length).toBeLessThan(47200);
   });
 
   it('caps bills/upcoming/recurring and reports what was left out, same convention as merchants/months', () => {
@@ -369,7 +471,7 @@ describe('ChatContext — bills/upcoming/recurring sections (#22)', () => {
     // describe block below for the web shape (no `upcoming` key at all).
     const system = buildChatMessages({ message: 'what are my current recurring payments', context: stateCtx })[0].content;
     expect(system).toMatch(/BILLS REGISTER[\s\S]*UPCOMING[\s\S]*DETECTED RECURRING MERCHANTS/);
-    expect(system).toMatch(/answer questions about current bills.*recurring.*directly from them/i);
+    expect(system).toMatch(/answer questions about current bills.*recurring monthly obligations.*directly from/i);
   });
 
   it('tells the model to check for an existing bill or recurring merchant BEFORE proposing record_bill — never propose a duplicate', () => {
@@ -578,9 +680,16 @@ describe('modelFor — vision model selection', () => {
 // merchant text or base64. The narrow return type is the enforcement — a future field
 // has to fit boolean | number, not free text.
 describe('successLogFields — counts-only success log', () => {
-  it('carries only hasImage and durationMs', () => {
-    expect(successLogFields(true, 42)).toEqual({ hasImage: true, durationMs: 42 });
-    expect(successLogFields(false, 0)).toEqual({ hasImage: false, durationMs: 0 });
-    expect(Object.keys(successLogFields(true, 1))).toEqual(['hasImage', 'durationMs']);
+  it('carries only hasImage, durationMs and truncated', () => {
+    expect(successLogFields(true, 42, false)).toEqual({ hasImage: true, durationMs: 42, truncated: false });
+    expect(successLogFields(false, 0, false)).toEqual({ hasImage: false, durationMs: 0, truncated: false });
+    expect(Object.keys(successLogFields(true, 1, false))).toEqual(['hasImage', 'durationMs', 'truncated']);
+  });
+
+  // Audit finding #2: a truncated completion returned before this log line ran,
+  // so a truncated turn was invisible in logs — no way to notice max_tokens
+  // starting to bite as the prompt grows.
+  it('flags a truncated completion so it is visible in logs, not just to the owner', () => {
+    expect(successLogFields(true, 1200, true)).toEqual({ hasImage: true, durationMs: 1200, truncated: true });
   });
 });

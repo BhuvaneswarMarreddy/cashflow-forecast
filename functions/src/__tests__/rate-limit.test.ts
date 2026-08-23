@@ -100,5 +100,10 @@ describe('checkRateLimit (mocked transaction)', () => {
   it('uses the configured default limits', () => {
     expect(LIMITS.aiDecision).toBe(50);
     expect(LIMITS.parseReceipt).toBe(60);
+    // FIX 4: applyDecision and importCsv are rate-limited too, not for AI cost
+    // but because a retry can create unbounded duplicate writes that every
+    // future readLedger then re-applies to every transaction, forever.
+    expect(LIMITS.applyDecision).toBe(100);
+    expect(LIMITS.importCsv).toBe(30);
   });
 });
