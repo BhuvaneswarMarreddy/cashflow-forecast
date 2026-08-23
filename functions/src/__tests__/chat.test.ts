@@ -16,7 +16,7 @@ const ctx = {
   ],
 };
 
-import { truncatedReply } from '../chat';
+import { truncatedReply, quotaFallback } from '../chat';
 
 describe('a truncated completion', () => {
   it('says the answer was too long instead of echoing a broken JSON fragment', () => {
@@ -26,6 +26,40 @@ describe('a truncated completion', () => {
     expect(reply.fallback).toBe(true);
     // Never a raw fragment: the copy must not look like JSON.
     expect(reply.result.explanation.trim().startsWith('{')).toBe(false);
+  });
+});
+
+describe('an OpenAI quota/rate-limit failure', () => {
+  // Neither case is a chat.ts problem — the app is fine, the owner's own
+  // OpenAI account is the thing that needs attention. The old copy ("add the
+  // rule by hand in Settings") predated create_rule having any siblings and
+  // never told the owner what actually happened.
+  const noMentionOfRulesOrSettings = (explanation: string) => {
+    expect(explanation.toLowerCase()).not.toMatch(/\brule\b/);
+    expect(explanation.toLowerCase()).not.toMatch(/\bsettings\b/);
+  };
+
+  it('out of credit (insufficient_quota) says to add credit, not to retry', () => {
+    const reply = quotaFallback({ code: 'insufficient_quota', status: 429 });
+    expect(reply?.result.action).toBe('answer');
+    expect(reply?.result.explanation).toMatch(/credit/i);
+    expect(reply?.result.explanation).toMatch(/platform\.openai\.com\/billing/);
+    expect(reply?.fallback).toBe(true);
+    noMentionOfRulesOrSettings(reply!.result.explanation);
+  });
+
+  it('a bare 429 (no insufficient_quota code) says to wait and retry, not to add credit', () => {
+    const reply = quotaFallback({ status: 429 });
+    expect(reply?.result.action).toBe('answer');
+    expect(reply?.result.explanation).toMatch(/wait|minutes/i);
+    expect(reply?.result.explanation).not.toMatch(/credit/i);
+    expect(reply?.fallback).toBe(true);
+    noMentionOfRulesOrSettings(reply!.result.explanation);
+  });
+
+  it('is null for anything that is not a quota/rate-limit failure', () => {
+    expect(quotaFallback({})).toBeNull();
+    expect(quotaFallback({ code: 'invalid_api_key', status: 401 })).toBeNull();
   });
 });
 

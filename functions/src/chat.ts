@@ -15,10 +15,52 @@ import { AI_CONFIG } from './ai-config';
 import { buildChatMessages, AiChatRequest } from './prompts';
 import { checkRateLimit, LIMITS } from './rate-limit';
 
+// Generic "the model gave nothing back" fallback — JSON mode returned empty
+// content with no parse error to explain why. Not a quota/rate-limit case;
+// see OUT_OF_CREDIT/RATE_LIMITED below for those.
 const UNAVAILABLE = {
   action: 'answer',
-  explanation: 'AI chat is temporarily unavailable. You can add the rule by hand in Settings.',
+  explanation: "That didn't come back with an answer. Try asking again.",
 };
+
+/**
+ * OpenAI's own error `code` on a 429 tells the two quota failures apart:
+ * `insufficient_quota` is the account out of prepaid credit — retrying does
+ * nothing until the owner adds credit. A 429 with any other (or no) code is
+ * the per-minute rate limit — retrying in a bit works fine. This is
+ * https://platform.openai.com/docs/guides/error-codes's own distinction, not
+ * a guess: `openai`'s RateLimitError carries the JSON body's `code` verbatim.
+ */
+const OUT_OF_CREDIT = {
+  action: 'answer' as const,
+  explanation:
+    'The OpenAI account behind this chat is out of credit. Add credit at platform.openai.com/billing, then ask again.',
+};
+
+const RATE_LIMITED = {
+  action: 'answer' as const,
+  explanation: 'OpenAI is rate-limiting this account right now. Wait a few minutes and try again.',
+};
+
+/**
+ * What the owner sees when the OpenAI call itself failed with a quota error.
+ * Exported (mirrors `truncatedReply`) so tests pin the branching, not just
+ * the copy. Returns `null` for anything that isn't one of the two quota
+ * shapes — the caller then falls through to the generic 500.
+ */
+export function quotaFallback(err: { code?: string; status?: number }): {
+  success: true;
+  result: { action: 'answer'; explanation: string };
+  fallback: true;
+} | null {
+  if (err?.code === 'insufficient_quota') {
+    return { success: true, result: OUT_OF_CREDIT, fallback: true };
+  }
+  if (err?.status === 429) {
+    return { success: true, result: RATE_LIMITED, fallback: true };
+  }
+  return null;
+}
 
 /**
  * Image turns are rare (rate-limited, personal app) and gpt-4o-mini's weaker vision is
@@ -134,9 +176,8 @@ export const aiChat = onCall(
       const err = error as { code?: string; status?: number };
       console.error('AI Chat Error:', error);
 
-      if (err?.code === 'insufficient_quota' || err?.status === 429) {
-        return { success: true, result: UNAVAILABLE, fallback: true };
-      }
+      const quotaReply = quotaFallback(err);
+      if (quotaReply) return quotaReply;
       throw new HttpsError('internal', 'Failed to process request');
     }
   }
