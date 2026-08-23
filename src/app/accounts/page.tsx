@@ -252,7 +252,15 @@ export default function AccountsPage() {
     const isLoan = accountForm.type === 'personal_loan';
     const isCard = accountForm.type === 'credit_card';
     const needsPaymentSource = isCard || isLoan;
-    
+
+    // #14 (CRITICAL-3): a feedless card's derived balance is opening ± payments —
+    // there is no feed, so nothing else ever anchors it. An UNANCHORED feedless card
+    // starts from an invented $0 and goes NEGATIVE the moment a payment is recorded
+    // (forecast.ts clamps that at $0 defensively, but a negative-then-clamped "owed"
+    // is still not a real number). Refuse the save rather than invent an anchor —
+    // the Save button's `disabled` below is the same guard, this is the belt.
+    if (isCard && accountForm.feedless && !accountForm.balance.trim()) return;
+
     const accountData = {
       name: accountForm.name,
       type: accountForm.type,
@@ -1200,11 +1208,22 @@ export default function AccountsPage() {
 
               <button
                 onClick={handleSaveAccount}
-                disabled={!accountForm.name}
+                disabled={
+                  !accountForm.name ||
+                  // #14 (CRITICAL-3): a feedless card without a starting balance has
+                  // nothing to anchor its derived balance to — see the comment in
+                  // handleSaveAccount above.
+                  (accountForm.type === 'credit_card' && accountForm.feedless && !accountForm.balance.trim())
+                }
                 className="btn-primary w-full disabled:opacity-50"
               >
                 {editingAccount ? 'Update Account' : 'Add Account'}
               </button>
+              {accountForm.type === 'credit_card' && accountForm.feedless && !accountForm.balance.trim() && (
+                <p className="text-xs text-[var(--accent-danger)] -mt-2">
+                  Set a starting balance above — a no-feed card needs one to anchor its balance.
+                </p>
+              )}
             </div>
           </div>
         </div>

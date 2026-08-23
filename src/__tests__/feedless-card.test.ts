@@ -260,6 +260,29 @@ describe('FEEDLESS-CARD-001: attribution resolves among ALL cards first, THEN ch
   });
 });
 
+describe('FEEDLESS-CARD-001: an unanchored feedless card clamps at zero, never negative (CRITICAL-3)', () => {
+  // A feedless card's balance only ever moves DOWN (payments reduce owed; there is
+  // no feed to ever raise it), so an unanchored account — opening $0 by construction
+  // (#83) — goes negative the moment any payment is recorded. A negative "owed"
+  // would subtract from every other card's debt in Cards-owed and inflate net
+  // worth. accounts/page.tsx refuses to SAVE a feedless card with no starting
+  // balance; this is the defensive floor for every account that predates that
+  // guard or reaches this state some other way.
+  const unanchored: PaymentAccount = { ...feedlessCard, openingBalance: 0 }; // no openingDate
+
+  it('a payment on an unanchored feedless card does not push the derived balance negative', () => {
+    const payment = txn({ id: 'p1', title: 'DISCOVER PAYMENT ACH PMT', amount: 800, accountId: 'chk', date: '2026-03-15' });
+    const accounts = [chk, unanchored];
+    expect(deriveAccountBalance(unanchored, [payment], POSTED_ONLY, accounts)).toBe(0); // clamped, not -800
+  });
+
+  it('withDerivedBalances agrees: currentBalance is clamped, not negative', () => {
+    const payment = txn({ id: 'p1', title: 'DISCOVER PAYMENT ACH PMT', amount: 800, accountId: 'chk', date: '2026-03-15' });
+    const [, card] = withDerivedBalances([chk, unanchored], [payment], POSTED_ONLY);
+    expect(card.currentBalance).toBe(0);
+  });
+});
+
 describe('FEEDLESS-CARD-001: regression — a user with no feedless accounts is unaffected', () => {
   const accounts = [chk, normalCard];
   const purchase = txn({ id: 'x1', title: 'Groceries', amount: 60, accountId: 'rewards', category: 'food' });
