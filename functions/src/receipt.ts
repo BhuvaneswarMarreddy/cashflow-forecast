@@ -71,7 +71,7 @@ IMPORTANT:
 If you cannot parse: { "transactions": [], "summary": "Could not parse image", "error": true }`;
 
 /** Vision call + JSON extraction. */
-async function callVision(apiKey: string, dataUrl: string) {
+export async function callVision(apiKey: string, dataUrl: string) {
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
@@ -107,15 +107,20 @@ async function callVision(apiKey: string, dataUrl: string) {
   const content = data.choices?.[0]?.message?.content || '';
 
   // Extract JSON from response (might be wrapped in markdown)
-  try {
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
+  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
       return { success: true, parsed: JSON.parse(jsonMatch[0]), source: 'openai' };
+    } catch (parseError) {
+      console.error('JSON parse error:', parseError);
     }
-  } catch (parseError) {
-    console.error('JSON parse error:', parseError);
   }
 
+  // Counts only — never the message text. `matched` separates a genuine refusal
+  // or non-JSON prose (no `{...}` substring at all) from "found something but
+  // JSON.parse failed" — without this, a silently empty success here was
+  // indistinguishable from a genuinely empty receipt.
+  console.log('parseReceipt', { matched: Boolean(jsonMatch) });
   return { success: true, parsed: { transactions: [], summary: content }, source: 'openai' };
 }
 
