@@ -2,7 +2,7 @@ import { withDerivedBalances } from '@/lib/forecast';
 import type { MappingRule } from '@/lib/mapping-rules';
 import type { PaymentAccount, Transaction } from '@/types';
 
-import { interpretLedgerRows, mapAccount, mapTransaction } from '../snapshot';
+import { buildSnapshot, interpretLedgerRows, mapAccount, mapTransaction, type Ledger } from '../snapshot';
 
 /**
  * The one invariant `homeSnapshot` exists to hold.
@@ -150,5 +150,89 @@ describe('ledger interpretation', () => {
   it('is a no-op with no rules and no holds — readLedger is safe for a user who has set neither', () => {
     const rows = [txn({ id: 't1', merchant: 'COSTCO WHSE #55', title: 'COSTCO', category: 'shopping' })];
     expect(interpretLedgerRows(rows, [])).toEqual(rows);
+  });
+});
+
+/**
+ * Finding 2. Cloud Functions run in UTC; the owner is in Chicago (or wherever
+ * `settings.timezone` says). `buildSnapshot` never set `process.env.TZ`, so
+ * `deriveAccountBalance`'s `format(new Date(), 'yyyy-MM-dd')` — and every other
+ * "today" downstream — read the runtime's UTC date instead of the owner's.
+ *
+ * Why this test spies on `Date` construction rather than asserting a computed
+ * calendar day: V8 caches its resolved local timezone the first time ANY code
+ * localises a `Date` in a process, and jest's own runner does that during its
+ * bootstrap — before this file's first line runs. A later `process.env.TZ =`
+ * reassignment is then invisible to `new Date().toString()`/`format()` for the
+ * rest of that jest worker (verified with a plain, jest-free `node -e`
+ * reproduction, where the identical reassignment DOES change the calendar day
+ * every time — this is a jest-process quirk, not a flaw in the fix). So instead
+ * of reading a `Date`'s localised output, this asserts what actually matters
+ * and IS reliably observable here: `process.env.TZ` already holds the owner's
+ * zone at the moment `buildSnapshot` constructs its first `Date` — i.e. the
+ * assignment happened, unconditionally, before any date work.
+ */
+describe('buildSnapshot — sets process.env.TZ from the owner\'s setting before any date work (Finding 2)', () => {
+  const realTZ = process.env.TZ;
+  afterEach(() => {
+    process.env.TZ = realTZ;
+  });
+
+  const checking: PaymentAccount = {
+    id: 'chk',
+    name: 'Checking',
+    type: 'bank_account',
+    provider: 'bank-transfer',
+    color: '#000000',
+    isActive: true,
+    openingBalance: 1000,
+    openingDate: '2026-01-01',
+  };
+
+  const ledgerAt = (timezone?: string): Ledger => ({
+    accounts: [checking],
+    transactions: [],
+    incomeSources: [],
+    reviews: {},
+    bills: [],
+    goals: [],
+    safetyThreshold: 500,
+    includePending: false,
+    assumedMonthlySpend: null,
+    lastBankSyncAt: null,
+    rules: [],
+    timezone,
+  });
+
+  /** `process.env.TZ` at the instant buildSnapshot's FIRST `new Date()` fires. */
+  const tzSeenByFirstDate = (ledger: Ledger): string | undefined => {
+    const RealDate = global.Date;
+    let seen: string | undefined;
+    class SpyDate extends RealDate {
+      constructor(...args: ConstructorParameters<typeof Date>) {
+        super(...args);
+        if (seen === undefined) seen = process.env.TZ;
+      }
+    }
+    global.Date = SpyDate as unknown as DateConstructor;
+    try {
+      buildSnapshot(ledger);
+    } finally {
+      global.Date = RealDate;
+    }
+    return seen;
+  };
+
+  it('reads settings.timezone — the same field importCsv.ts reads — and it is already in effect before the first date computation', () => {
+    expect(tzSeenByFirstDate(ledgerAt('Asia/Kolkata'))).toBe('Asia/Kolkata');
+  });
+
+  it('falls back to America/Chicago, the same fallback importCsv.ts uses, when no timezone is stored', () => {
+    expect(tzSeenByFirstDate(ledgerAt(undefined))).toBe('America/Chicago');
+  });
+
+  it('sets it unconditionally — a warm instance carrying a previous invocation\'s zone does not survive a differently-configured owner', () => {
+    process.env.TZ = 'Pacific/Auckland'; // stands in for a previous invocation's leftover zone
+    expect(tzSeenByFirstDate(ledgerAt('Asia/Kolkata'))).toBe('Asia/Kolkata');
   });
 });

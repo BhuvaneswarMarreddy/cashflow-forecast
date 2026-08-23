@@ -79,6 +79,13 @@ export interface Ledger {
    * write sets.
    */
   assumedMonthlySpend: number | null;
+  /**
+   * cashflow-mobile finding 2. Read the SAME `settings.timezone` field
+   * importCsv.ts reads, so buildSnapshot can set `process.env.TZ` before doing
+   * any "today" math. OPTIONAL, mirroring `categories?` above: a hand-built
+   * test Ledger that omits it falls back to buildSnapshot's own default.
+   */
+  timezone?: string;
   /** `meta/plaid.lastSuccess` — when the banks were last actually reached. */
   lastBankSyncAt: string | null;
   /** The owner's mapping rules, newest first — same precedence order as
@@ -134,6 +141,7 @@ export async function readLedger(uid: string): Promise<Ledger> {
     includePendingInCalculations?: boolean;
     assumedMonthlySpend?: number | null;
     categories?: CustomCategory[];
+    timezone?: string;
   };
 
   const rules = rulesDocs.docs
@@ -177,6 +185,7 @@ export async function readLedger(uid: string): Promise<Ledger> {
     // fabricated $0/negative "burn" downstream. sanitizeAssumedSpend enforces this
     // on both web and mobile so they never diverge on corrupt input.
     assumedMonthlySpend: sanitizeAssumedSpend(settings.assumedMonthlySpend),
+    timezone: settings.timezone,
     rules,
     // cashflow-mobile#24. Resolved ONCE here — the single home both validateOp
     // (via applyDecisionCore) and buildSnapshot's payload below read from.
@@ -286,6 +295,16 @@ const UPCOMING_KIND: Partial<Record<ForecastEvent['type'], 'bill' | 'card-paymen
  * thin auth + read shell around it.
  */
 export function buildSnapshot(ledger: Ledger) {
+  // cashflow-mobile finding 2. Every "today" below — `withDerivedBalances` ->
+  // `deriveAccountBalance`'s `format(new Date(), 'yyyy-MM-dd')`, `homeSummary`'s
+  // `today`, `generateForecast`'s `startOfDay(new Date())` — reads the PROCESS
+  // clock's zone. Cloud Functions run in UTC; the owner is in Chicago. Same fix
+  // as importCsv.ts:66-77, same reasoning: set unconditionally, before any date
+  // work, so a warm instance can never carry a previous invocation's zone. Same
+  // fallback too, so an owner with no stored timezone gets the same answer on
+  // both paths.
+  process.env.TZ = ledger.timezone || 'America/Chicago';
+
   // The app's financial policy, assembled exactly as UserProfileContext does.
   const policy: IncomeContext = {
     sources: ledger.incomeSources,
