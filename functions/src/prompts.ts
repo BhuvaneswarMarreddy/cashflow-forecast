@@ -377,8 +377,7 @@ REQUIREMENTS:
 - If the message is a question, or too vague to name a merchant, use action "answer" with no "rule" and put the reply in explanation.
 
 ANSWERING QUESTIONS ABOUT MONEY:
-- BILLS REGISTER and DETECTED RECURRING MERCHANTS are computed by the application, not samples, and always appear below. Answer questions about current bills or recurring monthly obligations directly from them — never say you have no information when these sections are present.
-- UPCOMING (bills and forecasted payments due soon) is computed by only some clients. If the UPCOMING section does not appear anywhere below, THIS client cannot see it — say exactly that ("I can't see upcoming payments on this client") rather than "you have no upcoming payments", which is a different, unverified claim. If the UPCOMING section DOES appear, it is complete and computed the same as the other two: answer from it directly, and "(none)" there genuinely means no upcoming payments.
+- BILLS REGISTER, DETECTED RECURRING MERCHANTS and UPCOMING (bills and forecasted payments due soon) are each computed by only some clients, never a sample — answer questions about current bills, recurring monthly obligations, or upcoming payments directly from whichever of these sections appear below. If a section does not appear anywhere below, THIS client cannot see it — say exactly that (for example "I can't see detected recurring merchants on this client", or "I can't see upcoming payments on this client") rather than "you have none", which is a different, unverified claim. If a section DOES appear, it is complete: answer from it directly, and "(none recorded)"/"(none detected)"/"(none)" there genuinely means there are none.
 - The LEDGER TOTALS section is computed by the application over EVERY transaction the user has, not a sample. When it covers the question, it is complete — answer from it directly and give the figure.
 - RECENT TRANSACTIONS is a 20-row sample shown so you can see what raw bank text looks like when writing a rule. It is NEVER evidence for a total, a count, or "you had no X". Never generalise from it.
 - Quote figures from LEDGER TOTALS verbatim. Do not add, subtract, average or re-derive them; arithmetic across periods is the application's job, not yours.
@@ -614,6 +613,22 @@ export function buildChatMessages(
     return `- ${clip(r.title) || '(no title)'} | ${clip(r.merchant) || '-'} | ${amount} | ${clip(r.category) || '-'}`;
   });
 
+  /**
+   * ABSENT vs EMPTY, applied uniformly to all three app-computed sections. A client that
+   * never sends the key (`undefined`) has never computed that section at all — "this
+   * client cannot see it". A client that sends a real `[]` computed it and there are
+   * genuinely none. Collapsing the two (the old behaviour, for bills/recurring) let a
+   * client's silence read as a confident "you have no bills" / "no subscriptions
+   * detected" — worse than an honest "I can't see that here". Mobile has no recurring-
+   * merchant detector at all, so `recurring` is always absent from mobile; the fix for
+   * that gap lives here (the model is told, never a fabricated `bills`/`recurring` in
+   * every client), not in mobile — see cashflow-mobile's chat.ts for the bills/upcoming
+   * half, which mobile DOES compute and now gates the same way on its own side.
+   * Each `*Provided` flag below gates whether its section renders at all, so an absent
+   * client omits the section instead of rendering a false "(none recorded)"/"(none
+   * detected)"/"(none)".
+   */
+  const billsProvided = ctx.bills !== undefined;
   // #22 — bills the app has already recorded, so "is X already on my bills" and "what
   // do I pay monthly" are answerable, and record_bill can check for a duplicate first.
   const billRows = ctx.bills || [];
@@ -628,18 +643,13 @@ export function buildChatMessages(
     return `- ${clip(b?.vendor) || '(unnamed)'} | ${money(b?.amount)} | ${clip(b?.frequency) || '-'}${flags ? ` | ${flags}` : ''}`;
   });
 
-  // Web never supplies `upcoming` at all (only mobile's homeSnapshot computes forecast
-  // events + bill events) — `undefined` here means ABSENT ("this client cannot see this"),
-  // which is a different claim from `[]`, EMPTY ("computed, and there are genuinely
-  // none"). Collapsing the two let the model read a client's silence as "you have no
-  // upcoming payments". `upcomingProvided` gates whether the section renders at all,
-  // below, so an absent client omits the section instead of rendering a false "(none)".
   const upcomingProvided = ctx.upcoming !== undefined;
   const upcomingRows = ctx.upcoming || [];
   const upcoming = upcomingRows.slice(0, CAPS.upcoming).map((u) =>
     `- ${clip(u?.name) || '(unnamed)'} | ${clip(u?.dueDate, 10) || '?'} | ${money(u?.amount)}`
   );
 
+  const recurringProvided = ctx.recurring !== undefined;
   const recurringRows = ctx.recurring || [];
   const recurring = recurringRows.slice(0, CAPS.recurring).map((r) =>
     `- ${clip(r?.merchant) || '(unnamed)'} | ${money(r?.amount)} | ${clip(r?.cadence) || '-'}`
@@ -659,20 +669,24 @@ export function buildChatMessages(
     'FREQUENT MERCHANTS AND DESCRIPTIONS:',
     merchants.length ? merchants.join('\n') : '(none)',
     '',
-    'BILLS REGISTER — recorded recurring obligations, computed by the app (vendor | amount each | frequency | flags). Complete, not a sample.',
-    bills.length ? bills.join('\n') : '(none recorded)',
-    ...omitted(Math.max(0, billRows.length - CAPS.bills), 'bills'),
-    '',
+    ...(billsProvided ? [
+      'BILLS REGISTER — recorded recurring obligations, computed by the app (vendor | amount each | frequency | flags). Complete, not a sample.',
+      bills.length ? bills.join('\n') : '(none recorded)',
+      ...omitted(Math.max(0, billRows.length - CAPS.bills), 'bills'),
+      '',
+    ] : []),
     ...(upcomingProvided ? [
       'UPCOMING — bills and forecasted payments due within the horizon (name | due date | amount). Complete, not a sample.',
       upcoming.length ? upcoming.join('\n') : '(none)',
       ...omitted(Math.max(0, upcomingRows.length - CAPS.upcoming), 'upcoming items'),
       '',
     ] : []),
-    'DETECTED RECURRING MERCHANTS — pattern detection over transaction history, separate from the Bills register above (merchant | amount each | cadence):',
-    recurring.length ? recurring.join('\n') : '(none detected)',
-    ...omitted(Math.max(0, recurringRows.length - CAPS.recurring), 'recurring merchants'),
-    '',
+    ...(recurringProvided ? [
+      'DETECTED RECURRING MERCHANTS — pattern detection over transaction history, separate from the Bills register above (merchant | amount each | cadence):',
+      recurring.length ? recurring.join('\n') : '(none detected)',
+      ...omitted(Math.max(0, recurringRows.length - CAPS.recurring), 'recurring merchants'),
+      '',
+    ] : []),
     'LEDGER TOTALS — computed by the app over EVERY transaction. Complete, not a sample.',
     ...summaryLines(ctx.summary),
     '',
