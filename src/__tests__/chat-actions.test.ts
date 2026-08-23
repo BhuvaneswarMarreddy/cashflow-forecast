@@ -382,6 +382,17 @@ describe('set_monthly_spend — FIN-SPEND-001, the owner\'s runway assumption', 
   it('accepts exactly the ceiling', () => {
     expect(parseChatAction({ ...valid, amount: 1_000_000 })).toEqual({ ...valid, amount: 1_000_000 });
   });
+
+  it('rejects a sub-cent amount instead of rounding it down to a silent 0', () => {
+    // 0.004 passes `amount > 0` but rounds to exactly 0 below — the card would say
+    // "Saved" while writing 0, and sanitizeAssumedSpend(0) reverts to the derived
+    // average on the next read. Must be rejected before rounding runs.
+    expect(parseChatAction({ ...valid, amount: 0.004 })).toBeNull();
+  });
+
+  it('accepts the smallest amount that survives rounding', () => {
+    expect(parseChatAction({ ...valid, amount: 0.01 })).toEqual({ ...valid, amount: 0.01 });
+  });
 });
 
 describe('record_bill — the chat verb this task adds (issues #10/#14)', () => {
@@ -408,6 +419,14 @@ describe('record_bill — the chat verb this task adds (issues #10/#14)', () => 
 
   it('rounds amount to cents precision like every other money amount here', () => {
     expect(parseChatAction({ ...valid, amount: 45.786 })).toEqual({ ...valid, amount: 45.79 });
+  });
+
+  it('rejects a sub-cent amount instead of rounding it down to a silent 0', () => {
+    expect(parseChatAction({ ...valid, amount: 0.004 })).toBeNull();
+  });
+
+  it('accepts the smallest amount that survives rounding', () => {
+    expect(parseChatAction({ ...valid, amount: 0.01 })).toEqual({ ...valid, amount: 0.01 });
   });
 
   it('rejects an unknown/invented frequency rather than coercing it', () => {

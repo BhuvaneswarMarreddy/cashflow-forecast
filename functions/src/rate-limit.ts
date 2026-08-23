@@ -13,6 +13,20 @@ export const LIMITS = {
   aiDecision: 50,
   parseReceipt: 60,
   aiChat: 100,
+  // Not an AI-cost bound like the three above: applyDecision writes a rule doc
+  // that EVERY future readLedger re-applies to EVERY transaction, so a
+  // retrying/buggy client creating unbounded duplicate rule docs is a cost
+  // that compounds permanently, not a one-time write. 100/day is far beyond
+  // any single human hand-categorizing merchants (or approving chat-proposed
+  // rules) in a day.
+  applyDecision: 100,
+  // A CSV import is a heavy op (9 parallel reads, an account-create batch, a
+  // transaction-write batch); a retry storm here is not free even though
+  // imports are themselves idempotent (twin-merge dedupes re-sent rows).
+  // 30/day covers re-importing every account's statement (Chase, Amex,
+  // Discover, Apple Card, USAA, a Monarch bulk export...) more than once in a
+  // day, with room to spare for retries.
+  importCsv: 30,
 } as const;
 
 export interface RateLimitDoc {

@@ -1,3 +1,5 @@
+import { monthlyFromCadence } from '@/lib/income-cadence';
+
 /**
  * The one money formatter (D2: honor profile.currency). USD keeps the app's
  * existing look ($1,234); INR renders ₹ with en-IN grouping (₹1,00,000).
@@ -21,12 +23,15 @@ export const formatMoneyCents = (cents: number, currency: string = 'USD') =>
  * 26 paychecks a year, not 24, and the naive *2 understated a $4,340 paycheck by
  * ~$723/month while the AI panels reasoned from a different figure than the tile.
  * Callers pass ACTIVE sources only — a paused source is not money arriving.
+ *
+ * Delegates to income-cadence's `monthlyFromCadence` — the arithmetic here was
+ * byte-for-byte identical (yearly /12, biweekly *26/12, weekly *52/12, monthly
+ * passthrough) before this swap, verified against income-cadence.test.ts and the
+ * new tests in money.test.ts, so this is a single-source-of-truth change, not a
+ * behaviour change: two hand-copies of the same formula are exactly how it drifted
+ * to *24 once already.
  */
 export const monthlyIncomeOf = (
   sources: ReadonlyArray<{ amount: number; frequency: 'weekly' | 'biweekly' | 'monthly' | 'yearly' }>
 ): number =>
-  sources.reduce((sum, s) =>
-    sum + (s.frequency === 'yearly' ? s.amount / 12
-      : s.frequency === 'biweekly' ? (s.amount * 26) / 12
-      : s.frequency === 'weekly' ? (s.amount * 52) / 12
-      : s.amount), 0);
+  sources.reduce((sum, s) => sum + monthlyFromCadence(s.amount, s.frequency), 0);

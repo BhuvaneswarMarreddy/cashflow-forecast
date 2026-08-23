@@ -144,7 +144,8 @@ describe('Debt Planner', () => {
     it('should calculate interest savings vs minimum payments', () => {
       const plan = generateDebtPayoffPlan(debts, 'avalanche', 100);
       
-      expect(plan.interestSaved).toBeGreaterThanOrEqual(0);
+      expect(plan.interestSaved).not.toBeNull();
+      expect(plan.interestSaved!).toBeGreaterThanOrEqual(0);
     });
     
     it('should return debt-free timeline', () => {
@@ -180,13 +181,13 @@ describe('Debt Planner', () => {
       const comparison = compareStrategies(debts, 50);
       
       // Avalanche typically saves more on high-interest debt
-      expect(comparison.avalanche.interestSaved).toBeGreaterThanOrEqual(comparison.snowball.interestSaved);
+      expect(comparison.avalanche.interestSaved!).toBeGreaterThanOrEqual(comparison.snowball.interestSaved!);
     });
-    
+
     it('should calculate savings difference', () => {
       const comparison = compareStrategies(debts, 100);
-      
-      const expectedDiff = comparison.avalanche.interestSaved - comparison.snowball.interestSaved;
+
+      const expectedDiff = comparison.avalanche.interestSaved! - comparison.snowball.interestSaved!;
       expect(comparison.savingsDifference).toBe(expectedDiff);
     });
   });
@@ -202,6 +203,74 @@ describe('Debt Planner', () => {
       
       // Should be a valid date string like "March 2026"
       expect(debtFreeDate).toMatch(/^[A-Z][a-z]+ \d{4}$/);
+    });
+  });
+
+  // #77 — a 0% APR was being printed as fact where no rate was ever entered, and
+  // Total Interest / Interest Saved / Debt-Free Date were derived from that
+  // fabricated 0. apr must stay null (never 0) all the way through, and every
+  // figure that depends on an unknown rate must refuse to compute.
+  describe('#77 — unset apr must never be fabricated as 0%', () => {
+    const noRateLoan = (): PaymentAccount => ({
+      id: 'loan_no_rate',
+      name: 'Car Loan',
+      type: 'personal_loan',
+      provider: 'bank-transfer',
+      openingBalance: 12000,
+      openingDate: '2000-01-01',
+      monthlyPayment: 400,
+      dueDate: 1,
+      color: '#f59e0b',
+      isActive: true,
+      // apr intentionally omitted — never entered by the owner
+    });
+
+    it('accountsToDebts: no apr entered becomes apr: null, not 0', () => {
+      const [debt] = accountsToDebts([noRateLoan()]);
+      expect(debt.apr).toBeNull();
+    });
+
+    it('generateDebtPayoffPlan: refuses to fabricate totalInterestPaid/interestSaved when any debt has no rate', () => {
+      const plan = generateDebtPayoffPlan(accountsToDebts([noRateLoan()]), 'avalanche', 100);
+
+      expect(plan.hasUnknownApr).toBe(true);
+      expect(plan.totalInterestPaid).toBeNull();
+      expect(plan.interestSaved).toBeNull();
+      expect(plan.debts[0].apr).toBeNull();
+      expect(plan.debts[0].totalInterestPaid).toBeNull();
+    });
+
+    it('getDebtFreeDate: refuses a payoff date when any included debt has no rate', () => {
+      const plan = generateDebtPayoffPlan(accountsToDebts([noRateLoan()]), 'avalanche', 100);
+      expect(getDebtFreeDate(plan)).toBeNull();
+    });
+
+    it('compareStrategies: cannot recommend a strategy by savings it cannot compute', () => {
+      const comparison = compareStrategies(accountsToDebts([noRateLoan()]), 100);
+      expect(comparison.savingsDifference).toBeNull();
+      expect(comparison.recommendation).toBeNull();
+    });
+
+    it('regression — a loan WITH a known apr still computes real interest and a real payoff date', () => {
+      const debts = accountsToDebts([mockLoan(12000, 6.5, 400, 'Car Loan')]);
+      const plan = generateDebtPayoffPlan(debts, 'avalanche', 100);
+
+      expect(plan.hasUnknownApr).toBe(false);
+      expect(plan.totalInterestPaid).not.toBeNull();
+      expect(plan.totalInterestPaid!).toBeGreaterThan(0);
+      expect(plan.interestSaved).not.toBeNull();
+      expect(plan.debts[0].apr).toBe(6.5);
+      expect(plan.debts[0].totalInterestPaid).not.toBeNull();
+      expect(getDebtFreeDate(plan)).toMatch(/^[A-Z][a-z]+ \d{4}$/);
+    });
+
+    it('an explicitly-entered 0% (e.g. a promo card) is a real fact, distinct from unset', () => {
+      const debts = accountsToDebts([mockCreditCard(1000, 0, 'Promo Card')]);
+      expect(debts[0].apr).toBe(0);
+
+      const plan = generateDebtPayoffPlan(debts, 'avalanche', 100);
+      expect(plan.hasUnknownApr).toBe(false);
+      expect(plan.totalInterestPaid).toBe(0);
     });
   });
 });

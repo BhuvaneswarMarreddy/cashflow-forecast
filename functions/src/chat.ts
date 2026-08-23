@@ -57,8 +57,12 @@ export function truncatedReply(): {
   };
 }
 
-export function successLogFields(hasImage: boolean, durationMs: number): { hasImage: boolean; durationMs: number } {
-  return { hasImage, durationMs };
+export function successLogFields(
+  hasImage: boolean,
+  durationMs: number,
+  truncated: boolean
+): { hasImage: boolean; durationMs: number; truncated: boolean } {
+  return { hasImage, durationMs, truncated };
 }
 
 export const aiChat = onCall(
@@ -110,12 +114,16 @@ export const aiChat = onCall(
       });
 
       const content = completion.choices[0]?.message?.content || '';
+      const truncated = completion.choices[0]?.finish_reason === 'length';
+      // Counts only — never the message, merchant names or base64. See applyDecision's
+      // console.log for the same discipline elsewhere in this codebase. Logged before
+      // the truncation branch returns, so a truncated turn is visible in logs, not
+      // just to the owner — otherwise there is no way to notice max_tokens starting
+      // to bite as the prompt grows.
+      console.log('aiChat', successLogFields(hasImage, Date.now() - startedAt, truncated));
       // A truncated completion is never valid JSON, and echoing the fragment
       // back as prose shows the owner a broken object. Say what happened.
-      if (completion.choices[0]?.finish_reason === 'length') return truncatedReply();
-      // Counts only — never the message, merchant names or base64. See applyDecision's
-      // console.log for the same discipline elsewhere in this codebase.
-      console.log('aiChat', successLogFields(hasImage, Date.now() - startedAt));
+      if (truncated) return truncatedReply();
       try {
         return { success: true, result: JSON.parse(content) };
       } catch {
