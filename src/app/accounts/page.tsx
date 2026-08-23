@@ -700,6 +700,16 @@ export default function AccountsPage() {
                               {account.dueDate && `Due: ${account.dueDate}${getOrdinalSuffix(account.dueDate)}`}
                             </p>
                           )}
+                          {/* #14 round 4: the ONLY disclosure a feedless card's coverage guard gets
+                              (see the `ponytail:` note at src/lib/classify.ts:612) — without it a
+                              chronically sparse feed (a token row every month) silently guards every
+                              month's stand-in payment, and the owner has no way to see why the
+                              card's spend contribution collapsed. Reads `feedCoveredPeriods` directly. */}
+                          {account.feedless && !!account.feedCoveredPeriods?.size && (
+                            <p className="text-xs text-[var(--foreground-muted)]">
+                              {account.feedCoveredPeriods.size} {account.feedCoveredPeriods.size === 1 ? 'month' : 'months'} covered by your card's own data
+                            </p>
+                          )}
                           {/* Show linked payment account */}
                           {(account.type === 'credit_card' || account.type === 'personal_loan') && account.paymentFromAccountId && (
                             <p className="text-xs text-[var(--accent-primary)] flex items-center gap-1 mt-1">
