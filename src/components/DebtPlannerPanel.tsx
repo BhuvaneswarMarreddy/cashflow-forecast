@@ -80,18 +80,28 @@ export default function DebtPlannerPanel({
         </div>
         <div className="p-4 rounded-card bg-[var(--background-tertiary)]">
           <p className="text-sm text-[var(--foreground-muted)]">Debt-Free Date</p>
-          <p className="text-xl font-bold text-[var(--accent-success)]">
-            {getDebtFreeDate(plan)}
-          </p>
+          {/* #77: no fabricated payoff date when a rate is unset — getDebtFreeDate
+              returns null exactly when plan.hasUnknownApr is true. */}
+          {plan.hasUnknownApr ? (
+            <p className="text-sm font-medium text-[var(--foreground-muted)]">Add rates below to calculate</p>
+          ) : (
+            <p className="text-xl font-bold text-[var(--accent-success)]">
+              {getDebtFreeDate(plan)}
+            </p>
+          )}
         </div>
         <div className="p-4 rounded-card bg-[var(--background-tertiary)]">
           <p className="text-sm text-[var(--foreground-muted)]">Interest Saved</p>
-          <p className="text-xl font-bold text-emerald-500">
-            ${plan.interestSaved.toLocaleString()}
-          </p>
+          {plan.interestSaved === null ? (
+            <p className="text-sm font-medium text-[var(--foreground-muted)]">Add rates below to calculate</p>
+          ) : (
+            <p className="text-xl font-bold text-emerald-500">
+              ${plan.interestSaved.toLocaleString()}
+            </p>
+          )}
         </div>
       </div>
-      
+
       {/* Strategy Selection */}
       <div className="p-6 rounded-card bg-[var(--background-secondary)] border border-[var(--border-color)]">
         <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">
@@ -131,7 +141,9 @@ export default function DebtPlannerPanel({
                 </p>
                 <p className="text-sm">
                   <span className="text-[var(--foreground-muted)]">Interest to pay: </span>
-                  <span className="font-medium text-[var(--foreground)]">${comparison.snowball.totalInterestPaid.toLocaleString()}</span>
+                  <span className="font-medium text-[var(--foreground)]">
+                    {comparison.snowball.totalInterestPaid === null ? 'rate needed' : `$${comparison.snowball.totalInterestPaid.toLocaleString()}`}
+                  </span>
                 </p>
               </div>
             )}
@@ -169,15 +181,17 @@ export default function DebtPlannerPanel({
                 </p>
                 <p className="text-sm">
                   <span className="text-[var(--foreground-muted)]">Interest to pay: </span>
-                  <span className="font-medium text-[var(--foreground)]">${comparison.avalanche.totalInterestPaid.toLocaleString()}</span>
+                  <span className="font-medium text-[var(--foreground)]">
+                    {comparison.avalanche.totalInterestPaid === null ? 'rate needed' : `$${comparison.avalanche.totalInterestPaid.toLocaleString()}`}
+                  </span>
                 </p>
               </div>
             )}
           </button>
         </div>
         
-        {/* Recommendation */}
-        {comparison.savingsDifference > 50 && (
+        {/* Recommendation — #77: nothing to recommend by savings that can't be computed */}
+        {comparison.savingsDifference !== null && comparison.savingsDifference > 50 && (
           <div className="p-3 rounded-control bg-[var(--accent-primary)]/10 border border-[var(--accent-primary)]/20">
             <div className="flex items-start gap-2">
               <Info className="w-4 h-4 text-[var(--accent-primary)] mt-1" />
@@ -251,7 +265,14 @@ export default function DebtPlannerPanel({
         <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">
           Payoff Order ({selectedStrategy === 'snowball' ? 'Smallest First' : 'Highest APR First'})
         </h3>
-        
+        {/* #77: avalanche ranks by APR — with any rate unknown, "highest APR first"
+            can't actually be verified for every debt below. */}
+        {selectedStrategy === 'avalanche' && plan.hasUnknownApr && (
+          <p className="text-sm text-[var(--foreground-muted)] mb-4">
+            One or more debts below have no rate set, so this order isn&apos;t guaranteed to be highest-APR-first.
+          </p>
+        )}
+
         <div className="space-y-3">
           {plan.debts.map((debt, index) => (
             <div
@@ -277,7 +298,9 @@ export default function DebtPlannerPanel({
                 </div>
                 <div className="flex gap-4 text-sm text-[var(--foreground-muted)]">
                   <span>${debt.originalBalance.toLocaleString()}</span>
-                  <span>{debt.apr}% APR</span>
+                  {/* #77: "0% APR" is a fact only when someone entered it — an
+                      unset rate must read as unset, not as a measured zero. */}
+                  <span>{debt.apr === null ? 'rate not set' : `${debt.apr}% APR`}</span>
                 </div>
               </div>
               
@@ -297,21 +320,38 @@ export default function DebtPlannerPanel({
           ))}
         </div>
         
-        {/* Summary */}
-        <div className="mt-6 p-4 rounded-card bg-emerald-500/10 border border-emerald-500/30">
-          <div className="flex items-center gap-3">
-            <Target className="w-6 h-6 text-emerald-500" />
-            <div>
-              <p className="font-medium text-emerald-600">
-                Debt-free by {getDebtFreeDate(plan)}!
-              </p>
-              <p className="text-sm text-[var(--foreground-muted)]">
-                Total interest: ${plan.totalInterestPaid.toLocaleString()} • 
-                You'll save ${plan.interestSaved.toLocaleString()} vs minimum payments
-              </p>
+        {/* Summary — #77: refuse Total Interest / Interest Saved / Debt-Free
+            Date while any debt above has no rate, and say what's missing. */}
+        {plan.hasUnknownApr ? (
+          <div className="mt-6 p-4 rounded-card bg-[var(--background-tertiary)] border border-[var(--border-color)]">
+            <div className="flex items-center gap-3">
+              <Info className="w-6 h-6 text-[var(--foreground-muted)]" />
+              <div>
+                <p className="font-medium text-[var(--foreground)]">
+                  Add the APR for {plan.debts.filter(d => d.apr === null).map(d => d.accountName).join(', ')} to see your debt-free date
+                </p>
+                <p className="text-sm text-[var(--foreground-muted)]">
+                  Total interest and interest saved can't be calculated until every debt above has a known rate.
+                </p>
+              </div>
             </div>
           </div>
-        </div>
+        ) : (
+          <div className="mt-6 p-4 rounded-card bg-emerald-500/10 border border-emerald-500/30">
+            <div className="flex items-center gap-3">
+              <Target className="w-6 h-6 text-emerald-500" />
+              <div>
+                <p className="font-medium text-emerald-600">
+                  Debt-free by {getDebtFreeDate(plan)}!
+                </p>
+                <p className="text-sm text-[var(--foreground-muted)]">
+                  Total interest: ${plan.totalInterestPaid!.toLocaleString()} •
+                  You'll save ${plan.interestSaved!.toLocaleString()} vs minimum payments
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
       
       {/* Strategy Explanation */}
