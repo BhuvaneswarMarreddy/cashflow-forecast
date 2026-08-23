@@ -10,7 +10,7 @@
  * round once, so per-row rounding can never drift a header total.
  */
 
-import { addDays, differenceInCalendarDays, format, getDaysInMonth, isAfter, isBefore, parseISO } from 'date-fns';
+import { addDays, addMonths, differenceInCalendarDays, format, getDaysInMonth, isAfter, isBefore, parseISO } from 'date-fns';
 
 import type { Transaction } from '@/types';
 
@@ -80,8 +80,11 @@ export interface Bill {
   /**
    * Payments left as of when this was recorded — caps how many future due
    * dates `billUpcomingEvents()` projects (mirrors `FirestoreIncome.remainingPayments`
-   * / forecast.ts's `maxPayments`). Does NOT auto-decrement with time; re-record
-   * to update it.
+   * / forecast.ts's `maxPayments`). The stored number does NOT auto-decrement;
+   * re-record to correct it. It does, however, EXPIRE: `isCharging()` derives
+   * the plan's end from `createdAt` + this many periods, so an installment
+   * captured from a screenshot stops charging on its own instead of inflating
+   * "Locked" and Upcoming forever.
    */
   installmentsRemaining?: number;
   createdAt: string;
@@ -136,8 +139,40 @@ const TODAY = (): string => new Date().toISOString().slice(0, 10);
  * bills digest) filter to "current" bills with the SAME rule billUpcomingEvents
  * already uses, instead of a second definition of "active" drifting from this one.
  */
-export const isCharging = (b: Bill, today: string): boolean =>
-  b.lifecycleStatus !== 'cancelled' && !(b.endDate !== undefined && b.endDate < today);
+export const isCharging = (b: Bill, today: string): boolean => {
+  if (b.lifecycleStatus === 'cancelled') return false;
+  if (b.endDate !== undefined && b.endDate < today) return false;
+  const end = installmentEndISO(b);
+  return end === undefined || end >= today;
+};
+
+/**
+ * When an installment plan runs out — DERIVED, never stored.
+ *
+ * `installmentsRemaining` is a count captured at record time, and nothing
+ * anywhere decrements it (see the field's own doc). `isCharging` used to look
+ * only at `endDate`, and `record_bill`'s prompt deliberately instructs the
+ * model to send at most ONE of `endDate` / `installmentsRemaining` — so a bill
+ * captured from an installment screenshot has a count and no end date, and
+ * therefore charged FOREVER. It kept feeding `nonNegotiableMonthly` (the Home
+ * "Locked" tile), `upcomingTotalCents` and the bills digest, growing more
+ * wrong every month, and the only way to stop it was to remember to re-record
+ * the bill by hand.
+ *
+ * `createdAt` is the date the count was true on, so it is the anchor. A count
+ * of 0 is how an installment is marked FINISHED (see `update_bill`'s prompt),
+ * and falls out of this naturally: the plan ended the day it was recorded.
+ */
+function installmentEndISO(b: Bill): string | undefined {
+  if (b.installmentsRemaining === undefined) return undefined;
+  const from = parseISO(b.createdAt);
+  const months = MONTH_STEP[b.frequency];
+  const end =
+    months !== undefined
+      ? addMonths(from, months * b.installmentsRemaining)
+      : addDays(from, (b.frequency === 'weekly' ? 7 : 14) * b.installmentsRemaining);
+  return format(end, 'yyyy-MM-dd');
+}
 
 export function monthlyCostRaw(bill: Bill): number {
   return bill.amount * MONTHLY_FACTOR[bill.frequency];
@@ -400,6 +435,14 @@ export function billUpcomingEvents(
       dueDates = dueDates.filter((d) => !isAfter(d, end));
     }
     if (bill.installmentsRemaining !== undefined) {
+      // Cap by the plan's DERIVED end as well as by the count. The count alone
+      // is measured from today, so a plan recorded months ago would keep
+      // projecting its full original length forever.
+      const planEnd = installmentEndISO(bill);
+      if (planEnd) {
+        const end = parseISO(planEnd);
+        dueDates = dueDates.filter((d) => !isAfter(d, end));
+      }
       dueDates = dueDates.slice(0, bill.installmentsRemaining);
     }
 

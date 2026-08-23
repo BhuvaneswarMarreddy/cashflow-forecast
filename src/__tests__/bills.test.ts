@@ -15,6 +15,7 @@ import {
   migrationSummary,
   billsOnRetiredMethods,
   billUpcomingEvents,
+  isCharging,
   PAYMENT_METHODS,
 } from '@/lib/bills';
 import starter from '@/data/bills-starter.json';
@@ -405,5 +406,49 @@ describe('billUpcomingEvents', () => {
     // Buggy code rolls Sep 31 -> Oct 1 (a phantom, since Sep only has 30 days); Oct's
     // own real 31st is excluded by the horizon either way.
     expect(events.map(e => e.dueDate)).toEqual(['2026-09-30']);
+  });
+});
+
+/**
+ * Installment plans have to expire on their own.
+ *
+ * `installmentsRemaining` is a count captured at record time and nothing
+ * decrements it. `isCharging` used to consult only `endDate` — and
+ * `record_bill`'s prompt deliberately instructs the model to send at most ONE
+ * of the two, so the screenshot path ("$45.79/mo, $595.31 remaining" → 13
+ * payments) produces a count and NO end date. That bill charged forever,
+ * inflating the Home "Locked" tile and Upcoming every month until someone
+ * remembered to re-record it by hand.
+ */
+describe('installment plans expire without a re-record', () => {
+  const thirteenMonthly = (createdAt: string): Bill =>
+    mk(45.79, 'monthly', { installmentsRemaining: 13, createdAt, updatedAt: createdAt });
+
+  test('still charges while the plan is running', () => {
+    const bill = thirteenMonthly('2026-08-06T00:00:00.000Z');
+    expect(isCharging(bill, '2027-01-06')).toBe(true);
+    expect(totalMonthlyCost([bill], '2027-01-06')).toBe(45.79);
+  });
+
+  test('stops charging once the last payment has passed', () => {
+    // 13 monthly payments from 2026-08-06 ends 2027-09-06.
+    const bill = thirteenMonthly('2026-08-06T00:00:00.000Z');
+    expect(isCharging(bill, '2027-09-07')).toBe(false);
+    expect(totalMonthlyCost([bill], '2027-09-07')).toBe(0);
+    expect(nonNegotiableMonthly([{ ...bill, nonNegotiable: true }], '2027-09-07')).toBe(0);
+  });
+
+  test('projects no further due dates after the plan ends', () => {
+    const bill = thirteenMonthly('2026-08-06T00:00:00.000Z');
+    expect(billUpcomingEvents([bill], '2027-09-07', 45)).toHaveLength(0);
+  });
+
+  test('a count of zero means finished, not unbounded', () => {
+    const bill = mk(45.79, 'monthly', { installmentsRemaining: 0 });
+    expect(isCharging(bill, '2026-08-07')).toBe(false);
+  });
+
+  test('a bill with no installment count is unaffected', () => {
+    expect(isCharging(mk(20, 'monthly'), '2030-01-01')).toBe(true);
   });
 });
