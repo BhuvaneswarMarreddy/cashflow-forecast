@@ -141,7 +141,7 @@ export interface DebtAccount {
   id: string;
   name: string;
   balance: number;
-  apr: number;
+  apr: number | null; // #77: null = rate never entered — never fabricated as 0
   minimumPayment: number;
   dueDate: number;
 }
@@ -150,19 +150,20 @@ export interface DebtPayoffPlan {
   strategy: DebtPayoffStrategy;
   extraMonthlyPayment: number;
   debts: DebtPayoffItem[];
-  totalInterestPaid: number;
+  totalInterestPaid: number | null; // null when any included debt has apr === null
   totalMonths: number;
-  interestSaved: number; // Compared to minimum payments only
+  interestSaved: number | null; // Compared to minimum payments only; null, same reason
+  hasUnknownApr: boolean; // true when any included debt's apr is null
 }
 
 export interface DebtPayoffItem {
   accountId: string;
   accountName: string;
   originalBalance: number;
-  apr: number;
+  apr: number | null;
   payoffOrder: number;
   payoffDate: string; // ISO date
-  totalInterestPaid: number;
+  totalInterestPaid: number | null; // null when THIS debt's own apr is unknown
   monthsToPayoff: number;
 }
 
