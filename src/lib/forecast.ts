@@ -16,7 +16,7 @@ import {
   AccountForecast 
 } from '@/types';
 import { addDays, format, parseISO, startOfDay, isBefore, isAfter, isSameDay } from 'date-fns';
-import { isPositive, classifyTransaction, interpretTransaction, isPosted, IncomeContext } from '@/lib/classify';
+import { isPositive, classifyTransaction, interpretTransaction, isPosted, IncomeContext, feedlessCardTargetOf } from '@/lib/classify';
 import { currentOf } from '@/lib/accounts';
 import { buildAssumptions, behaviorEvents, AssumptionOverrides } from '@/lib/behavior';
 import { normalizeMerchant } from '@/lib/flows';
@@ -101,6 +101,42 @@ function monthsBetweenInclusive(from: string, to: string): number {
   return (ty - fy) * 12 + (tm - fm) + 1;
 }
 
+/**
+ * The double-count guard for a FEEDLESS card (#14 round 3): the SET of calendar
+ * periods (`YYYY-MM`) this card has at least one POSTED, already-happened row of
+ * its own. Pending rows (not yet settled) and future-dated rows (not yet happened)
+ * are not evidence of anything and are excluded.
+ *
+ * Round 2 used a single "latest qualifying row" date as an open-ended UPPER BOUND
+ * (guard when `payment.date <= that date`) — any row, no matter how old or how far
+ * in the past its own month is, silently reached back over EVERY earlier month too.
+ * Measured on a $1,000-anchor / five-$800-payment ledger (true spend $4,000): a
+ * March-only statement import suppressed Jan+Feb ($2,400 counted); a single stray
+ * $12 row on Feb 1 suppressed January; a LIVE FEED — which keeps its latest row
+ * pinned near today — suppressed every historical payment permanently, understating
+ * average monthly spend and overstating runway by the same factor. A [earliest,
+ * latest] SPAN closes those but still leaks: rows in January and March with nothing
+ * in February make February look covered too, because it falls inside the span.
+ *
+ * The complete model: coverage is EXACTLY the set of periods with a qualifying row
+ * — no more, no less — and a payment is guarded only when ITS OWN period (not some
+ * earlier or later one) is a member. This matches statement-cycle semantics: once
+ * this card's feed has a real row for a given month, that month's itemized data is
+ * the source of truth and the payment reverts to being an ordinary transfer for
+ * THAT month only.
+ */
+function feedCoveredPeriods(accountId: string, transactions: readonly Transaction[]): Set<string> {
+  const todayKey = format(new Date(), 'yyyy-MM-dd');
+  const periods = new Set<string>();
+  for (const t of transactions) {
+    if (t.accountId !== accountId || !isPosted(t)) continue;
+    const day = t.date.slice(0, 10);
+    if (day > todayKey) continue; // not yet happened — not evidence
+    periods.add(day.slice(0, 7)); // YYYY-MM
+  }
+  return periods;
+}
+
 export function calculateCurrentCash(accounts: PaymentAccount[]): number {
   return accounts
     .filter(a => a.type === 'bank_account' || a.type === 'debit_card' || a.type === 'cash')
@@ -116,30 +152,85 @@ export function calculateCurrentCash(accounts: PaymentAccount[]): number {
 export function deriveAccountBalance(
   account: PaymentAccount,
   transactions: Transaction[],
-  policy: IncomeContext
+  policy: IncomeContext,
+  /**
+   * FEEDLESS-CARD-001 (#14). Every OTHER account, needed ONLY to identify which
+   * feedless card a payment sitting on a DIFFERENT account names — see the
+   * cross-account branch below. Every pre-existing caller omits it, and a
+   * feedless card's balance then simply never moves off its anchor, which is
+   * the safe do-nothing default.
+   */
+  allAccounts?: PaymentAccount[]
 ): number {
   const includePending = policy?.includePending ?? false;
   const todayKey = format(new Date(), 'yyyy-MM-dd');
   const openingKey = account.openingDate || '0000-00-00';
   const isDebt = account.type === 'credit_card' || account.type === 'personal_loan';
-  const net = transactions.reduce((sum, t) => {
-    if (t.accountId !== account.id) return sum;
+  const inWindow = (t: Transaction) => {
     // PENDING: excluded by DEFAULT. The anchor this is added to is the provider's POSTED
     // balance (simplefin.py re-anchors from `balance`, not available-balance), so
     // folding holds in here counts the same money twice and moves the hero number.
     // `includePending` is the owner's explicit "show me the balance once these clear"
     // view — opt-in only, and never the number any total or forecast reads.
-    if (!isPosted(t) && !includePending) return sum;
+    if (!isPosted(t) && !includePending) return false;
     // Compare calendar days, not instants (IST timezone; see git history).
     const day = t.date.split('T')[0];
-    if (day > todayKey) return sum;   // future = forecast, not current balance
-    if (day < openingKey) return sum; // pre-anchor = already inside openingBalance
+    return day <= todayKey && day >= openingKey; // future/pre-anchor excluded
+  };
+  // A feedless card's OWN rows are the guard: a payment is superseded only when
+  // ITS OWN period has a qualifying row of the card's own — see feedCoveredPeriods'
+  // doc for why a set of exact periods, not a floor/ceiling/span.
+  const feedless = !!account.feedless && account.type === 'credit_card';
+  const feedPeriods = feedless ? feedCoveredPeriods(account.id, transactions) : undefined;
+
+  // #14 round 4 (CRITICAL-3, reopened): TWO separate arms, summed separately, not
+  // one shared `net`. The OWN-ROW arm (this card's own posted rows) can legitimately
+  // go negative — a refund bigger than the balance is a real credit balance and must
+  // stay visible (round 3). The STAND-IN arm (a payment on ANOTHER account, standing
+  // in for this card's missing feed in an UNCOVERED month) has no purchases behind it
+  // by construction and must never pay the card past zero. Round 3's clamp gated on
+  // `hasCoverage` — "does this account have ANY covered period at all" — so a single
+  // covered month (e.g. a feed connecting this April) disabled the clamp for the
+  // WHOLE account while the stand-in pathology was still live in every uncovered
+  // month behind it. Measured: five months of recorded payments, then a feed
+  // connects in April — the card's derived balance went negative and Cards-owed
+  // was understated by the same amount. Capping only the stand-in arm fixes this
+  // without touching the own-row arithmetic at all; `hasCoverage` is gone.
+  const ownNet = transactions.reduce((sum, t) => {
+    if (t.accountId !== account.id || !inWindow(t)) return sum;
     return sum + (isPositive(t, [account]) ? t.amount : -t.amount);
+  }, 0);
+  const standInNet = transactions.reduce((sum, t) => {
+    // FEEDLESS-CARD-001: a payment landing on ANOTHER account that names THIS
+    // feedless card stands in for its missing feed — the same rule classify.ts's
+    // interpretTransaction applies to the expense side, so the balance this card
+    // shows and the spend the payment counts as never disagree.
+    if (t.accountId === account.id || !feedless || !allAccounts || !inWindow(t)) return sum;
+    const day = t.date.split('T')[0];
+    if (feedPeriods?.has(day.slice(0, 7))) return sum; // guard: a real row already covers THIS period
+    if (feedlessCardTargetOf(t, allAccounts)?.id !== account.id) return sum;
+    return sum + t.amount; // a payment always reduces debt
   }, 0);
   const opening = account.openingBalance || 0;
   // Debt is stored as a positive amount owed: a purchase (signedEffect < 0) raises it,
   // a payment (signedEffect > 0) lowers it — the opposite sign to a cash account.
-  return isDebt ? opening - net : opening + net;
+  // Own-row arithmetic ONLY — untouched by the stand-in arm.
+  const owed = isDebt ? opening - ownNet : opening + ownNet;
+
+  // CRITICAL-1/3 (#14): the stand-in arm has no purchases behind it by construction
+  // (it exists only because the feed is missing for that month), so it must never
+  // invent a negative balance. Cap it so it pays `owed` down to zero and never past —
+  // an UNANCHORED feedless card with no coverage at all (opening = 0 by construction,
+  // #83) also lands at exactly $0 this way. A negative "owed" INVENTED by the
+  // stand-in arm would subtract from every other card's debt in Cards-owed and
+  // inflate net worth, exactly the #83 class of bug.
+  //
+  // The own-row arm is completely untouched: a genuine credit balance from real
+  // refund rows (e.g. the Amazon Store Card's $4,744 of refunds in
+  // CSV_GROUND_TRUTH.md#3) still reads negative, never clamped, no matter what the
+  // stand-in arm is doing in other months.
+  const standInReduction = feedless ? Math.min(standInNet, Math.max(0, owed)) : standInNet;
+  return owed - standInReduction;
 }
 
 /**
@@ -154,7 +245,16 @@ export function withDerivedBalances(
   transactions: Transaction[],
   policy: IncomeContext
 ): PaymentAccount[] {
-  return accounts.map((a) => ({ ...a, currentBalance: deriveAccountBalance(a, transactions, policy) }));
+  return accounts.map((a) => {
+    // FEEDLESS-CARD-001 (#14): attach the guard's covered-periods set onto the
+    // account object itself so interpretTransaction() — which only ever sees
+    // `accounts`, never the full transaction list — can see it too, wherever
+    // these derived accounts get passed on from here.
+    const coveredPeriods =
+      a.feedless && a.type === 'credit_card' ? feedCoveredPeriods(a.id, transactions) : undefined;
+    const withGuard = coveredPeriods && coveredPeriods.size > 0 ? { ...a, feedCoveredPeriods: coveredPeriods } : a;
+    return { ...withGuard, currentBalance: deriveAccountBalance(withGuard, transactions, policy, accounts) };
+  });
 }
 
 /**

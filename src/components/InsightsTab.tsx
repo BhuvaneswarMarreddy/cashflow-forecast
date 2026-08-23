@@ -17,7 +17,7 @@ import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import ChartSrTable from '@/components/ChartSrTable';
 import { interpretTransaction } from '@/lib/classify';
-import { monthlyAverages } from '@/lib/forecast';
+import { monthlyAverages, withDerivedBalances } from '@/lib/forecast';
 import { formatMoney } from '@/lib/money';
 import { Transaction } from '@/types';
 import {
@@ -42,14 +42,24 @@ export default function InsightsTab() {
   const [currentDate, setCurrentDate] = useState(new Date());
 
   const money = (n: number) => formatMoney(n, profile?.currency, 2);
+
+  // CRITICAL-4 (#14): the feedless double-count guard lives on `feedCoveredPeriods`,
+  // attached IN MEMORY by withDerivedBalances() — never on the raw profile accounts.
+  // Passing profile?.paymentAccounts straight to classify/forecast here meant this
+  // tab's guard never tripped, disagreeing with every screen that derives first.
+  const derivedAccounts = useMemo(
+    () => withDerivedBalances(profile?.paymentAccounts || [], transactions, incomeContext),
+    [profile?.paymentAccounts, transactions, incomeContext]
+  );
+
   // STATE-002: "does this COUNT as spending", which honours confirmed reviews — not
   // "what KIND of row is this", which cannot see them.
   const isExpense = (t: Transaction) =>
-    interpretTransaction(t, profile?.paymentAccounts, incomeContext).expense === 'counted';
+    interpretTransaction(t, derivedAccounts, incomeContext).expense === 'counted';
 
   const derivedMonthly = useMemo(
-    () => monthlyAverages(transactions, profile?.paymentAccounts || [], 6, incomeContext),
-    [transactions, profile?.paymentAccounts, incomeContext]
+    () => monthlyAverages(transactions, derivedAccounts, 6, incomeContext),
+    [transactions, derivedAccounts, incomeContext]
   );
   const monthlyBudget =
     (profile?.monthlyBudget || 0) > 0 ? profile!.monthlyBudget! : derivedMonthly.spending;
@@ -79,7 +89,7 @@ export default function InsightsTab() {
       return { date: format(day, viewMode === 'weekly' ? 'EEE' : 'd'), spent: isPast ? spent : null, isPast };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transactions, range, viewMode, profile?.paymentAccounts, incomeContext]);
+  }, [transactions, range, viewMode, derivedAccounts, incomeContext]);
 
   const spentSoFar = daily.reduce((s, d) => s + (d.spent ?? 0), 0);
   const daysElapsed = daily.filter(d => d.isPast).length;
@@ -102,7 +112,7 @@ export default function InsightsTab() {
     const prevAvg = prevDays > 0 ? prevSpent / prevDays : 0;
     return prevAvg > 0 ? ((avgDailySpend - prevAvg) / prevAvg) * 100 : 0;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transactions, currentDate, viewMode, avgDailySpend, profile?.paymentAccounts, incomeContext]);
+  }, [transactions, currentDate, viewMode, avgDailySpend, derivedAccounts, incomeContext]);
 
   const topMerchants = useMemo(() => {
     const m: Record<string, number> = {};
@@ -115,7 +125,7 @@ export default function InsightsTab() {
     return Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 6)
       .map(([name, value]) => ({ name, value }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transactions, range, profile?.paymentAccounts, incomeContext]);
+  }, [transactions, range, derivedAccounts, incomeContext]);
   const maxMerchant = Math.max(...topMerchants.map(m => m.value), 0.01);
 
   const step = (dir: -1 | 1) =>

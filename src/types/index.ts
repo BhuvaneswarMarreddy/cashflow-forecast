@@ -191,6 +191,33 @@ export interface PaymentAccount {
    */
   openingDate?: string;
   currentBalance?: number; // DERIVED in memory by withDerivedBalances; never stored
+  /**
+   * No transaction feed of its own — an Amazon-store-card-style account whose
+   * purchases never arrive as itemized rows (#14). A PAYMENT into this account
+   * then stands in for the missing itemized spend and counts as the expense
+   * itself, on the payment's own date — see interpretTransaction() (classify.ts)
+   * and deriveAccountBalance() (forecast.ts). Undefined/false = ordinary
+   * account, behavior unchanged.
+   */
+  feedless?: boolean;
+  /**
+   * DERIVED in memory by withDerivedBalances(); never stored. The SET of
+   * calendar periods (`YYYY-MM`) this FEEDLESS account has at least one POSTED,
+   * already-happened row of its own for (a feed connected, a CSV import, a
+   * single synced charge) — the double-count guard (#14 round 3). A payment
+   * naming this card stops counting as spend once ITS OWN period is a member
+   * of this set: a real row already covers that period, so the itemized row is
+   * the truth instead. Undefined/empty = no qualifying row yet, so every
+   * payment still counts.
+   *
+   * Deliberately a SET of exact periods, not a single floor/ceiling/span date:
+   * a single historical statement import (rows clustered in one past month)
+   * must guard only that month, not every month after it forever (round 2's
+   * bug), and a span between two real rows must not silently cover a gap month
+   * with nothing in it (round 2's own bug — see the doc on
+   * `feedCoveredPeriods()` in src/lib/forecast.ts for the measured numbers).
+   */
+  feedCoveredPeriods?: ReadonlySet<string>;
   // Payment linking - which account pays this card/loan
   paymentFromAccountId?: string; // ID of the account that pays this credit card or loan
   // Loan specific fields

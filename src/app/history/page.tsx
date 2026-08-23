@@ -97,6 +97,18 @@ export default function HistoryPage() {
     }
   }, [isAuthenticated, isOnboarded, authLoading, profileLoading, router]);
 
+  // CRITICAL-4 (#14): the feedless double-count guard lives on `feedCoveredPeriods`,
+  // a field withDerivedBalances() attaches IN MEMORY — it is never on the raw profile
+  // accounts. Every classify/forecast call below must read THIS, not
+  // profile?.paymentAccounts directly, or the guard silently never trips (measured:
+  // $1,400 vs $600 for the same month between two screens reading different account
+  // lists). One memo so every computation on this page agrees with every other page
+  // that already does this (e.g. Accounts).
+  const derivedAccounts = useMemo(
+    () => withDerivedBalances(profile?.paymentAccounts || [], transactions, incomeContext),
+    [profile?.paymentAccounts, transactions, incomeContext]
+  );
+
   // Filter and sort transactions
   const filteredTransactions = useMemo(() => {
     let filtered = [...transactions];
@@ -134,7 +146,7 @@ export default function HistoryPage() {
     if (typeFilter !== 'all') {
       // Must match the classifier, not the stored type — otherwise a card payment
       // stored as 'income' shows under the In chip while contributing $0 to the In total.
-      filtered = filtered.filter(t => classifyTransaction(t, profile?.paymentAccounts) === typeFilter);
+      filtered = filtered.filter(t => classifyTransaction(t, derivedAccounts) === typeFilter);
     }
 
     // Account filter
@@ -180,7 +192,7 @@ export default function HistoryPage() {
     }
 
     return filtered;
-  }, [transactions, dateFilter, typeFilter, accountFilter, categoryFilter, searchQuery, sortOrder, profile?.paymentAccounts]);
+  }, [transactions, dateFilter, typeFilter, accountFilter, categoryFilter, searchQuery, sortOrder, derivedAccounts]);
 
   // Every distinct category present, most-used first — drives the filter dropdown so
   // it lists the user's own labels ("AI Tools", "Coffee Shops") rather than the enum.
@@ -214,8 +226,8 @@ export default function HistoryPage() {
       key,
       label: groupBy === 'month' ? format(parseISO(key + '-01'), 'MMMM yyyy') : key,
       transactions: txns,
-      income: sumIncomeCents(txns, profile?.paymentAccounts, incomeContext) / 100,
-      expenses: sumExpenseCents(txns, profile?.paymentAccounts, incomeContext) / 100,
+      income: sumIncomeCents(txns, derivedAccounts, incomeContext) / 100,
+      expenses: sumExpenseCents(txns, derivedAccounts, incomeContext) / 100,
     }));
 
     // Time groups read newest-first; category groups read biggest-spend-first, which is
@@ -223,37 +235,37 @@ export default function HistoryPage() {
     return groupBy === 'category'
       ? entries.sort((a, b) => (b.expenses + b.income) - (a.expenses + a.income))
       : entries.sort((a, b) => b.key.localeCompare(a.key));
-  }, [filteredTransactions, groupBy, profile?.paymentAccounts, incomeContext]);
+  }, [filteredTransactions, groupBy, derivedAccounts, incomeContext]);
 
   // The header's In/Out/Net — from the ENGINE, so History can never disagree with
   // Flow or the XLSX export. In = earned income matched to approved sources only;
   // a refund or an unreviewed credit is not "In".
   const totals = useMemo(() => {
-    const income = sumIncomeCents(filteredTransactions, profile?.paymentAccounts, incomeContext) / 100;
-    const expenses = sumExpenseCents(filteredTransactions, profile?.paymentAccounts, incomeContext) / 100;
+    const income = sumIncomeCents(filteredTransactions, derivedAccounts, incomeContext) / 100;
+    const expenses = sumExpenseCents(filteredTransactions, derivedAccounts, incomeContext) / 100;
     return { income, expenses, net: income - expenses };
-  }, [filteredTransactions, profile?.paymentAccounts, incomeContext]);
+  }, [filteredTransactions, derivedAccounts, incomeContext]);
 
   // Per-account summary — appears when History is filtered to one account. The metrics
   // shown differ by account type (loan / credit card / bank), computed from the filtered
   // rows with the same classifier the rest of the app uses.
   const accountSummary = useMemo(() => {
-    const acct = profile?.paymentAccounts?.find(a => a.id === accountFilter);
+    const acct = derivedAccounts.find(a => a.id === accountFilter);
     if (!acct) return null;
     // Earned/spent from the engine; transfers and rewards counted separately.
-    const spent = sumExpenseCents(filteredTransactions, profile?.paymentAccounts, incomeContext) / 100;
-    const income = sumIncomeCents(filteredTransactions, profile?.paymentAccounts, incomeContext) / 100;
+    const spent = sumExpenseCents(filteredTransactions, derivedAccounts, incomeContext) / 100;
+    const income = sumIncomeCents(filteredTransactions, derivedAccounts, incomeContext) / 100;
     let inbound = 0, outbound = 0, rewards = 0;
     filteredTransactions.forEach(t => {
-      const cls = classifyTransaction(t, profile?.paymentAccounts);
+      const cls = classifyTransaction(t, derivedAccounts);
       if (cls === 'income' && isReward(t)) rewards += t.amount;
       else if (cls === 'transfer') {
-        if (isPositive(t, profile?.paymentAccounts)) inbound += t.amount;
+        if (isPositive(t, derivedAccounts)) inbound += t.amount;
         else outbound += t.amount;
       }
     });
     return { acct, spent, income, inbound, outbound, rewards };
-  }, [accountFilter, filteredTransactions, profile?.paymentAccounts, incomeContext]);
+  }, [accountFilter, filteredTransactions, derivedAccounts, incomeContext]);
 
   // Calculate monthly averages for runway
   /**
@@ -275,23 +287,22 @@ export default function HistoryPage() {
     if (past.length === 0) {
       return { avgExpenses: profile?.monthlyBudget || 3000, avgIncome: 0 };
     }
-    const avg = monthlyAverages(past, profile?.paymentAccounts || [], 6, incomeContext);
+    const avg = monthlyAverages(past, derivedAccounts, 6, incomeContext);
     // A brand-new ledger has no full prior month; fall back rather than show a zero
     // runway on real data.
     if (avg.spending === 0 && avg.income === 0) {
       const months = new Set(past.map(t => format(parseISO(t.date), 'yyyy-MM'))).size || 1;
       // STATE-002: counts what the owner confirmed as spending, like every other total.
-      const spent = sumExpenseCents(past, profile?.paymentAccounts, incomeContext) / 100;
+      const spent = sumExpenseCents(past, derivedAccounts, incomeContext) / 100;
       return { avgExpenses: spent / months, avgIncome: 0 };
     }
     return { avgExpenses: avg.spending, avgIncome: avg.income };
-  }, [transactions, profile?.monthlyBudget, profile?.paymentAccounts, incomeContext]);
+  }, [transactions, profile?.monthlyBudget, derivedAccounts, incomeContext]);
 
   // Generate forecast for runway. Balances derived from linked transactions so the
   // runway starts from the real current cash, not the stored opening figure.
   const forecast = useMemo(() => {
     if (!profile) return null;
-    const derivedAccounts = withDerivedBalances(profile?.paymentAccounts || [], transactions, incomeContext);
     const currentCash = calculateCurrentCash(derivedAccounts);
     return generateForecast(
       currentCash,
@@ -305,7 +316,7 @@ export default function HistoryPage() {
     // STATE-001 (#105): `incomeContext` MUST be in this list. It was not, so this memo
     // held a forecast computed under the previous policy — flip the pending setting and
     // History's runway silently kept the old answer until something else invalidated it.
-  }, [profile, transactions, incomeContext]);
+  }, [profile, transactions, incomeContext, derivedAccounts]);
 
   const handleDelete = async (id: string) => {
     // A card payment / internal move is TWO paired halves. Deleting only one desyncs
@@ -349,7 +360,7 @@ export default function HistoryPage() {
     (accountFilter !== 'all' ? 1 : 0) +
     (categoryFilter !== 'all' ? 1 : 0);
 
-  const currentCash = calculateCurrentCash(withDerivedBalances(profile?.paymentAccounts || [], transactions, incomeContext));
+  const currentCash = calculateCurrentCash(derivedAccounts);
   // ACTIVE sources only: getIncomeSources() now returns paused sources too (so they
   // can be resumed), and a paused source is not money arriving.
   const monthlyIncome = monthlyIncomeOf(profile?.incomeSources?.filter((i) => i.isActive) ?? []) || monthlyStats.avgIncome;
@@ -785,7 +796,7 @@ export default function HistoryPage() {
                               <div className="flex items-center gap-4">
                                 {/* Smart display based on transaction type and account */}
                                 {(() => {
-                                  const positive = isPositive(txn, profile?.paymentAccounts);
+                                  const positive = isPositive(txn, derivedAccounts);
                                   return (
                                     <p className={`font-semibold ${txn.pending ? 'text-[var(--foreground-muted)]' : positive ? 'text-emerald-500' : 'text-[var(--foreground)]'}`}>
                                       {positive ? '+' : '-'}{formatMoney(txn.amount, 'USD', 2)}

@@ -14,6 +14,7 @@ import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import ChartSrTable from '@/components/ChartSrTable';
 import { classifyTransaction, interpretTransaction, isPosted, isPositive, isReward, sumExpenseCents, sumIncomeCents } from '@/lib/classify';
+import { withDerivedBalances } from '@/lib/forecast';
 import { matchTransfers } from '@/lib/transfers';
 import { displayCategory } from '@/types';
 import { CAT_COLORS } from '@/lib/palette';
@@ -39,7 +40,15 @@ export default function CashflowTab() {
   // Calendar's inheritance: tap a month bar, see that month's days.
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
 
-  const accounts = profile?.paymentAccounts;
+  // CRITICAL-4 (#14): the feedless double-count guard lives on `feedCoveredPeriods`,
+  // attached IN MEMORY by withDerivedBalances() — never on the raw profile accounts.
+  // Passing profile?.paymentAccounts straight to classify here meant this tab's
+  // guard never tripped (measured: this tab disagreeing with another by 2.3x on the
+  // same month).
+  const accounts = useMemo(
+    () => withDerivedBalances(profile?.paymentAccounts || [], transactions, incomeContext),
+    [profile?.paymentAccounts, transactions, incomeContext]
+  );
   // STATE-002 (#104): two questions, two helpers, never one blanket replacement.
   // `cls` = WHAT KIND of row (pairing, labels, the reward arm below). It cannot see the
   // owner's confirmed reviews, and for those uses it must not.

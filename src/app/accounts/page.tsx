@@ -127,6 +127,7 @@ export default function AccountsPage() {
     dueDate: '',
     lastFourDigits: '',
     paymentFromAccountId: '', // Which checking account pays this card/loan
+    feedless: false, // #14: no transaction feed of its own — a payment IS the expense
     // Loan specific
     originalAmount: '',
     monthlyPayment: '',
@@ -244,6 +245,7 @@ export default function AccountsPage() {
       dueDate: account.dueDate?.toString() || '',
       lastFourDigits: account.lastFourDigits || '',
       paymentFromAccountId: account.paymentFromAccountId || '',
+      feedless: account.feedless || false,
       originalAmount: account.originalAmount?.toString() || '',
       monthlyPayment: account.monthlyPayment?.toString() || '',
       loanTerm: account.loanTerm?.toString() || '',
@@ -268,7 +270,15 @@ export default function AccountsPage() {
     const isLoan = accountForm.type === 'personal_loan';
     const isCard = accountForm.type === 'credit_card';
     const needsPaymentSource = isCard || isLoan;
-    
+
+    // #14 (CRITICAL-3): a feedless card's derived balance is opening ± payments —
+    // there is no feed, so nothing else ever anchors it. An UNANCHORED feedless card
+    // starts from an invented $0 and goes NEGATIVE the moment a payment is recorded
+    // (forecast.ts clamps that at $0 defensively, but a negative-then-clamped "owed"
+    // is still not a real number). Refuse the save rather than invent an anchor —
+    // the Save button's `disabled` below is the same guard, this is the belt.
+    if (isCard && accountForm.feedless && !accountForm.balance.trim()) return;
+
     const accountData = {
       name: accountForm.name,
       type: accountForm.type,
@@ -318,6 +328,15 @@ export default function AccountsPage() {
       dueDate: (isCard || isLoan) ? (accountForm.dueDate ? parseInt(accountForm.dueDate) : undefined) : undefined,
       lastFourDigits: accountForm.lastFourDigits || undefined,
       paymentFromAccountId: needsPaymentSource && accountForm.paymentFromAccountId ? accountForm.paymentFromAccountId : undefined,
+      // #14: only meaningful on a card — a payment into it stands in for the
+      // itemized purchases there is no feed to supply. See src/lib/classify.ts.
+      //
+      // IMPORTANT-5: an explicit `false`, never `undefined` — updateAccount()
+      // (firestore.ts) strips `undefined` keys entirely (Firestore rejects
+      // `undefined`), so unticking the checkbox used to write NOTHING: the stored
+      // `feedless: true` survived untouched, silently re-arming the spending rule
+      // on reload even though the UI looked like it had turned off.
+      feedless: isCard && accountForm.feedless,
       originalAmount: isLoan ? parseFloat(accountForm.originalAmount) || undefined : undefined,
       monthlyPayment: isLoan ? parseFloat(accountForm.monthlyPayment) || undefined : undefined,
       loanTerm: isLoan ? parseInt(accountForm.loanTerm) || undefined : undefined,
@@ -375,6 +394,7 @@ export default function AccountsPage() {
       dueDate: '',
       lastFourDigits: '',
       paymentFromAccountId: '',
+      feedless: false,
       originalAmount: '',
       monthlyPayment: '',
       loanTerm: '',
@@ -711,6 +731,16 @@ export default function AccountsPage() {
                               {account.statementDate && `Statement: ${account.statementDate}${getOrdinalSuffix(account.statementDate)}`}
                               {account.statementDate && account.dueDate && ' • '}
                               {account.dueDate && `Due: ${account.dueDate}${getOrdinalSuffix(account.dueDate)}`}
+                            </p>
+                          )}
+                          {/* #14 round 4: the ONLY disclosure a feedless card's coverage guard gets
+                              (see the `ponytail:` note at src/lib/classify.ts:612) — without it a
+                              chronically sparse feed (a token row every month) silently guards every
+                              month's stand-in payment, and the owner has no way to see why the
+                              card's spend contribution collapsed. Reads `feedCoveredPeriods` directly. */}
+                          {account.feedless && !!account.feedCoveredPeriods?.size && (
+                            <p className="text-xs text-[var(--foreground-muted)]">
+                              {account.feedCoveredPeriods.size} {account.feedCoveredPeriods.size === 1 ? 'month' : 'months'} covered by your card's own data
                             </p>
                           )}
                           {/* Show linked payment account */}
@@ -1151,6 +1181,22 @@ export default function AccountsPage() {
                       className="input-field"
                     />
                   </div>
+                  <label className="flex items-start gap-2 p-3 rounded-control bg-[var(--accent-primary)]/5 border border-[var(--accent-primary)]/20 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={accountForm.feedless}
+                      onChange={(e) => setAccountForm({ ...accountForm, feedless: e.target.checked })}
+                      className="mt-0.5"
+                    />
+                    <span className="text-sm text-[var(--foreground-secondary)]">
+                      <span className="font-medium text-[var(--foreground)]">No transaction feed</span>
+                      {' '}(e.g. an Amazon Store Card). Each payment INTO this card counts as the expense
+                      itself, on the payment date. Set a starting balance below so it has something to
+                      anchor to, and enter the last four digits so a payment naming this card is never
+                      mistaken for one of your other cards. If this card later gains a feed, its own
+                      itemized rows automatically take over and payments stop double-counting.
+                    </span>
+                  </label>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">Statement Date</label>
@@ -1213,11 +1259,22 @@ export default function AccountsPage() {
 
               <button
                 onClick={handleSaveAccount}
-                disabled={!accountForm.name}
+                disabled={
+                  !accountForm.name ||
+                  // #14 (CRITICAL-3): a feedless card without a starting balance has
+                  // nothing to anchor its derived balance to — see the comment in
+                  // handleSaveAccount above.
+                  (accountForm.type === 'credit_card' && accountForm.feedless && !accountForm.balance.trim())
+                }
                 className="btn-primary w-full disabled:opacity-50"
               >
                 {editingAccount ? 'Update Account' : 'Add Account'}
               </button>
+              {accountForm.type === 'credit_card' && accountForm.feedless && !accountForm.balance.trim() && (
+                <p className="text-xs text-[var(--accent-danger)] -mt-2">
+                  Set a starting balance above — a no-feed card needs one to anchor its balance.
+                </p>
+              )}
             </div>
           </div>
         </div>
