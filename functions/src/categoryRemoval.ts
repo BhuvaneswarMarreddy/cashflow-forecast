@@ -5,6 +5,18 @@
  * from mobile (which could only render remove_category as an explanation, not
  * an action). This callable does the whole sweep server-side, one request.
  *
+ * WHAT "the whole sweep" covers, exactly — five stores, every row that still
+ * carries `value` reassigned to `reassignTo`, plus the category entry itself
+ * archived:
+ *   - transactions[].category
+ *   - rules[].set.category
+ *   - bills[].category
+ *   - settings.categoryBudgets[].categoryId
+ *   - plannedTransactions/{id}.category
+ * The first version only covered the first three (this doc comment used to
+ * claim that was everything); categoryBudgets and plannedTransactions were
+ * left pointing at an archived category until this fix.
+ *
  * Same split as decisions.ts: a pure core (`buildRemovalPlan`,
  * `validateRemoveCategoryOp`, `chunk`) unit-tested without an emulator, and a
  * thin auth + read + write shell around it, following `homeSnapshot`'s auth
@@ -14,7 +26,7 @@
 import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 
-import type { CustomCategory } from '@/types';
+import type { CategoryBudget, CustomCategory } from '@/types';
 import { EXPENSE_CATEGORIES, type ResolvedCategory } from '@/types';
 
 import { readLedger, type Ledger } from './snapshot';
@@ -38,19 +50,43 @@ export interface RemovalPlan {
   transactionIds: string[];
   ruleIds: string[];
   billIds: string[];
+  /** Indexes into `extra.categoryBudgets` (== `settings.categoryBudgets`) whose
+   *  `categoryId` is `value` — an array on the user doc, not a collection of
+   *  docs, so there is no id to collect, only a position to patch. */
+  budgetIndexes: number[];
+  plannedTransactionIds: string[];
 }
 
 /**
- * Everything currently filed under `value` — same three collections
- * DataChatSheet.tsx's own `planCategoryRemoval` previews client-side, computed
- * fresh here from the server's own ledger read so the callable never trusts a
+ * Everything currently filed under `value` — across FIVE stores. Three come
+ * straight off `ledger` (same three DataChatSheet.tsx's own `planCategoryRemoval`
+ * previews client-side): transactions, rules (`set.category`), bills. The other
+ * two — `settings.categoryBudgets` and `plannedTransactions` — live outside
+ * `Ledger` entirely (`readLedger`, snapshot.ts, never fetches either), so they
+ * arrive as `extra`, read separately by the callable below and defaulted to
+ * empty so every existing ledger-only call site keeps compiling unchanged.
+ *
+ * Computed fresh from the server's own reads so the callable never trusts a
  * client-supplied count.
  */
-export function buildRemovalPlan(ledger: Ledger, value: string): RemovalPlan {
+export function buildRemovalPlan(
+  ledger: Ledger,
+  value: string,
+  extra: {
+    categoryBudgets: readonly { categoryId: string }[];
+    plannedTransactions: readonly { id: string; category: string }[];
+  } = { categoryBudgets: [], plannedTransactions: [] },
+): RemovalPlan {
   return {
     transactionIds: ledger.transactions.filter((t) => t.category === value).map((t) => t.id),
     ruleIds: ledger.rules.filter((r) => r.set.category === value).map((r) => r.id),
     billIds: ledger.bills.filter((b) => b.category === value).map((b) => b.id),
+    budgetIndexes: extra.categoryBudgets
+      .map((b, i) => (b.categoryId === value ? i : -1))
+      .filter((i) => i >= 0),
+    plannedTransactionIds: extra.plannedTransactions
+      .filter((p) => p.category === value)
+      .map((p) => p.id),
   };
 }
 
@@ -118,20 +154,39 @@ export const removeCategory = onCall({ cors: true }, async (request) => {
   // decisions.ts's applyDecision for the same reasoning.
   validateRemoveCategoryOp(raw);
 
-  const ledger = await readLedger(request.auth.uid);
-  const { value, reassignTo } = validateRemoveCategoryOp(raw, ledger.categories);
-  const plan = buildRemovalPlan(ledger, value);
-
   const db = getFirestore();
   const user = db.collection('users').doc(request.auth.uid);
+
+  // categoryBudgets (an array on the user doc) and plannedTransactions (its own
+  // subcollection) live outside `Ledger` — readLedger never fetches either —
+  // so they're read here directly, in parallel with the ledger read itself.
+  const [ledger, userDoc, plannedSnap] = await Promise.all([
+    readLedger(request.auth.uid),
+    user.get(),
+    user.collection('plannedTransactions').get(),
+  ]);
+  const { value, reassignTo } = validateRemoveCategoryOp(raw, ledger.categories);
+
+  // Read raw settings fresh rather than reusing ledger.categories, which is the
+  // RESOLVED set (13 defaults folded in) and must never itself be persisted back.
+  const settings = (userDoc.data()?.settings ?? {}) as {
+    categories?: CustomCategory[];
+    categoryBudgets?: CategoryBudget[];
+  };
+  const categoryBudgets = Array.isArray(settings.categoryBudgets) ? settings.categoryBudgets : [];
+  const plannedTransactions = plannedSnap.docs.map((d) => ({
+    id: d.id,
+    category: (d.data() as { category?: string }).category ?? '',
+  }));
+
+  const plan = buildRemovalPlan(ledger, value, { categoryBudgets, plannedTransactions });
 
   const writes: { ref: FirebaseFirestore.DocumentReference; patch: Record<string, unknown> }[] = [
     ...plan.transactionIds.map((id) => ({
       ref: user.collection('transactions').doc(id),
       patch: { category: reassignTo },
     })),
-    // Dot-path update — same field TransactionContext.updateRuleCategoryAwaited
-    // writes client-side — touches only `set.category`, never the rest of the
+    // Dot-path update — touches only `set.category`, never the rest of the
     // rule doc (match, enabled, createdAt).
     ...plan.ruleIds.map((id) => ({
       ref: user.collection('rules').doc(id),
@@ -139,6 +194,10 @@ export const removeCategory = onCall({ cors: true }, async (request) => {
     })),
     ...plan.billIds.map((id) => ({
       ref: user.collection('bills').doc(id),
+      patch: { category: reassignTo },
+    })),
+    ...plan.plannedTransactionIds.map((id) => ({
+      ref: user.collection('plannedTransactions').doc(id),
       patch: { category: reassignTo },
     })),
   ];
@@ -150,14 +209,25 @@ export const removeCategory = onCall({ cors: true }, async (request) => {
   }
 
   // Archived, not deleted — a row that (despite the sweep above) still carries
-  // the old value must still resolve a label. Read raw settings.categories
-  // fresh rather than reusing ledger.categories, which is the RESOLVED set
-  // (13 defaults folded in) and must never itself be persisted back.
-  const userDoc = await user.get();
-  const settings = (userDoc.data()?.settings ?? {}) as { categories?: CustomCategory[] };
-  const current = Array.isArray(settings.categories) ? settings.categories : [];
-  const nextCategories = current.map((c) => (c.value === value ? { ...c, archived: true } : c));
-  await user.update({ 'settings.categories': nextCategories });
+  // the old value must still resolve a label.
+  const currentCategories = Array.isArray(settings.categories) ? settings.categories : [];
+  const nextCategories = currentCategories.map((c) => (c.value === value ? { ...c, archived: true } : c));
+  // categoryBudgets rows move the same way transactions/rules/bills do — only
+  // the categoryId they point at changes, monthlyLimit/isEnabled untouched.
+  const nextBudgets = categoryBudgets.map((b, i) =>
+    plan.budgetIndexes.includes(i) ? { ...b, categoryId: reassignTo } : b);
+
+  // ONE update, independent dot-paths. settings.categories and
+  // settings.categoryBudgets never touch each other's field, so writing them
+  // together — rather than two sequential user.update() calls — can never let
+  // one clobber the other, or any other settings.* field neither one names.
+  // categoryBudgets is written back only when it already existed — an owner
+  // who never set a budget must not gain an empty `categoryBudgets: []` field
+  // just from removing a category.
+  await user.update({
+    'settings.categories': nextCategories,
+    ...(categoryBudgets.length > 0 ? { 'settings.categoryBudgets': nextBudgets } : {}),
+  });
 
   // Immutable trail, same shape firestore.rules:239-244 requires and the same
   // pattern decisions.ts's applyDecision uses.
@@ -172,6 +242,8 @@ export const removeCategory = onCall({ cors: true }, async (request) => {
     transactions: plan.transactionIds.length,
     rules: plan.ruleIds.length,
     bills: plan.billIds.length,
+    budgets: plan.budgetIndexes.length,
+    plannedTransactions: plan.plannedTransactionIds.length,
   };
 
   // Counts only — never the rows or the category value itself. Same discipline

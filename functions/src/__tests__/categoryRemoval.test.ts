@@ -1,6 +1,6 @@
 import { BATCH_LIMIT, buildRemovalPlan, chunk, validateRemoveCategoryOp } from '../categoryRemoval';
 import { EXPENSE_CATEGORIES } from '@/types';
-import type { ResolvedCategory } from '@/types';
+import type { CategoryBudget, PlannedTransaction, ResolvedCategory } from '@/types';
 import type { Ledger } from '../snapshot';
 
 // Same idea as decisions.test.ts's fixture: a plain object shaped like the bits
@@ -28,12 +28,62 @@ describe('buildRemovalPlan — exactly the rows filed under `value`, nothing els
       transactionIds: ['t1', 't2'],
       ruleIds: ['r1'],
       billIds: ['b1'],
+      budgetIndexes: [],
+      plannedTransactionIds: [],
     });
   });
 
   it('a category nothing is filed under returns empty everywhere', () => {
     expect(buildRemovalPlan(ledger, 'no-such-category')).toEqual({
-      transactionIds: [], ruleIds: [], billIds: [],
+      transactionIds: [], ruleIds: [], billIds: [], budgetIndexes: [], plannedTransactionIds: [],
+    });
+  });
+});
+
+/**
+ * The sweep used to stop at transactions/rules/bills. Two more stores hold a
+ * removable category value and were left pointing at an archived one:
+ * settings.categoryBudgets[].categoryId (BudgetSettingsPanel.tsx) and
+ * plannedTransactions/{id}.category (PlannedPaymentsPanel.tsx). Neither lives
+ * on `Ledger` (readLedger never fetches either), so they arrive as `extra`,
+ * read separately by the callable.
+ */
+describe('buildRemovalPlan — categoryBudgets and plannedTransactions sweep', () => {
+  const categoryBudgets = [
+    { categoryId: 'vacations', monthlyLimit: 200, isEnabled: true },
+    { categoryId: 'food', monthlyLimit: 400, isEnabled: true },
+    { categoryId: 'vacations', monthlyLimit: 50, isEnabled: false },
+  ] as unknown as CategoryBudget[];
+  const plannedTransactions = [
+    { id: 'p1', category: 'vacations' },
+    { id: 'p2', category: 'food' },
+  ] as unknown as PlannedTransaction[];
+
+  it('collects the index of every budget row and the id of every planned row filed under `value`', () => {
+    const plan = buildRemovalPlan(ledger, 'vacations', { categoryBudgets, plannedTransactions });
+    expect(plan.budgetIndexes).toEqual([0, 2]);
+    expect(plan.plannedTransactionIds).toEqual(['p1']);
+  });
+
+  it('a budget/planned row filed under a DIFFERENT category is left out — untouched', () => {
+    const plan = buildRemovalPlan(ledger, 'vacations', { categoryBudgets, plannedTransactions });
+    expect(plan.budgetIndexes).not.toContain(1); // the 'food' budget at index 1
+    expect(plan.plannedTransactionIds).not.toContain('p2'); // the 'food' planned row
+  });
+
+  it('a category nothing is filed under returns empty budget/planned lists too', () => {
+    const plan = buildRemovalPlan(ledger, 'no-such-category', { categoryBudgets, plannedTransactions });
+    expect(plan.budgetIndexes).toEqual([]);
+    expect(plan.plannedTransactionIds).toEqual([]);
+  });
+
+  it('omitted `extra` defaults to no budget/planned rows in the plan', () => {
+    expect(buildRemovalPlan(ledger, 'vacations')).toEqual({
+      transactionIds: ['t1', 't2'],
+      ruleIds: ['r1'],
+      billIds: ['b1'],
+      budgetIndexes: [],
+      plannedTransactionIds: [],
     });
   });
 });

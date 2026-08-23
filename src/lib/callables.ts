@@ -83,8 +83,16 @@ export async function undoDecision(decisionId: string): Promise<{ ok: true }> {
  * functions/src/categoryRemoval.ts's own return shape, redefined here for the
  * same reason ChangeSummary above is: that file lives in the functions/ build,
  * outside this app's `@/*` path. Counts only — never the rows themselves.
+ * Five stores, matching the callable's own sweep exactly: transactions, rules,
+ * bills, settings.categoryBudgets entries, and plannedTransactions docs.
  */
-export type CategoryRemovalCounts = { transactions: number; rules: number; bills: number };
+export type CategoryRemovalCounts = {
+  transactions: number;
+  rules: number;
+  bills: number;
+  budgets: number;
+  plannedTransactions: number;
+};
 
 /**
  * Calls the removeCategory callable (functions/src/categoryRemoval.ts,
