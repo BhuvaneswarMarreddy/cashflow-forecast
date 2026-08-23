@@ -25,9 +25,12 @@ import {
   inferAccountType,
   matchAccountByName,
   parseCsv,
+  type ParsedTransaction,
 } from '@/lib/csv-import';
 import { findTwin, fingerprintOfRow, mergeFields } from '@/lib/fingerprint';
 import type { PaymentAccount, Transaction } from '@/types';
+
+import { checkRateLimit, LIMITS } from './rate-limit';
 
 /** Firestore's own ceiling is 500 operations per batch. */
 const BATCH_LIMIT = 450;
@@ -46,10 +49,48 @@ interface Request {
 const toIso = (value: unknown): string =>
   value instanceof Timestamp ? value.toDate().toISOString() : String(value ?? '');
 
+/**
+ * This is an Admin-SDK path — firestore.rules never runs, so this file is the
+ * only gate on what gets written. The client-SDK equivalent enforces
+ * `isValidString(title, 1, 200)`; a CSV cell has no length bound of its own
+ * (only the whole file's 8MB cap), so an unclipped mega-cell would be written
+ * once and re-read on every ledger load forever.
+ */
+const FIELD_MAX = 200;
+const clip = (value: string | undefined): string | undefined =>
+  value === undefined ? undefined : value.slice(0, FIELD_MAX);
+
+/**
+ * Pure, exported for testing without an emulator — same reasoning as
+ * `applyDecisionCore`/`validateOp` in decisions.ts.
+ */
+export function buildRow(parsed: ParsedTransaction, account: PaymentAccount | undefined) {
+  return {
+    title: parsed.title.slice(0, FIELD_MAX),
+    amount: parsed.amount,
+    type: parsed.type,
+    transferDirection: parsed.transferDirection,
+    category: parsed.category,
+    sourceCategory: clip(parsed.sourceCategory),
+    paymentMethod: account?.provider ?? parsed.paymentMethod,
+    date: parsed.date,
+    // Undefined rather than '' / false: the write merges, so only fields the
+    // CSV genuinely carries should overwrite what is already stored.
+    description: clip(parsed.description || undefined),
+    merchant: clip(parsed.merchant),
+    accountId: account?.id,
+  };
+}
+
 export const importCsv = onCall({ cors: true, memory: '512MiB', timeoutSeconds: 300 }, async (request) => {
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Sign in to import.');
   }
+  // Same slot as aiDecision/aiChat/parseReceipt: right after auth, before any
+  // work. See LIMITS.importCsv for why this one is rate-limited too — a
+  // retrying client can otherwise create unbounded duplicate rule/account/
+  // transaction writes from one heavy op (9 parallel reads, a write batch).
+  await checkRateLimit(request.auth.uid, 'importCsv', LIMITS.importCsv);
 
   const { content, filename } = (request.data ?? {}) as Request;
   if (!content) {
@@ -182,21 +223,7 @@ export const importCsv = onCall({ cors: true, memory: '512MiB', timeoutSeconds: 
 
   for (const parsed of fresh) {
     const account = parsed.csvAccount ? resolved.get(parsed.csvAccount) : fallback;
-    const row = {
-      title: parsed.title,
-      amount: parsed.amount,
-      type: parsed.type,
-      transferDirection: parsed.transferDirection,
-      category: parsed.category,
-      sourceCategory: parsed.sourceCategory,
-      paymentMethod: account?.provider ?? parsed.paymentMethod,
-      date: parsed.date,
-      // Undefined rather than '' / false: the write merges, so only fields the
-      // CSV genuinely carries should overwrite what is already stored.
-      description: parsed.description || undefined,
-      merchant: parsed.merchant,
-      accountId: account?.id,
-    };
+    const row = buildRow(parsed, account);
 
     const twin = findTwin(row, existing, 3, claimed);
     if (!twin) {
