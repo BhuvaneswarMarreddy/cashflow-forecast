@@ -154,7 +154,10 @@ export function calculateBudgetStatuses(
         percentUsed,
         projectedMonthEnd,
         isOverBudget: spent > budget.monthlyLimit,
-        isAtRisk: projectedMonthEnd > budget.monthlyLimit && !spent // Will likely exceed
+        // On pace to exceed by month end, but not there yet — `!spent` here always meant
+        // "spent === 0", and projectMonthEndSpending(0, …) always returns 0, so this could
+        // only fire when monthlyLimit < 0. Meant: over budget and at risk are exclusive.
+        isAtRisk: projectedMonthEnd > budget.monthlyLimit && spent <= budget.monthlyLimit
       };
     })
     .sort((a, b) => b.percentUsed - a.percentUsed); // Sort by percent used (highest first)
