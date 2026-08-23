@@ -107,6 +107,10 @@ describe('FEEDLESS-CARD-001: the double-count guard is a PER-PAYMENT predicate (
     expect(i.expense).toBe('excluded');
     expect(i.financialMeaning).toBe('card_payment'); // reverts to the ordinary settlement reading
     expect(i.reason).toMatch(/already has itemized rows through 2026-04-05/);
+    // IMPORTANT-6: the reason must not claim a review flag nothing sets — this
+    // row never reaches selectInflowReviewQueue() (financialMeaning is
+    // 'card_payment', not 'unknown_inflow').
+    expect(i.reason).not.toMatch(/flagged for review/);
   });
 
   it("a payment dated ON the row's own day (inclusive boundary) also stops counting", () => {

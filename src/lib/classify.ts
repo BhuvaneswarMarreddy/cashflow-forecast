@@ -604,7 +604,12 @@ export function interpretTransaction(
   // payment that would otherwise count as spend does not, once the card it
   // names already has itemized rows of its own for this period.
   if (feedGuardTripped) {
-    reason += `; ${feedlessTarget!.name} already has itemized rows through ${feedlessTarget!.feedCoverageThrough} — this payment is excluded to avoid double-counting, flagged for review`;
+    // IMPORTANT-6: this used to claim the row was "flagged for review" — nothing
+    // ever flagged it. selectInflowReviewQueue() only surfaces `unknown_inflow`
+    // rows, and a guarded feedless payment reverts to `card_payment` (below),
+    // which never reaches that queue. Say what actually happens instead: it
+    // reverts to an ordinary transfer, same as any other card settlement.
+    reason += `; ${feedlessTarget!.name} already has itemized rows through ${feedlessTarget!.feedCoverageThrough} — this payment reverts to an ordinary card-payment transfer, not counted as spend, to avoid double-counting those rows`;
   }
 
   // A CONFIRMED meaning decides its own treatment; a DERIVED one still defers to the
