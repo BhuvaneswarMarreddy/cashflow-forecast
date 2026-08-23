@@ -226,6 +226,24 @@ describe('FIN-RECOVERY-UI-001 · confirmation and editing (F1-F8)', () => {
     expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
   });
 
+  it('F9 — a rejected write announces failure, not success, and the item stays in the queue', async () => {
+    // saveLink signals a rejected write by RESOLVING { ok: false }, not throwing —
+    // this is exactly what the write-honesty audit found onDecide was not checking.
+    mockSaveLink.mockResolvedValue({ ok: false, ruleId: 'V4' });
+    await openFirstItem();
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm links' }));
+
+    await waitFor(() =>
+      expect(screen.getByText('That allocation could not be saved. Please try again.')).toBeInTheDocument()
+    );
+    expect(screen.queryByText('Confirmed — $1,200.00 marked as returned.')).toBeNull();
+    // Nothing landed, so there is nothing to undo and no decision was recorded.
+    expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
+    expect(mockSaveReviewCandidate).not.toHaveBeenCalled();
+    expect(mockRecordCandidateDecision).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /back from DEMO AMAZON/ })).toBeInTheDocument();
+  });
+
   it('F8 — no transaction object is mutated in place, asserted by frozen fixtures', async () => {
     const before = JSON.stringify(LEDGER);
     await openFirstItem();
