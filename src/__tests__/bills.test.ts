@@ -452,3 +452,42 @@ describe('installment plans expire without a re-record', () => {
     expect(isCharging(mk(20, 'monthly'), '2030-01-01')).toBe(true);
   });
 });
+
+/**
+ * Review of the first cut of this fix caught a defect worse than the bug:
+ * anchoring on `createdAt` retired a bill EARLY and silently whenever the owner
+ * corrected its count, because `updateBill` strips `createdAt` and `update_bill`
+ * is the documented way to correct one.
+ */
+describe('installment anchor survives a correction', () => {
+  test('correcting the count re-anchors instead of retiring the bill early', () => {
+    const corrected = mk(45.79, 'monthly', {
+      installmentsRemaining: 8,
+      createdAt: '2026-01-10T00:00:00.000Z',
+      updatedAt: '2026-08-10T00:00:00.000Z', // the day the count was corrected
+    });
+    // 8 payments from the correction runs to 2027-04-10, not 2026-09-10.
+    expect(isCharging(corrected, '2026-12-01')).toBe(true);
+    expect(isCharging(corrected, '2027-04-09')).toBe(true);
+    expect(isCharging(corrected, '2027-04-11')).toBe(false);
+  });
+
+  test('a malformed stamp disables expiry rather than throwing', () => {
+    // `format()` on an Invalid Date throws RangeError, which would take the
+    // whole homeSnapshot callable — and the phone's Home screen — down.
+    const broken = mk(20, 'monthly', {
+      installmentsRemaining: 3,
+      createdAt: '',
+      updatedAt: '',
+    });
+    expect(() => isCharging(broken, '2026-08-07')).not.toThrow();
+    expect(isCharging(broken, '2026-08-07')).toBe(true);
+  });
+
+  test('a non-numeric count cannot retire a bill instantly', () => {
+    const nulled = mk(20, 'monthly', {
+      installmentsRemaining: null as unknown as number,
+    });
+    expect(isCharging(nulled, '2026-08-07')).toBe(true);
+  });
+});
