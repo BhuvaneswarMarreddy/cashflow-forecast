@@ -136,7 +136,13 @@ describe('buildChatMessages', () => {
     // CATEGORY, THIS MONTH / LAST MONTH) — this fixture supplies no `summary`, so those
     // render as empty-list headers only, not maxed rows. Measured worst-case went
     // 20450 -> 22245 (+1795 chars).
-    expect(system.length).toBeLessThan(22500);
+    // DROPPED from 22500 (device-reported gap fix): this fixture supplies no bills/
+    // upcoming/recurring, so BILLS REGISTER and DETECTED RECURRING MERCHANTS now omit
+    // their section entirely (ABSENT, same gate UPCOMING already had) instead of
+    // rendering a header + "(none recorded)"/"(none detected)" placeholder. The
+    // ANSWERING QUESTIONS ABOUT MONEY paragraph was also unified across all three
+    // sections, a close wash. Measured worst-case went 22245 -> 21890 (-355 chars).
+    expect(system.length).toBeLessThan(22200);
   });
 
   it('survives a garbage context without throwing', () => {
@@ -263,11 +269,20 @@ describe('ChatContext — bills/upcoming/recurring sections (#22)', () => {
     expect(system).toContain('15.49');
   });
 
-  it('says so explicitly when no bills/upcoming/recurring were supplied', () => {
+  /**
+   * The device-reported gap, closed for BILLS/RECURRING too, not just UPCOMING: a client
+   * that never sends a section must never be told it's "(none recorded)"/"(none
+   * detected)" — that's a confident, false claim of emptiness, not "unavailable". Before
+   * this fix these two sections rendered their placeholder even when wholly absent from
+   * `context` (see the ABSENT-vs-EMPTY describe blocks below for the replacement
+   * behaviour, mirroring UPCOMING's existing gate).
+   */
+  it('omits all three app-computed sections, and says so, when none were supplied at all', () => {
     const system = buildChatMessages({ message: 'hi' })[0].content;
-    expect(system).toContain('BILLS REGISTER');
-    expect(system).toMatch(/\(none recorded\)/);
-    expect(system).toMatch(/\(none detected\)/);
+    expect(system).not.toContain('BILLS REGISTER — recorded recurring obligations');
+    expect(system).not.toContain('DETECTED RECURRING MERCHANTS — pattern detection');
+    expect(system).not.toContain('UPCOMING — bills and forecasted payments');
+    expect(system).toMatch(/a section does not appear.*this client cannot see it/i);
   });
 
   /**
@@ -283,7 +298,7 @@ describe('ChatContext — bills/upcoming/recurring sections (#22)', () => {
       const system = buildChatMessages({ message: 'what are my upcoming payments', context: ctx })[0].content;
       expect(system).not.toContain('UPCOMING — bills and forecasted payments');
       // The teaching text always travels, so the model knows what an absent section means.
-      expect(system).toMatch(/UPCOMING section does not appear.*this client cannot see it/i);
+      expect(system).toMatch(/a section does not appear.*this client cannot see it/i);
       expect(system).toMatch(/say exactly that.*I can't see upcoming payments on this client/i);
     });
 
@@ -300,6 +315,46 @@ describe('ChatContext — bills/upcoming/recurring sections (#22)', () => {
       expect(system).toContain('UPCOMING — bills and forecasted payments');
       expect(system).toContain('Verizon Wireless');
       expect(system).toContain('2026-09-01');
+    });
+  });
+
+  /**
+   * Same gate as UPCOMING, applied to BILLS REGISTER — mobile always computes this one
+   * (chat.ts's buildContext), but a hand-rolled request or a future client that doesn't
+   * must get an honest "unavailable" instead of a confident "(none recorded)".
+   */
+  describe('BILLS REGISTER — absent vs empty are different claims', () => {
+    it('omits the section entirely when the context has no `bills` key at all', () => {
+      const system = buildChatMessages({ message: 'what bills do I have', context: ctx })[0].content;
+      expect(system).not.toContain('BILLS REGISTER — recorded recurring obligations');
+      expect(system).toMatch(/a section does not appear.*this client cannot see it/i);
+    });
+
+    it('renders the section, reading "(none recorded)", when the client supplies an empty array', () => {
+      const system = buildChatMessages({ message: 'what bills do I have', context: { ...ctx, bills: [] } })[0].content;
+      expect(system).toMatch(/BILLS REGISTER — recorded recurring obligations[\s\S]*?\(none recorded\)/);
+    });
+  });
+
+  /**
+   * Same gate, applied to DETECTED RECURRING MERCHANTS — this is the device-reported
+   * fault's other half: mobile has no recurring-merchant detector at all (cashflow-mobile
+   * audit), so this section is ALWAYS absent from a mobile request. Before this fix the
+   * prompt called it "computed by the application... always appear[ing] below", so the
+   * model could confidently say "you have no subscriptions detected" having never been
+   * told anything about them.
+   */
+  describe('DETECTED RECURRING MERCHANTS — absent vs empty are different claims', () => {
+    it('omits the section entirely when the context has no `recurring` key at all (mobile shape — no detector)', () => {
+      const system = buildChatMessages({ message: 'what are my subscriptions', context: ctx })[0].content;
+      expect(system).not.toContain('DETECTED RECURRING MERCHANTS — pattern detection');
+      expect(system).toMatch(/a section does not appear.*this client cannot see it/i);
+      expect(system).toMatch(/say exactly that.*I can't see detected recurring merchants on this client/i);
+    });
+
+    it('renders the section, reading "(none detected)", when the client supplies an empty array', () => {
+      const system = buildChatMessages({ message: 'what are my subscriptions', context: { ...ctx, recurring: [] } })[0].content;
+      expect(system).toMatch(/DETECTED RECURRING MERCHANTS — pattern detection[\s\S]*?\(none detected\)/);
     });
   });
 
@@ -338,6 +393,10 @@ describe('ChatContext — bills/upcoming/recurring sections (#22)', () => {
     // Bumped again (cashflow-mobile#25): the same +1795 chars as the test above — this
     // fixture supplies no `summary` either, so the new sections are still headers only.
     // Measured 44136.
+    // DROPPED slightly (device-reported gap fix): bills/upcoming/recurring are all
+    // maxed out here, so the ABSENT-vs-EMPTY gate doesn't drop anything for this
+    // fixture — the change is just the unified ANSWERING QUESTIONS ABOUT MONEY
+    // paragraph, a close wash. Measured 44102.
     expect(system.length).toBeLessThan(44400);
   });
 
@@ -369,7 +428,7 @@ describe('ChatContext — bills/upcoming/recurring sections (#22)', () => {
     // describe block below for the web shape (no `upcoming` key at all).
     const system = buildChatMessages({ message: 'what are my current recurring payments', context: stateCtx })[0].content;
     expect(system).toMatch(/BILLS REGISTER[\s\S]*UPCOMING[\s\S]*DETECTED RECURRING MERCHANTS/);
-    expect(system).toMatch(/answer questions about current bills.*recurring.*directly from them/i);
+    expect(system).toMatch(/answer questions about current bills.*recurring monthly obligations.*directly from/i);
   });
 
   it('tells the model to check for an existing bill or recurring merchant BEFORE proposing record_bill — never propose a duplicate', () => {
