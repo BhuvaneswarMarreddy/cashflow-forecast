@@ -12,6 +12,7 @@ import {
   getSuggestedBudgets,
 } from '../lib/budgets';
 import { Transaction, CategoryBudget, ExpenseCategory } from '../types';
+import { IncomeContext } from '../lib/classify';
 
 // Helper to create mock transaction
 const mockTransaction = (
@@ -198,6 +199,62 @@ describe('Budget Calculations', () => {
     });
   });
   
+  // Finding 1: countsAgainstBudget() called interpretTransaction() with no `income`
+  // argument at all, so a review the owner CONFIRMED could never reach it — a
+  // transfer-typed row (e.g. all 22 real Upstart loan-payment rows, per classify.ts's
+  // own documentation) stayed short-circuited to `expense: 'excluded'` regardless of
+  // what the owner said it was, while every other screen (which does pass `income`)
+  // honoured the confirmation.
+  describe('review-confirmed transfers (Finding 1 — income context threading)', () => {
+    const loanPayment: Transaction = {
+      id: 'txn_upstart_1',
+      title: 'Upstart Loan Payment',
+      amount: 350,
+      type: 'transfer',
+      category: 'other',
+      paymentMethod: 'chase',
+      date: new Date().toISOString(),
+    };
+
+    const confirmedAsLoanRepayment: IncomeContext = {
+      reviews: {
+        txn_upstart_1: {
+          transactionId: 'txn_upstart_1',
+          state: 'confirmed',
+          meaning: 'loan_repayment',
+          updatedAt: new Date().toISOString(),
+          source: 'user',
+        },
+      },
+    };
+
+    it('a confirmed loan-repayment transfer counts against its category budget when the income context is passed', () => {
+      const spending = getCategorySpending([loanPayment], 'other', new Date(), undefined, undefined, confirmedAsLoanRepayment);
+      expect(spending).toBe(350);
+
+      const all = getAllCategorySpending([loanPayment], new Date(), undefined, undefined, confirmedAsLoanRepayment);
+      expect(all.other).toBe(350);
+
+      const budgets: CategoryBudget[] = [{ categoryId: 'other', monthlyLimit: 300, isEnabled: true }];
+      const statuses = calculateBudgetStatuses(budgets, [loanPayment], new Date(), undefined, undefined, confirmedAsLoanRepayment);
+      expect(statuses.find(s => s.categoryId === 'other')?.spent).toBe(350);
+      expect(statuses.find(s => s.categoryId === 'other')?.isOverBudget).toBe(true);
+    });
+
+    it('regression: the same transfer counts for nothing when no review confirmation is available — matches pre-fix behaviour', () => {
+      expect(getCategorySpending([loanPayment], 'other')).toBe(0);
+      expect(getAllCategorySpending([loanPayment]).other).toBe(0);
+
+      const budgets: CategoryBudget[] = [{ categoryId: 'other', monthlyLimit: 300, isEnabled: true }];
+      const statuses = calculateBudgetStatuses(budgets, [loanPayment]);
+      expect(statuses.find(s => s.categoryId === 'other')?.spent).toBe(0);
+
+      // Passing an income context with no matching review is likewise a no-op.
+      const emptyIncome: IncomeContext = { reviews: {} };
+      expect(getCategorySpending([loanPayment], 'other', new Date(), undefined, undefined, emptyIncome)).toBe(0);
+    });
+  });
+
   describe('getSuggestedBudgets', () => {
     it('should calculate suggested budgets based on income', () => {
       const monthlyIncome = 5000;

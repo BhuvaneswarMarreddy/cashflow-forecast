@@ -21,7 +21,7 @@ export default function BudgetStatusPanel({
   accounts,
   compact = true,
 }: BudgetStatusPanelProps) {
-  const { profile } = useUserProfile();
+  const { profile, incomeContext } = useUserProfile();
   // cashflow-mobile#24. DISPLAY lookup — the full resolved set (archived
   // included): calculateBudgetStatuses (src/lib/budgets.ts) still falls back
   // `categoryLabel` to the raw stored value for anything outside the 13
@@ -33,13 +33,13 @@ export default function BudgetStatusPanel({
   );
 
   const statuses = useMemo(() =>
-    calculateBudgetStatuses(budgets, transactions, new Date(), accounts),
-    [budgets, transactions, accounts]
+    calculateBudgetStatuses(budgets, transactions, new Date(), accounts, undefined, incomeContext),
+    [budgets, transactions, accounts, incomeContext]
   );
 
   const risks = useMemo(() =>
-    getTopBudgetRisks(budgets, transactions, 3, new Date(), accounts),
-    [budgets, transactions, accounts]
+    getTopBudgetRisks(budgets, transactions, 3, new Date(), accounts, incomeContext),
+    [budgets, transactions, accounts, incomeContext]
   );
   
   if (budgets.length === 0 || statuses.length === 0) {
