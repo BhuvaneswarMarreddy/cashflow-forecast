@@ -1148,8 +1148,10 @@ export default function AccountsPage() {
                     <span className="text-sm text-[var(--foreground-secondary)]">
                       <span className="font-medium text-[var(--foreground)]">No transaction feed</span>
                       {' '}(e.g. an Amazon Store Card). Each payment INTO this card counts as the expense
-                      itself, on the payment date — see the double-count guard note in classify.ts if this
-                      card later gains a feed.
+                      itself, on the payment date. Set a starting balance below so it has something to
+                      anchor to, and enter the last four digits so a payment naming this card is never
+                      mistaken for one of your other cards. If this card later gains a feed, its own
+                      itemized rows automatically take over and payments stop double-counting.
                     </span>
                   </label>
                   <div className="grid grid-cols-2 gap-4">
