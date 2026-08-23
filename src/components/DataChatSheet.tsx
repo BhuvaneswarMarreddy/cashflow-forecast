@@ -12,7 +12,7 @@ import { formatMoney } from '@/lib/money';
 import { sanitizeAssumedSpend } from '@/lib/profile-settings';
 import { matchIncomeDeposits } from '@/lib/ask';
 import { deriveAccountBalance, monthlyAverages } from '@/lib/forecast';
-import { addBill, getBills } from '@/lib/firestore';
+import { addBill, getBills, updateBill } from '@/lib/firestore';
 import { Bill, BillFrequency, PAYMENT_METHODS } from '@/lib/bills';
 import type { IncomeContext } from '@/lib/classify';
 import {
@@ -67,6 +67,20 @@ interface ChatMessage {
     installmentsRemaining?: number;
     nonNegotiable?: boolean;
   };
+  /** cashflow-mobile#34: set when the assistant proposed editing an EXISTING bill —
+   *  match resolves against the live `bills` state, same contract as `balance` above. */
+  billEdit?: {
+    match: { billId?: string; vendor?: string };
+    set: {
+      vendor?: string;
+      amount?: number;
+      frequency?: BillFrequency;
+      nextDueDate?: string;
+      endDate?: string;
+      installmentsRemaining?: number;
+      nonNegotiable?: boolean;
+    };
+  };
   /** cashflow-mobile#24: set when the assistant proposed adding, renaming or
    *  removing one of the owner's own categories. */
   category?:
@@ -114,6 +128,67 @@ export function resolveBillPaymentMethod(name: string | undefined): string | nul
   if (exact.length === 1) return exact[0][0];
   const contains = entries.filter(([, m]) => m.label.toLowerCase().includes(n));
   return contains.length === 1 ? contains[0][0] : null;
+}
+
+/**
+ * cashflow-mobile#34. `match` -> the ONE existing Bill it names, or null. Same
+ * exact-then-unique-substring algorithm as resolveAccount/resolveBillPaymentMethod
+ * above, run against the owner's real bills register instead of accounts or the
+ * bundled payment-method registry.
+ *
+ * billId, when present, is exact — it came from an earlier turn of THIS conversation
+ * (the model copying an id the app already showed it), never a guess, so it is looked
+ * up directly and never falls through to the vendor path even when vendor is also set.
+ *
+ * vendor is where the ambiguity that matters actually lives: an owner's Apple Card
+ * installments are routinely named only "A"/"B"/"C"/"D" (a statement line never says
+ * what an installment bought), so "the Apple Card installment" can legitimately match
+ * three rows at once. Ambiguous or unknown resolves to null — the card renders words
+ * and no button, same contract as resolveAccount: the model never gets to guess which
+ * row it meant.
+ */
+export function resolveBill(match: { billId?: string; vendor?: string }, bills: readonly Bill[]): Bill | null {
+  if (match.billId) return bills.find((b) => b.id === match.billId) ?? null;
+  if (!match.vendor) return null;
+  const n = match.vendor.trim().toLowerCase();
+  if (!n) return null;
+  const exact = bills.filter((b) => b.vendor.trim().toLowerCase() === n);
+  if (exact.length === 1) return exact[0];
+  const contains = bills.filter((b) => b.vendor.toLowerCase().includes(n));
+  return contains.length === 1 ? contains[0] : null;
+}
+
+/** "Your bills: A ($45.79 monthly), B (...), ..." — what an unresolved match's card
+ *  shows instead of guessing, so the owner can see exactly what to say instead. */
+const describeBills = (bills: readonly Bill[], money: (n: number) => string): string =>
+  bills.map((b) => `${b.vendor} (${money(b.amount)} ${b.frequency})`).join(', ') || '(none)';
+
+/** yyyy-MM-dd for "today" — matches bills.ts's own TODAY(), for the same plain-string
+ *  comparison against Bill.endDate. */
+const todayISO = (): string => new Date().toISOString().slice(0, 10);
+
+/**
+ * cashflow-mobile#34. The one truthful sentence a chat-applied bill edit gets: BEFORE
+ * -> AFTER, in the owner's own numbers — never "updated" or "saved" with no figures,
+ * which is exactly the overpromise record_bill's own applied message was built to
+ * avoid. Pure and exported so the exact wording is testable without mounting the
+ * component (see data-chat-sheet.test.tsx).
+ */
+export function describeBillUpdate(before: Bill, after: Bill, currency?: string): string {
+  const m2 = (n: number) => formatMoney(n, currency, 2);
+  const head = after.vendor === before.vendor ? after.vendor : `${before.vendor} → ${after.vendor}`;
+  const finished = after.installmentsRemaining === 0 || (after.endDate !== undefined && after.endDate < todayISO());
+  const tail = [
+    `${m2(after.amount)} ${after.frequency}`,
+    after.installmentsRemaining !== undefined
+      ? after.installmentsRemaining === 0
+        ? 'finished'
+        : `${after.installmentsRemaining} payment${after.installmentsRemaining === 1 ? '' : 's'} left`
+      : null,
+    after.endDate ? `ends ${after.endDate}` : null,
+    after.nonNegotiable ? 'locked — reserved first in every plan' : null,
+  ].filter(Boolean).join(', ');
+  return `Saved — ${head}, ${tail}.${finished ? ' No longer in Upcoming.' : ''}`;
 }
 
 /**
@@ -387,6 +462,11 @@ export default function DataChatSheet({ open, onClose, seed }: {
                 },
                 status: 'pending',
               })
+          : reply?.action === 'update_bill'
+            ? mk('assistant', reply.reason, {
+                billEdit: { match: reply.match, set: reply.set },
+                status: 'pending',
+              })
           : reply?.action === 'add_category'
             ? mk('assistant', reply.reason, {
                 category: { kind: 'add', label: reply.label, icon: reply.icon },
@@ -442,7 +522,7 @@ export default function DataChatSheet({ open, onClose, seed }: {
   };
 
   const dismiss = (id: string) =>
-    setMessages((prev) => prev.map((x) => (x.id === id ? { ...x, rule: undefined, balance: undefined, income: undefined, spend: undefined, bill: undefined, category: undefined, status: undefined } : x)));
+    setMessages((prev) => prev.map((x) => (x.id === id ? { ...x, rule: undefined, balance: undefined, income: undefined, spend: undefined, bill: undefined, billEdit: undefined, category: undefined, status: undefined } : x)));
 
   /** THE one path from a balance proposal to the store — a button press, same
    *  reconcile() the accounts screen used before its manual knob was removed. */
@@ -564,6 +644,58 @@ export default function DataChatSheet({ open, onClose, seed }: {
       setMessages((prev) => [
         ...prev.map((x) => (x.id === m.id ? { ...x, status: 'applied' as const } : x)),
         mk('assistant', `Saved — ${m.bill!.vendor} now shows in Upcoming and Bills, ${formatMoney(m.bill!.amount, profile?.currency, 2)} ${m.bill!.frequency}.`),
+      ]);
+    } catch {
+      setMessages((prev) => [...prev, mk('assistant', 'That could not be saved. Please try again.')]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * cashflow-mobile#34. update_bill -> updateBill() (src/lib/firestore.ts) against the
+   * row `resolveBill` picks out — re-resolved here rather than trusted from the card,
+   * mirroring applyBill's own re-derivation of resolveBillAnchor above: Apply can never
+   * fire against a row the card's own resolution rejected. When the frequency is
+   * changing (or a new nextDueDate was given) the anchor is recomputed the same way
+   * record_bill's card does; otherwise the bill's existing schedule is left untouched.
+   */
+  const applyUpdateBill = async (m: ChatMessage) => {
+    if (!m.billEdit || busy || !profile?.id) return;
+    const before = resolveBill(m.billEdit.match, bills);
+    if (!before) return;
+    const { set } = m.billEdit;
+    const effectiveFrequency = set.frequency ?? before.frequency;
+    const frequencyChanging = set.frequency !== undefined && set.frequency !== before.frequency;
+    let anchor: { autopayDay?: number; anchorDate?: string } | undefined;
+    if (set.nextDueDate !== undefined || frequencyChanging) {
+      const resolved = resolveBillAnchor({ frequency: effectiveFrequency, nextDueDate: set.nextDueDate });
+      // Mirrors the card's own gate (UpdateBillProposalCard, below) — unreachable in
+      // practice, since Apply is never rendered without a resolvable anchor.
+      if (!resolved) return;
+      anchor = resolved;
+    }
+    setBusy(true);
+    try {
+      const updates: Partial<Bill> = {
+        ...(set.vendor !== undefined ? { vendor: set.vendor } : {}),
+        ...(set.amount !== undefined ? { amount: set.amount } : {}),
+        ...(set.frequency !== undefined ? { frequency: set.frequency } : {}),
+        ...(set.endDate !== undefined ? { endDate: set.endDate } : {}),
+        ...(set.installmentsRemaining !== undefined ? { installmentsRemaining: set.installmentsRemaining } : {}),
+        ...(set.nonNegotiable !== undefined ? { nonNegotiable: set.nonNegotiable } : {}),
+        ...(anchor?.autopayDay !== undefined ? { autopayDay: anchor.autopayDay } : {}),
+        ...(anchor?.anchorDate !== undefined ? { anchorDate: anchor.anchorDate } : {}),
+      };
+      await updateBill(profile.id, before.id, updates);
+      const after: Bill = { ...before, ...updates };
+      // Mirrors applyBill's own local-append reasoning: `bills` is fetched once per
+      // profile and never re-read, so the next turn ("is C still $45.79?") must see
+      // this write immediately, not after a reopen.
+      setBills((prev) => prev.map((b) => (b.id === before.id ? after : b)));
+      setMessages((prev) => [
+        ...prev.map((x) => (x.id === m.id ? { ...x, status: 'applied' as const } : x)),
+        mk('assistant', describeBillUpdate(before, after, profile?.currency)),
       ]);
     } catch {
       setMessages((prev) => [...prev, mk('assistant', 'That could not be saved. Please try again.')]);
@@ -807,6 +939,17 @@ export default function DataChatSheet({ open, onClose, seed }: {
                   pending={m.status === 'pending'}
                   busy={busy}
                   onApply={() => applyBill(m)}
+                  onCancel={() => dismiss(m.id)}
+                />
+              )}
+              {m.billEdit && (
+                <UpdateBillProposalCard
+                  proposal={m.billEdit}
+                  bills={bills}
+                  currency={profile?.currency}
+                  pending={m.status === 'pending'}
+                  busy={busy}
+                  onApply={() => applyUpdateBill(m)}
                   onCancel={() => dismiss(m.id)}
                 />
               )}
@@ -1146,6 +1289,92 @@ function BillProposalCard({ proposal, currency, pending, busy, onApply, onCancel
         {[methodLabel, anchor.anchorDate ? `next ${anchor.anchorDate}` : null, end, proposal.nonNegotiable ? 'locked — reserved first in every plan' : null]
           .filter(Boolean)
           .join(' · ')}
+      </p>
+      {pending ? (
+        <div className="flex gap-2 mt-3">
+          <button type="button" onClick={onApply} disabled={busy} className="btn-primary min-h-[44px] px-4 text-sm disabled:opacity-50">Apply</button>
+          <button type="button" onClick={onCancel} disabled={busy} className="min-h-[44px] px-4 text-sm rounded-card border border-[var(--border-color)] text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] transition-colors disabled:opacity-50">Cancel</button>
+        </div>
+      ) : (
+        <p className="mt-3 text-xs text-[var(--accent-success)]">Applied</p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * cashflow-mobile#34. What's about to change on an EXISTING bill. `match` resolves
+ * CLIENT-side against the live bills register (resolveBill, above) — an unresolved or
+ * ambiguous match renders words and NO button, same contract as BalanceProposalCard's
+ * accountName: never guess between the Apple Card's similarly-named installments.
+ * Once resolved, the card shows the row it found (vendor, amount, cadence, next due)
+ * and exactly what changes, before -> after, so Apply can never surprise the owner
+ * with a different row than the one they meant.
+ */
+function UpdateBillProposalCard({ proposal, bills, currency, pending, busy, onApply, onCancel }: {
+  proposal: NonNullable<ChatMessage['billEdit']>;
+  bills: readonly Bill[];
+  currency?: string;
+  pending: boolean;
+  busy: boolean;
+  onApply: () => void;
+  onCancel: () => void;
+}) {
+  const m2 = (n: number) => formatMoney(n, currency, 2);
+  const resolved = resolveBill(proposal.match, bills);
+
+  if (!resolved) {
+    const named = proposal.match.vendor ?? proposal.match.billId ?? '';
+    return (
+      <p className="mt-3 text-xs text-[var(--foreground-muted)]">
+        I couldn&apos;t match &ldquo;{named}&rdquo; to exactly one of your bills, so nothing is offered.
+        Your bills: {describeBills(bills, m2)}.
+      </p>
+    );
+  }
+
+  const { set } = proposal;
+  const effectiveFrequency = set.frequency ?? resolved.frequency;
+  const frequencyChanging = set.frequency !== undefined && set.frequency !== resolved.frequency;
+  // Only recompute the anchor when the schedule itself might be changing — same
+  // "unreachable in practice, gated here" split as record_bill's BillProposalCard.
+  const anchor = set.nextDueDate !== undefined || frequencyChanging
+    ? resolveBillAnchor({ frequency: effectiveFrequency, nextDueDate: set.nextDueDate })
+    : undefined;
+
+  if (anchor === null) {
+    return (
+      <p className="mt-3 text-xs text-[var(--foreground-muted)]">
+        I don&apos;t have a next due date for a {effectiveFrequency} schedule, so {resolved.vendor} can&apos;t be updated to it yet — tell me when the next payment is due.
+      </p>
+    );
+  }
+
+  const after: Bill = {
+    ...resolved,
+    ...(set.vendor !== undefined ? { vendor: set.vendor } : {}),
+    ...(set.amount !== undefined ? { amount: set.amount } : {}),
+    ...(set.frequency !== undefined ? { frequency: set.frequency } : {}),
+    ...(set.endDate !== undefined ? { endDate: set.endDate } : {}),
+    ...(set.installmentsRemaining !== undefined ? { installmentsRemaining: set.installmentsRemaining } : {}),
+    ...(set.nonNegotiable !== undefined ? { nonNegotiable: set.nonNegotiable } : {}),
+    ...(anchor?.autopayDay !== undefined ? { autopayDay: anchor.autopayDay } : {}),
+    ...(anchor?.anchorDate !== undefined ? { anchorDate: anchor.anchorDate } : {}),
+  };
+
+  const row = (b: Bill) => `${b.vendor} — ${m2(b.amount)} ${b.frequency}${b.anchorDate ? `, next ${b.anchorDate}` : ''}`;
+
+  return (
+    <div className="mt-3 rounded-card border border-[var(--border-color)] bg-[var(--background)] p-3">
+      <p className="font-medium text-[var(--foreground)]">{row(resolved)} → {row(after)}</p>
+      <p className="text-xs text-[var(--foreground-muted)] mt-1">
+        {[
+          after.installmentsRemaining !== undefined
+            ? (after.installmentsRemaining === 0 ? 'finished — leaves Upcoming' : `${after.installmentsRemaining} payment${after.installmentsRemaining === 1 ? '' : 's'} left`)
+            : null,
+          after.endDate ? `ends ${after.endDate}` : null,
+          after.nonNegotiable ? 'locked — reserved first in every plan' : null,
+        ].filter(Boolean).join(' · ') || 'The rest of this bill is unchanged.'}
       </p>
       {pending ? (
         <div className="flex gap-2 mt-3">

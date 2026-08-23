@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import DataChatSheet, { resolveBillPaymentMethod, resolveBillAnchor } from '@/components/DataChatSheet';
+import DataChatSheet, { resolveBillPaymentMethod, resolveBillAnchor, resolveBill, describeBillUpdate } from '@/components/DataChatSheet';
 import { applyMappingRules, rulePreview, MappingRule } from '@/lib/mapping-rules';
 import { billUpcomingEvents, Bill } from '@/lib/bills';
 import { ExpenseCategory, Transaction } from '@/types';
@@ -15,6 +15,8 @@ const aiChat = jest.fn();
 const addRule = jest.fn();
 const addBill = jest.fn();
 const getBills = jest.fn();
+// cashflow-mobile#34
+const updateBill = jest.fn();
 // cashflow-mobile#28: the server-side sweep — replaces the old per-row
 // updateTransactionAwaited/updateRuleCategoryAwaited/updateBill mocks below.
 const removeCategory = jest.fn();
@@ -28,6 +30,7 @@ jest.mock('@/lib/callables', () => ({
 jest.mock('@/lib/firestore', () => ({
   addBill: (...args: unknown[]) => addBill(...args),
   getBills: (...args: unknown[]) => getBills(...args),
+  updateBill: (...args: unknown[]) => updateBill(...args),
 }));
 
 const txn = (id: string, title: string, merchant: string): Transaction => ({
@@ -103,6 +106,7 @@ beforeEach(() => {
   addRule.mockReset();
   addBill.mockReset().mockResolvedValue('new-bill-id');
   getBills.mockReset().mockResolvedValue([]);
+  updateBill.mockReset().mockResolvedValue(undefined);
   removeCategory.mockReset().mockResolvedValue({ moved: { transactions: 0, rules: 0, bills: 0, budgets: 0, plannedTransactions: 0 } });
   updateProfile.mockReset().mockResolvedValue(undefined);
   PROFILE_SETTINGS = {};
@@ -662,6 +666,169 @@ describe('the record_bill card and Defect 1 — nextDueDate wires anchorDate thr
 
     const saved: Bill = { id: 'b1', createdAt: '', updatedAt: '', ...addBill.mock.calls[0][1] };
     expect(billUpcomingEvents([saved], '2026-08-25', 45).length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * cashflow-mobile#34. The owner scenario this closes (part 1): an installment named
+ * only "A"/"B"/"C"/"D" (a statement line never says what an installment bought) needs
+ * to be renamed to the real product, or marked finished. RESOLUTION is the hard part:
+ * a vendor match that could mean more than one row must refuse, never guess.
+ */
+describe('update_bill — cashflow-mobile#34', () => {
+  const installmentA = {
+    id: 'bill-a', vendor: 'Apple Card Installment A', amount: 45.79, frequency: 'monthly' as const,
+    paymentMethodId: 'apple-card', migrationStatus: 'to-review' as const, lifecycleStatus: 'active' as const,
+    installmentsRemaining: 5, autopayDay: 1, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+  const installmentB = { ...installmentA, id: 'bill-b', vendor: 'Apple Card Installment B', amount: 32.5, installmentsRemaining: 3 };
+  const installmentC = { ...installmentA, id: 'bill-c', vendor: 'Apple Card Installment C', amount: 108, installmentsRemaining: 9 };
+  const installmentD = { ...installmentA, id: 'bill-d', vendor: 'Apple Card Installment D', amount: 59, installmentsRemaining: 2 };
+  const INSTALLMENTS = [installmentA, installmentB, installmentC, installmentD];
+
+  beforeEach(() => {
+    getBills.mockResolvedValue(INSTALLMENTS);
+  });
+
+  describe('resolveBill — the resolution both the update and remove cards are built on', () => {
+    it('billId resolves exactly, even when the vendor field alone would be ambiguous', () => {
+      expect(resolveBill({ billId: 'bill-c', vendor: 'Apple Card Installment' }, INSTALLMENTS)).toBe(installmentC);
+    });
+
+    it('an exact (case-insensitive) vendor match resolves', () => {
+      expect(resolveBill({ vendor: 'apple card installment c' }, INSTALLMENTS)).toBe(installmentC);
+    });
+
+    it('an ambiguous vendor substring refuses — never guesses between similarly-named installments', () => {
+      expect(resolveBill({ vendor: 'Apple Card Installment' }, INSTALLMENTS)).toBeNull();
+    });
+
+    it('a vendor matching nothing resolves to null', () => {
+      expect(resolveBill({ vendor: 'Netflix' }, INSTALLMENTS)).toBeNull();
+    });
+
+    it('an empty match resolves to null', () => {
+      expect(resolveBill({}, INSTALLMENTS)).toBeNull();
+    });
+
+    /**
+     * "Prove teeth": if the ambiguity guard degenerated to "just take the first
+     * match" (contains[0] instead of requiring contains.length === 1), this is the
+     * test that goes red — exactly the failure mode that would have let the chat
+     * silently rename the WRONG installment.
+     */
+    it('would go red if the ambiguity guard were weakened to "pick the first match"', () => {
+      const wouldPickFirst = INSTALLMENTS.filter((b) => b.vendor.toLowerCase().includes('apple card installment'))[0];
+      expect(resolveBill({ vendor: 'Apple Card Installment' }, INSTALLMENTS)).not.toBe(wouldPickFirst);
+    });
+  });
+
+  describe('the update_bill card', () => {
+    const proposal = (over: Record<string, unknown> = {}) => ({
+      success: true,
+      result: {
+        action: 'update_bill',
+        match: { vendor: 'Apple Card Installment C' },
+        set: { vendor: 'MacBook Air', amount: 108, installmentsRemaining: 8 },
+        reason: 'Got it — installment C is the MacBook Air.',
+        ...over,
+      },
+    });
+
+    it('resolves the exact row and shows before -> after — writes NOTHING until Apply', async () => {
+      aiChat.mockResolvedValue(proposal());
+      render(<DataChatSheet open onClose={() => {}} />);
+      await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+      send('installment C is the MacBook Air');
+
+      expect(await screen.findByText('Apple Card Installment C — $108.00 monthly → MacBook Air — $108.00 monthly')).toBeInTheDocument();
+      expect(screen.getByText(/8 payments left/)).toBeInTheDocument();
+      expect(updateBill).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+      await waitFor(() => expect(updateBill).toHaveBeenCalledTimes(1));
+      expect(updateBill).toHaveBeenCalledWith('user-1', 'bill-c', {
+        vendor: 'MacBook Air', amount: 108, installmentsRemaining: 8,
+      });
+      expect(await screen.findByText('Saved — Apple Card Installment C → MacBook Air, $108.00 monthly, 8 payments left.')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+    });
+
+    it('an ambiguous vendor gets words and NO button — never guesses between similarly-named installments', async () => {
+      aiChat.mockResolvedValue(proposal({ match: { vendor: 'Apple Card Installment' } }));
+      render(<DataChatSheet open onClose={() => {}} />);
+      await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+      send('clear the rest of the apple card installments');
+
+      expect(await screen.findByText(/couldn't match .Apple Card Installment. to exactly one of your bills/)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+      expect(updateBill).not.toHaveBeenCalled();
+    });
+
+    it('billId resolves exactly and applies, even though the vendor field alone would be ambiguous', async () => {
+      aiChat.mockResolvedValue(proposal({ match: { billId: 'bill-c', vendor: 'Apple Card Installment' } }));
+      render(<DataChatSheet open onClose={() => {}} />);
+      await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+      send('installment C is the MacBook Air');
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Apply' }));
+      await waitFor(() => expect(updateBill).toHaveBeenCalledWith('user-1', 'bill-c', expect.anything()));
+    });
+
+    it('marking installmentsRemaining 0 finishes the bill and says so — preserves history, leaves Upcoming', async () => {
+      aiChat.mockResolvedValue(proposal({
+        match: { vendor: 'Apple Card Installment A' },
+        set: { installmentsRemaining: 0 },
+        reason: 'Installment A is paid off.',
+      }));
+      render(<DataChatSheet open onClose={() => {}} />);
+      await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+      send('installment A is paid off');
+
+      expect(await screen.findByText(/finished — leaves Upcoming/)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+      await waitFor(() => expect(updateBill).toHaveBeenCalledWith('user-1', 'bill-a', { installmentsRemaining: 0 }));
+      expect(await screen.findByText(/No longer in Upcoming/)).toBeInTheDocument();
+    });
+
+    it('a match resolving to nothing gets words and NO button — unknown, not a guess', async () => {
+      aiChat.mockResolvedValue(proposal({ match: { vendor: 'Netflix' } }));
+      render(<DataChatSheet open onClose={() => {}} />);
+      await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+      send('netflix installment is the MacBook Air');
+
+      expect(await screen.findByText(/couldn't match .Netflix. to exactly one of your bills/)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+    });
+
+    it('Cancel drops the proposal without writing anything', async () => {
+      aiChat.mockResolvedValue(proposal());
+      render(<DataChatSheet open onClose={() => {}} />);
+      await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+      send('installment C is the MacBook Air');
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+      expect(updateBill).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('describeBillUpdate — the before -> after applied message', () => {
+    it('states vendor rename, amount, cadence and payments left', () => {
+      expect(describeBillUpdate(installmentC, { ...installmentC, vendor: 'MacBook Air', amount: 108, installmentsRemaining: 8 }))
+        .toBe('Saved — Apple Card Installment C → MacBook Air, $108.00 monthly, 8 payments left.');
+    });
+
+    it('marks a bill finished and says it left Upcoming, when installmentsRemaining hits 0', () => {
+      expect(describeBillUpdate(installmentA, { ...installmentA, installmentsRemaining: 0 }))
+        .toBe('Saved — Apple Card Installment A, $45.79 monthly, finished. No longer in Upcoming.');
+    });
+
+    it('leaves the vendor out of the arrow when only the amount changes', () => {
+      expect(describeBillUpdate(installmentA, { ...installmentA, amount: 50 }))
+        .toBe('Saved — Apple Card Installment A, $50.00 monthly, 5 payments left.');
+    });
   });
 });
 
