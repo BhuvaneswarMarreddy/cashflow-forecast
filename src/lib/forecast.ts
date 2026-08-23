@@ -102,26 +102,39 @@ function monthsBetweenInclusive(from: string, to: string): number {
 }
 
 /**
- * The double-count guard boundary for a FEEDLESS card (#14 round 2): the LATEST
- * date the card has a POSTED row of its own, dated on/before today. Pending rows
- * (not yet settled) and future-dated rows (not yet happened) are not evidence of
- * anything and are excluded — either one, left in, could silently supersede a real
- * payment that has nothing else standing in for it.
+ * The double-count guard for a FEEDLESS card (#14 round 3): the SET of calendar
+ * periods (`YYYY-MM`) this card has at least one POSTED, already-happened row of
+ * its own. Pending rows (not yet settled) and future-dated rows (not yet happened)
+ * are not evidence of anything and are excluded.
  *
- * Deliberately the LATEST row, not the earliest: see the field doc on
- * `PaymentAccount.feedCoverageThrough` (src/types/index.ts) for why a single
- * historical statement import must not guard every month after it forever.
+ * Round 2 used a single "latest qualifying row" date as an open-ended UPPER BOUND
+ * (guard when `payment.date <= that date`) — any row, no matter how old or how far
+ * in the past its own month is, silently reached back over EVERY earlier month too.
+ * Measured on a $1,000-anchor / five-$800-payment ledger (true spend $4,000): a
+ * March-only statement import suppressed Jan+Feb ($2,400 counted); a single stray
+ * $12 row on Feb 1 suppressed January; a LIVE FEED — which keeps its latest row
+ * pinned near today — suppressed every historical payment permanently, understating
+ * average monthly spend and overstating runway by the same factor. A [earliest,
+ * latest] SPAN closes those but still leaks: rows in January and March with nothing
+ * in February make February look covered too, because it falls inside the span.
+ *
+ * The complete model: coverage is EXACTLY the set of periods with a qualifying row
+ * — no more, no less — and a payment is guarded only when ITS OWN period (not some
+ * earlier or later one) is a member. This matches statement-cycle semantics: once
+ * this card's feed has a real row for a given month, that month's itemized data is
+ * the source of truth and the payment reverts to being an ordinary transfer for
+ * THAT month only.
  */
-function feedCoverageThrough(accountId: string, transactions: readonly Transaction[]): string | undefined {
+function feedCoveredPeriods(accountId: string, transactions: readonly Transaction[]): Set<string> {
   const todayKey = format(new Date(), 'yyyy-MM-dd');
-  let latest: string | undefined;
+  const periods = new Set<string>();
   for (const t of transactions) {
     if (t.accountId !== accountId || !isPosted(t)) continue;
     const day = t.date.slice(0, 10);
     if (day > todayKey) continue; // not yet happened — not evidence
-    if (!latest || day > latest) latest = day;
+    periods.add(day.slice(0, 7)); // YYYY-MM
   }
-  return latest;
+  return periods;
 }
 
 export function calculateCurrentCash(accounts: PaymentAccount[]): number {
@@ -164,11 +177,11 @@ export function deriveAccountBalance(
     const day = t.date.split('T')[0];
     return day <= todayKey && day >= openingKey; // future/pre-anchor excluded
   };
-  // A feedless card's OWN rows are the guard boundary: a payment dated ON/BEFORE
-  // the LATEST of them is superseded (see feedCoverageThrough's doc for why LATEST,
-  // not earliest — a per-PAYMENT predicate, not one floor for the account's whole life).
+  // A feedless card's OWN rows are the guard: a payment is superseded only when
+  // ITS OWN period has a qualifying row of the card's own — see feedCoveredPeriods'
+  // doc for why a set of exact periods, not a floor/ceiling/span.
   const feedless = !!account.feedless && account.type === 'credit_card';
-  const feedThrough = feedless ? feedCoverageThrough(account.id, transactions) : undefined;
+  const feedPeriods = feedless ? feedCoveredPeriods(account.id, transactions) : undefined;
 
   const net = transactions.reduce((sum, t) => {
     if (t.accountId === account.id) {
@@ -180,7 +193,7 @@ export function deriveAccountBalance(
     // shows and the spend the payment counts as never disagree.
     if (!feedless || !allAccounts || !inWindow(t)) return sum;
     const day = t.date.split('T')[0];
-    if (feedThrough !== undefined && day <= feedThrough) return sum; // guard: a real row already covers it
+    if (feedPeriods?.has(day.slice(0, 7))) return sum; // guard: a real row already covers THIS period
     if (feedlessCardTargetOf(t, allAccounts)?.id !== account.id) return sum;
     return sum + t.amount; // a payment always reduces debt
   }, 0);
@@ -220,13 +233,13 @@ export function withDerivedBalances(
   policy: IncomeContext
 ): PaymentAccount[] {
   return accounts.map((a) => {
-    // FEEDLESS-CARD-001 (#14): attach the guard boundary onto the account object
-    // itself so interpretTransaction() — which only ever sees `accounts`, never
-    // the full transaction list — can see it too, wherever these derived
-    // accounts get passed on from here.
-    const coverageThrough =
-      a.feedless && a.type === 'credit_card' ? feedCoverageThrough(a.id, transactions) : undefined;
-    const withGuard = coverageThrough ? { ...a, feedCoverageThrough: coverageThrough } : a;
+    // FEEDLESS-CARD-001 (#14): attach the guard's covered-periods set onto the
+    // account object itself so interpretTransaction() — which only ever sees
+    // `accounts`, never the full transaction list — can see it too, wherever
+    // these derived accounts get passed on from here.
+    const coveredPeriods =
+      a.feedless && a.type === 'credit_card' ? feedCoveredPeriods(a.id, transactions) : undefined;
+    const withGuard = coveredPeriods && coveredPeriods.size > 0 ? { ...a, feedCoveredPeriods: coveredPeriods } : a;
     return { ...withGuard, currentBalance: deriveAccountBalance(withGuard, transactions, policy, accounts) };
   });
 }

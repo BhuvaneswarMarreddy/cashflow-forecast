@@ -40,7 +40,7 @@ export default function CashflowTab() {
   // Calendar's inheritance: tap a month bar, see that month's days.
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
 
-  // CRITICAL-4 (#14): the feedless double-count guard lives on `feedCoverageThrough`,
+  // CRITICAL-4 (#14): the feedless double-count guard lives on `feedCoveredPeriods`,
   // attached IN MEMORY by withDerivedBalances() — never on the raw profile accounts.
   // Passing profile?.paymentAccounts straight to classify here meant this tab's
   // guard never tripped (measured: this tab disagreeing with another by 2.3x on the

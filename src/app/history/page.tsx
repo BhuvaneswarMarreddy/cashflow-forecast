@@ -97,7 +97,7 @@ export default function HistoryPage() {
     }
   }, [isAuthenticated, isOnboarded, authLoading, profileLoading, router]);
 
-  // CRITICAL-4 (#14): the feedless double-count guard lives on `feedCoverageThrough`,
+  // CRITICAL-4 (#14): the feedless double-count guard lives on `feedCoveredPeriods`,
   // a field withDerivedBalances() attaches IN MEMORY — it is never on the raw profile
   // accounts. Every classify/forecast call below must read THIS, not
   // profile?.paymentAccounts directly, or the guard silently never trips (measured:

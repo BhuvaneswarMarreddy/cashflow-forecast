@@ -470,18 +470,17 @@ export function interpretTransaction(
   const settlement = type === 'transfer' && isCardSettlement(t, accounts);
   const pending: 'posted' | 'pending' = t.pending ? 'pending' : 'posted';
 
-  // FEEDLESS-CARD-001 (#14 round 2). A payment naming a FEEDLESS card stands in for
+  // FEEDLESS-CARD-001 (#14 round 3). A payment naming a FEEDLESS card stands in for
   // its missing itemized feed — UNLESS the guard has tripped: that card already has
-  // a POSTED row of its own (feedCoverageThrough, attached by withDerivedBalances)
-  // dated ON/AFTER this specific payment, in which case a real row already covers
-  // it and this reverts to the ordinary settlement reading below. Per-PAYMENT, not
-  // one floor for the account's whole life — see feedCoverageThrough's doc
-  // (src/lib/forecast.ts) for why the boundary is the LATEST qualifying row, not
-  // the earliest. Inclusive boundary: a payment dated the SAME day a real row
-  // appears already has a real row to double with.
+  // a POSTED row of its own (feedCoveredPeriods, attached by withDerivedBalances)
+  // for THIS SPECIFIC PAYMENT'S OWN PERIOD, in which case a real row already covers
+  // it and this reverts to the ordinary settlement reading below. Per-PAYMENT'S-OWN
+  // PERIOD, not a floor/ceiling/span over the account's whole life — see
+  // feedCoveredPeriods()'s doc (src/lib/forecast.ts) for the measured bugs a single
+  // boundary date (round 2) and a [earliest, latest] span both left open.
   const feedlessTarget = settlement ? feedlessCardTargetOf(t, accounts) : undefined;
-  const feedGuardTripped =
-    !!feedlessTarget?.feedCoverageThrough && t.date.slice(0, 10) <= feedlessTarget.feedCoverageThrough;
+  const paymentPeriod = t.date.slice(0, 7); // YYYY-MM
+  const feedGuardTripped = !!feedlessTarget?.feedCoveredPeriods?.has(paymentPeriod);
   const feedless = feedlessTarget && !feedGuardTripped ? feedlessTarget : undefined;
 
   // Refund/reward only on a debt account for the inbound case, mirroring how
@@ -609,7 +608,18 @@ export function interpretTransaction(
     // rows, and a guarded feedless payment reverts to `card_payment` (below),
     // which never reaches that queue. Say what actually happens instead: it
     // reverts to an ordinary transfer, same as any other card settlement.
-    reason += `; ${feedlessTarget!.name} already has itemized rows through ${feedlessTarget!.feedCoverageThrough} — this payment reverts to an ordinary card-payment transfer, not counted as spend, to avoid double-counting those rows`;
+    //
+    // ponytail: this `reason` string is the ONLY disclosure a guarded month gets —
+    // no surface in src/components or src/app renders it (grepped; only tests read
+    // it), so a whole suppressed month is currently invisible to the owner, not
+    // merely under-explained. Round 3 decided NOT to add a review-queue entry for
+    // it: `selectInflowReviewQueue` surfaces classification UNCERTAINTY, and a
+    // guarded payment is a CONFIDENT, correct reclassification (a real row already
+    // covers it), not an unknown one — putting it in that queue would misrepresent
+    // a settled answer as an open question. Upgrade path if this bites: a small
+    // "N feedless-card months covered by real data" disclosure on the Accounts or
+    // Insights screen, reading `feedCoveredPeriods` directly, not a review-queue entry.
+    reason += `; ${feedlessTarget!.name} already has itemized rows for ${paymentPeriod} — this payment reverts to an ordinary card-payment transfer, not counted as spend, to avoid double-counting those rows`;
   }
 
   // A CONFIRMED meaning decides its own treatment; a DERIVED one still defers to the

@@ -102,11 +102,11 @@ describe('FEEDLESS-CARD-001: the double-count guard is a PER-PAYMENT predicate (
     const [, card] = withDerivedBalances(
       [chk, anchored], [payment('before', '2026-04-04'), itemizedRow], POSTED_ONLY
     );
-    expect(card.feedCoverageThrough).toBe('2026-04-05');
+    expect(card.feedCoveredPeriods).toEqual(new Set(['2026-04']));
     const i = interpretTransaction(payment('before', '2026-04-04'), [chk, card]);
     expect(i.expense).toBe('excluded');
     expect(i.financialMeaning).toBe('card_payment'); // reverts to the ordinary settlement reading
-    expect(i.reason).toMatch(/already has itemized rows through 2026-04-05/);
+    expect(i.reason).toMatch(/already has itemized rows for 2026-04/);
     // IMPORTANT-6: the reason must not claim a review flag nothing sets — this
     // row never reaches selectInflowReviewQueue() (financialMeaning is
     // 'card_payment', not 'unknown_inflow').
@@ -140,13 +140,26 @@ describe('FEEDLESS-CARD-001: the double-count guard is a PER-PAYMENT predicate (
   });
 });
 
-describe('FEEDLESS-CARD-001: a historical statement import guards only ITS OWN period (#14 round 2)', () => {
-  // The measured bug this whole round exists for: importing a January statement
-  // (viewed from March) used to floor on January (the earliest row) and zero
-  // EVERY later month forever — Feb, Mar, Apr, all of it — because the guard was
-  // one global "earliest row" value compared the wrong way. A statement import
-  // is a one-time backfill for a SPECIFIC period, not proof an ongoing feed now
-  // covers every month after it.
+describe('FEEDLESS-CARD-001: coverage is the EXACT set of covered periods, not a floor/ceiling/span (#14 round 3)', () => {
+  // CRITICAL-1 (round 3). Round 2's guard was `payment.date <= LATEST qualifying
+  // row` — an OPEN-ENDED UPPER BOUND. Any single row reached back over unbounded
+  // history the feed has no data for. Measured on a $1,000-anchor / five-$800-
+  // payment ledger (true spend $4,000, this file's own shape scaled up):
+  //   - a March-ONLY statement import suppressed January AND February too
+  //     ($2,434.56 of $4,034.56 counted) — nothing stood in for those months.
+  //   - a single stray row on Feb 1 suppressed JANUARY, a month it says nothing
+  //     about, for no reason but "January is before February".
+  //   - a LIVE FEED (whose latest row sits near today) suppressed EVERY
+  //     historical payment permanently — measured average monthly spend fell
+  //     13.8x and runway inflated by the same factor.
+  // A [earliest, latest] SPAN closes those three but still leaks: rows in
+  // January and March with nothing in February make February look covered too,
+  // purely because it falls between them.
+  //
+  // The fix: `feedCoveredPeriods` is the exact SET of `YYYY-MM` periods with a
+  // qualifying row — no floor, no ceiling, no span. A payment is guarded only
+  // when ITS OWN period is a member; an earlier or later period having a row
+  // says nothing about this one.
   const anchored: PaymentAccount = { ...feedlessCard, openingBalance: 2000, openingDate: '2026-01-01' };
   const monthlyPayment = (id: string, date: string) =>
     txn({ id, title: 'DISCOVER PAYMENT ACH PMT', amount: 200, accountId: 'chk', date });
@@ -163,36 +176,43 @@ describe('FEEDLESS-CARD-001: a historical statement import guards only ITS OWN p
     const [, card] = withDerivedBalances(
       [chk, anchored], [...janRows, payJan, payFeb, payMar, payApr], POSTED_ONLY
     );
-    expect(card.feedCoverageThrough).toBe('2026-01-28');
+    expect(card.feedCoveredPeriods).toEqual(new Set(['2026-01']));
     const accs = [chk, card];
     expect(interpretTransaction(payJan, accs).expense).toBe('excluded'); // covered by the Jan statement
-    expect(interpretTransaction(payFeb, accs).expense).toBe('counted'); // #14 round 2: no longer zeroed
+    expect(interpretTransaction(payFeb, accs).expense).toBe('counted');
     expect(interpretTransaction(payMar, accs).expense).toBe('counted');
     expect(interpretTransaction(payApr, accs).expense).toBe('counted');
   });
 
-  it('a March-ONLY statement import guards January through March — not April', () => {
+  it('a March-ONLY statement import guards MARCH ONLY — January and February are NOT covered and keep counting (#14 round 3: the measured hole)', () => {
+    // This is the assertion round 2 got wrong: it expected (and enforced) that a
+    // March-only import guards "January through March", encoding the exact bug
+    // CRITICAL-1 measured. Nothing in this ledger stands in for Jan/Feb spend,
+    // so they must count.
     const marRows = [statementRow('m1', '2026-03-10'), statementRow('m2', '2026-03-28')];
     const [, card] = withDerivedBalances(
       [chk, anchored], [...marRows, payJan, payFeb, payMar, payApr], POSTED_ONLY
     );
-    expect(card.feedCoverageThrough).toBe('2026-03-28');
+    expect(card.feedCoveredPeriods).toEqual(new Set(['2026-03']));
     const accs = [chk, card];
-    expect(interpretTransaction(payJan, accs).expense).toBe('excluded');
-    expect(interpretTransaction(payFeb, accs).expense).toBe('excluded');
-    expect(interpretTransaction(payMar, accs).expense).toBe('excluded');
+    expect(interpretTransaction(payJan, accs).expense).toBe('counted'); // #14 round 3: no longer wrongly guarded
+    expect(interpretTransaction(payFeb, accs).expense).toBe('counted'); // #14 round 3: no longer wrongly guarded
+    expect(interpretTransaction(payMar, accs).expense).toBe('excluded'); // March itself IS covered
     expect(interpretTransaction(payApr, accs).expense).toBe('counted');
   });
 
-  it('BOTH a January and a March import together guard through the LATER (March) date', () => {
+  it('a January AND a March import guard ONLY January and March — February, the GAP between them, keeps counting (#14 round 3: the span hole)', () => {
+    // A [earliest, latest] span still gets this one wrong: it would treat
+    // February as covered too, purely because it sits between two real rows.
+    // It is not — nothing stands in for February's spend here.
     const rows = [statementRow('j1', '2026-01-10'), statementRow('m1', '2026-03-15')];
     const [, card] = withDerivedBalances(
       [chk, anchored], [...rows, payJan, payFeb, payMar, payApr], POSTED_ONLY
     );
-    expect(card.feedCoverageThrough).toBe('2026-03-15');
+    expect(card.feedCoveredPeriods).toEqual(new Set(['2026-01', '2026-03']));
     const accs = [chk, card];
     expect(interpretTransaction(payJan, accs).expense).toBe('excluded');
-    expect(interpretTransaction(payFeb, accs).expense).toBe('excluded');
+    expect(interpretTransaction(payFeb, accs).expense).toBe('counted'); // the gap — #14 round 3
     expect(interpretTransaction(payMar, accs).expense).toBe('excluded');
     expect(interpretTransaction(payApr, accs).expense).toBe('counted');
   });
@@ -200,7 +220,7 @@ describe('FEEDLESS-CARD-001: a historical statement import guards only ITS OWN p
   it('a PENDING row never trips the guard, no matter its date', () => {
     const pendingRow = statementRow('pend1', '2026-01-10', { pending: true });
     const [, card] = withDerivedBalances([chk, anchored], [pendingRow, payJan, payFeb], POSTED_ONLY);
-    expect(card.feedCoverageThrough).toBeUndefined();
+    expect(card.feedCoveredPeriods).toBeUndefined();
     const accs = [chk, card];
     expect(interpretTransaction(payJan, accs).expense).toBe('counted');
     expect(interpretTransaction(payFeb, accs).expense).toBe('counted');
@@ -211,11 +231,40 @@ describe('FEEDLESS-CARD-001: a historical statement import guards only ITS OWN p
     const [, card] = withDerivedBalances(
       [chk, anchored], [futureRow, payJan, payFeb, payMar], POSTED_ONLY
     );
-    expect(card.feedCoverageThrough).toBeUndefined();
+    expect(card.feedCoveredPeriods).toBeUndefined();
     const accs = [chk, card];
     expect(interpretTransaction(payJan, accs).expense).toBe('counted');
     expect(interpretTransaction(payFeb, accs).expense).toBe('counted');
     expect(interpretTransaction(payMar, accs).expense).toBe('counted');
+  });
+});
+
+describe('FEEDLESS-CARD-001: mutation-proof — coverage is a literal SET, not a range (#14 round 3)', () => {
+  // Kills the mutant that reintroduces a floor/ceiling/span: three qualifying
+  // rows (Jan, Mar, May) with TWO gaps (Feb, Apr) between them. A min/max-range
+  // check ("payment date falls between the earliest and latest covered row")
+  // would wrongly cover BOTH gaps at once; only an exact Set of periods gets
+  // both of them right simultaneously.
+  const anchored: PaymentAccount = { ...feedlessCard, openingBalance: 3000, openingDate: '2026-01-01' };
+  const pay = (id: string, date: string) =>
+    txn({ id, title: 'DISCOVER PAYMENT ACH PMT', amount: 150, accountId: 'chk', date });
+  const row = (id: string, date: string) => txn({ id, title: 'Some Merchant', amount: 20, accountId: 'amzn', date });
+
+  it('two separate gaps between three covered periods both keep counting', () => {
+    const rows = [row('j1', '2026-01-05'), row('m1', '2026-03-05'), row('my1', '2026-05-05')];
+    const payments = [
+      pay('jan', '2026-01-20'), pay('feb', '2026-02-20'), pay('mar', '2026-03-20'),
+      pay('apr', '2026-04-20'), pay('may', '2026-05-20'),
+    ];
+    const [, card] = withDerivedBalances([chk, anchored], [...rows, ...payments], POSTED_ONLY);
+    expect(card.feedCoveredPeriods).toEqual(new Set(['2026-01', '2026-03', '2026-05']));
+    const accs = [chk, card];
+    const expenseOf = (t: Transaction) => interpretTransaction(t, accs).expense;
+    expect(expenseOf(payments[0])).toBe('excluded'); // Jan: covered
+    expect(expenseOf(payments[1])).toBe('counted'); // Feb: gap 1
+    expect(expenseOf(payments[2])).toBe('excluded'); // Mar: covered
+    expect(expenseOf(payments[3])).toBe('counted'); // Apr: gap 2
+    expect(expenseOf(payments[4])).toBe('excluded'); // May: covered
   });
 });
 
@@ -261,6 +310,21 @@ describe('FEEDLESS-CARD-001: attribution resolves among ALL cards first, THEN ch
     const noDigitsAccounts = [chk, { ...feedlessDiscover, lastFourDigits: undefined }, secondFeedless];
     const ambiguous = txn({ id: 'p3', title: 'DISCOVER PAYMENT ACH PMT', amount: 500, accountId: 'chk', date: '2026-03-15' });
     expect(feedlessCardTargetOf(ambiguous, noDigitsAccounts)).toBeUndefined();
+  });
+
+  it('MINOR-4: two cards sharing the same last-four digits is a refused ambiguity, not a guess (mutation-proof for byDigits.length === 1)', () => {
+    // Without this fixture, mutating `byDigits.length === 1` to `>= 1` in
+    // feedlessCardTargetOf breaks nothing — no test puts TWO cards' digits in
+    // the same candidate pool. A duplicate/corrupt last-four is a real
+    // ambiguity: `>= 1` would silently pick `byDigits[0]` (whichever card
+    // happens to be first), `=== 1` correctly refuses to guess.
+    const dupeDigits: PaymentAccount = {
+      id: 'disc-feedless-dupe', name: 'Discover Duplicate', type: 'credit_card', provider: 'discover',
+      lastFourDigits: '5678', feedless: true, openingBalance: 0, color: '#777', isActive: true,
+    };
+    const dupeAccounts = [chk, feedlessDiscover, dupeDigits]; // both carry lastFourDigits '5678'
+    const ambiguous = txn({ id: 'p4', title: 'DISCOVER PAYMENT ACH PMT 5678', amount: 500, accountId: 'chk', date: '2026-03-15' });
+    expect(feedlessCardTargetOf(ambiguous, dupeAccounts)).toBeUndefined();
   });
 });
 

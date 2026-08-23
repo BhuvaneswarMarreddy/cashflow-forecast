@@ -200,21 +200,23 @@ export interface PaymentAccount {
    */
   feedless?: boolean;
   /**
-   * DERIVED in memory by withDerivedBalances(); never stored. The LATEST date
-   * this FEEDLESS account has a POSTED, already-happened row of its own (a feed
-   * connected, a CSV import, a single synced charge) — the double-count guard
-   * boundary (#14 round 2). A payment naming this card stops counting as spend
-   * once ITS OWN date is on/before this one: a real row already covers it, so
-   * the itemized row is the truth instead. Undefined = no qualifying row yet,
-   * so every payment still counts.
+   * DERIVED in memory by withDerivedBalances(); never stored. The SET of
+   * calendar periods (`YYYY-MM`) this FEEDLESS account has at least one POSTED,
+   * already-happened row of its own for (a feed connected, a CSV import, a
+   * single synced charge) — the double-count guard (#14 round 3). A payment
+   * naming this card stops counting as spend once ITS OWN period is a member
+   * of this set: a real row already covers that period, so the itemized row is
+   * the truth instead. Undefined/empty = no qualifying row yet, so every
+   * payment still counts.
    *
-   * Deliberately the LATEST, not the earliest: a single historical statement
-   * import (rows clustered in one past month) must guard only payments up
-   * through that import's own last row, not every month after it forever —
-   * see the per-payment predicate in classify.ts/forecast.ts for what using
-   * the earliest row as a permanent floor got wrong (#14 round 2).
+   * Deliberately a SET of exact periods, not a single floor/ceiling/span date:
+   * a single historical statement import (rows clustered in one past month)
+   * must guard only that month, not every month after it forever (round 2's
+   * bug), and a span between two real rows must not silently cover a gap month
+   * with nothing in it (round 2's own bug — see the doc on
+   * `feedCoveredPeriods()` in src/lib/forecast.ts for the measured numbers).
    */
-  feedCoverageThrough?: string;
+  feedCoveredPeriods?: ReadonlySet<string>;
   // Payment linking - which account pays this card/loan
   paymentFromAccountId?: string; // ID of the account that pays this credit card or loan
   // Loan specific fields

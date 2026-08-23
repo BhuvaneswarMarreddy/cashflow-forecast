@@ -43,7 +43,7 @@ export default function InsightsTab() {
 
   const money = (n: number) => formatMoney(n, profile?.currency, 2);
 
-  // CRITICAL-4 (#14): the feedless double-count guard lives on `feedCoverageThrough`,
+  // CRITICAL-4 (#14): the feedless double-count guard lives on `feedCoveredPeriods`,
   // attached IN MEMORY by withDerivedBalances() — never on the raw profile accounts.
   // Passing profile?.paymentAccounts straight to classify/forecast here meant this
   // tab's guard never tripped, disagreeing with every screen that derives first.
