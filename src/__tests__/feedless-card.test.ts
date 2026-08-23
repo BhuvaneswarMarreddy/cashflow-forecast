@@ -351,6 +351,32 @@ describe('FEEDLESS-CARD-001: an unanchored feedless card clamps at zero, never n
   });
 });
 
+describe('FEEDLESS-CARD-001: the zero clamp is gated on COVERAGE, not the `feedless` flag (IMPORTANT-2, #14 round 3)', () => {
+  // The `feedless` flag is a permanent account setting that never goes away, even
+  // once the card gains a real feed. Before this fix the clamp fired on the flag
+  // alone, so a feedless card WITH its own rows had the SAME arithmetic as any
+  // ordinary card but still got floored at $0 — hiding a real credit balance. The
+  // Amazon Store Card in this ledger carries $4,744 of refunds in
+  // (CSV_GROUND_TRUTH.md#3), the heaviest refund traffic of any account here.
+  const anchored: PaymentAccount = { ...feedlessCard, openingBalance: 100, openingDate: '2026-01-01' };
+  const refund = txn({
+    id: 'r1', title: 'REFUND - MERCHANT', type: 'income', amount: 900, accountId: 'amzn', date: '2026-02-01',
+  });
+
+  it('WITH coverage (a real row of its own): a $900 refund against a $100 balance reads -$800, not clamped to $0', () => {
+    expect(deriveAccountBalance(anchored, [refund], POSTED_ONLY, [chk, anchored])).toBe(-800);
+    const [, card] = withDerivedBalances([chk, anchored], [refund], POSTED_ONLY);
+    expect(card.currentBalance).toBe(-800);
+  });
+
+  it('WITHOUT coverage (no rows of its own — only a cross-account payment): the same $800 overshoot still clamps at $0, unchanged', () => {
+    const payment = txn({ id: 'p1', title: 'DISCOVER PAYMENT ACH PMT', amount: 900, accountId: 'chk', date: '2026-02-01' });
+    expect(deriveAccountBalance(anchored, [payment], POSTED_ONLY, [chk, anchored])).toBe(0);
+    const [, card] = withDerivedBalances([chk, anchored], [payment], POSTED_ONLY);
+    expect(card.currentBalance).toBe(0);
+  });
+});
+
 describe('FEEDLESS-CARD-001: regression — a user with no feedless accounts is unaffected', () => {
   const accounts = [chk, normalCard];
   const purchase = txn({ id: 'x1', title: 'Groceries', amount: 60, accountId: 'rewards', category: 'food' });

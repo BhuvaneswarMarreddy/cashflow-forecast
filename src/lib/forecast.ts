@@ -182,6 +182,10 @@ export function deriveAccountBalance(
   // doc for why a set of exact periods, not a floor/ceiling/span.
   const feedless = !!account.feedless && account.type === 'credit_card';
   const feedPeriods = feedless ? feedCoveredPeriods(account.id, transactions) : undefined;
+  // IMPORTANT-2 (#14 round 3): whether this card has ANY coverage at all — i.e. any
+  // qualifying row of its own, in any period. This, not the `feedless` FLAG, is what
+  // the zero clamp below must gate on.
+  const hasCoverage = !!feedPeriods && feedPeriods.size > 0;
 
   const net = transactions.reduce((sum, t) => {
     if (t.accountId === account.id) {
@@ -204,10 +208,11 @@ export function deriveAccountBalance(
 
   // CRITICAL-1/3 (#14): a feedless card's derived balance only ever moves DOWN —
   // payments reduce owed, and there is no feed to ever raise it back up — so an
-  // UNANCHORED feedless card (opening = 0 by construction, #83) goes NEGATIVE the
-  // moment any payment is recorded. A negative "owed" is not a real credit balance;
-  // it SUBTRACTS from every other card's debt in Cards-owed and INFLATES net worth,
-  // exactly the #83 class of bug (history measured against an invented zero).
+  // UNANCHORED feedless card with NO COVERAGE (opening = 0 by construction, #83)
+  // goes NEGATIVE the moment any payment is recorded. A negative "owed" is not a
+  // real credit balance; it SUBTRACTS from every other card's debt in Cards-owed
+  // and INFLATES net worth, exactly the #83 class of bug (history measured
+  // against an invented zero).
   //
   // The real fix is upstream: a feedless card should never be SAVED without an
   // anchor in the first place (accounts/page.tsx refuses that save). This is the
@@ -217,7 +222,16 @@ export function deriveAccountBalance(
   // render it, and a mid-render exception is worse than a floor of $0 ("we don't
   // owe less than nothing"). Clamping never HIDES money: it only stops an
   // impossible negative from being invented in the first place.
-  return feedless ? Math.max(0, owed) : owed;
+  //
+  // IMPORTANT-2 (#14 round 3): gated on `!hasCoverage`, NOT on the `feedless` flag
+  // alone. The flag is a permanent account setting; once a feedless card gains a
+  // real feed (rows of its own), `owed` is derived from those real rows same as any
+  // other card, and a negative owed there is a REAL credit balance (e.g. a refund
+  // larger than the balance) — clamping it to $0 would hide real money. Measured:
+  // the Amazon Store Card in this ledger carries $4,744 of refunds in
+  // (CSV_GROUND_TRUTH.md#3), the heaviest refund traffic of any account here; a
+  // $900 refund against a $100 balance must read -$800, not $0.
+  return feedless && !hasCoverage ? Math.max(0, owed) : owed;
 }
 
 /**
