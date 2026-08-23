@@ -312,7 +312,13 @@ export default function AccountsPage() {
       paymentFromAccountId: needsPaymentSource && accountForm.paymentFromAccountId ? accountForm.paymentFromAccountId : undefined,
       // #14: only meaningful on a card — a payment into it stands in for the
       // itemized purchases there is no feed to supply. See src/lib/classify.ts.
-      feedless: isCard && accountForm.feedless ? true : undefined,
+      //
+      // IMPORTANT-5: an explicit `false`, never `undefined` — updateAccount()
+      // (firestore.ts) strips `undefined` keys entirely (Firestore rejects
+      // `undefined`), so unticking the checkbox used to write NOTHING: the stored
+      // `feedless: true` survived untouched, silently re-arming the spending rule
+      // on reload even though the UI looked like it had turned off.
+      feedless: isCard && accountForm.feedless,
       originalAmount: isLoan ? parseFloat(accountForm.originalAmount) || undefined : undefined,
       monthlyPayment: isLoan ? parseFloat(accountForm.monthlyPayment) || undefined : undefined,
       loanTerm: isLoan ? parseInt(accountForm.loanTerm) || undefined : undefined,
