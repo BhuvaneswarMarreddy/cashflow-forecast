@@ -18,7 +18,10 @@ export interface UserProfileContextType {
   isLoading: boolean;
   isOnboarded: boolean;
   error: string | null;
-  updateProfile: (updates: Partial<UserProfile>) => Promise<void>;
+  // Returns whether the Firestore write actually confirmed — callers that need to
+  // show a real success/failure state (rather than the optimistic local update
+  // alone) read this instead of assuming the promise settling means it landed.
+  updateProfile: (updates: Partial<UserProfile>) => Promise<boolean>;
   addPaymentAccount: (account: Omit<PaymentAccount, 'id'>) => Promise<void>;
   // Create several accounts in one state update and return their ids in order. Used by
   // CSV import to auto-create the accounts a file references; a per-account loop over
@@ -221,8 +224,8 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
   }, [isAuthenticated, authLoading, user?.id, user, loadLocalProfile, syncFromFirestore, saveLocalProfile, profile]);
 
   // Update profile
-  const updateProfile = async (updates: Partial<UserProfile>) => {
-    if (!profile || !user?.id) return;
+  const updateProfile = async (updates: Partial<UserProfile>): Promise<boolean> => {
+    if (!profile || !user?.id) return false;
 
     // Merge settings properly
     const mergedSettings = updates.settings 
@@ -249,9 +252,11 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
 
         await firestoreService.updateUserSettings(user.id, firestoreSettings);
         setIsFirestoreOnline(true);
+        return true;
       } catch (err) {
         console.error('Failed to sync profile update:', err);
         setIsFirestoreOnline(false);
+        return false;
       }
     }
   };
