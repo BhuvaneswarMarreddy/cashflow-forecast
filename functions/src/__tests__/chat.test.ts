@@ -1,5 +1,5 @@
 import { buildChatMessages, CHAT_IMAGE_CAPS } from '../prompts';
-import { modelFor, successLogFields } from '../chat';
+import { modelFor, successLogFields, withServerSummary } from '../chat';
 import { AI_CONFIG } from '../ai-config';
 
 // content is `string | ChatContentPart[]` now that a user turn can carry an image; every
@@ -731,5 +731,49 @@ describe('successLogFields — counts-only success log', () => {
   // starting to bite as the prompt grows.
   it('flags a truncated completion so it is visible in logs, not just to the owner', () => {
     expect(successLogFields(true, 1200, true)).toEqual({ hasImage: true, durationMs: 1200, truncated: true });
+  });
+});
+
+/**
+ * LEDGER TOTALS are introduced to the model as "computed by the app over EVERY
+ * transaction. Complete, not a sample." Mobile never sent `summary`, so that
+ * block rendered "(no totals available)" and the phone's chat was structurally
+ * unable to answer any question involving a number — while the web, which built
+ * the summary client-side, could. It is now built server-side for both.
+ */
+describe('server-built ledger totals', () => {
+  const serverSummary = {
+    span: { from: '2026-01-01', to: '2026-08-23', transactions: 900 },
+    byCategoryThisMonth: [{ category: 'Groceries', spending: 840, count: 21 }],
+  } as unknown as Parameters<typeof withServerSummary>[1];
+
+  it('replaces whatever the caller supplied', () => {
+    const clientClaim = {
+      span: { from: '2020-01-01', to: '2020-01-02', transactions: 1 },
+      byCategoryThisMonth: [{ category: 'Groceries', spending: 1, count: 1 }],
+    } as unknown as Parameters<typeof withServerSummary>[1];
+
+    const out = withServerSummary(
+      { message: 'what did I spend', context: { summary: clientClaim } } as never,
+      serverSummary,
+    );
+
+    expect(out.context?.summary).toBe(serverSummary);
+  });
+
+  it('fills totals in for a caller that sent none, and they reach the prompt', () => {
+    const out = withServerSummary({ message: 'what did I spend' } as never, serverSummary);
+    const system = asText(buildChatMessages(out)[0].content);
+
+    expect(system).not.toContain('(no totals available)');
+    expect(system).toMatch(/Groceries \| 840\.00 \| 21 txns/);
+  });
+
+  it('keeps the rest of the context untouched', () => {
+    const out = withServerSummary(
+      { message: 'hi', context: { bills: [{ vendor: 'Rent', amount: 1, frequency: 'monthly' }] } } as never,
+      serverSummary,
+    );
+    expect(out.context?.bills).toHaveLength(1);
   });
 });
