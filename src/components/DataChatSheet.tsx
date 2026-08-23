@@ -175,6 +175,35 @@ export function planCategoryRemoval(
   };
 }
 
+/**
+ * FIN-SETTLEMENT-003 (see BalanceProposalCard's comment above for the same
+ * rule): "the confirmation must show the figure actually being moved." The
+ * preview above reads local state — `bills` is fetched once per profile, never
+ * refreshed (see the effect near the top of this component) — while the
+ * server (functions/src/categoryRemoval.ts) recomputes from a fresh ledger at
+ * the moment Apply is clicked. Those two can genuinely disagree: the owner
+ * approves what the preview showed, the server moves what is actually there.
+ * `null` when they match — nothing to say. Otherwise names the preview's
+ * numbers (the server's are already in the main "Saved —" sentence) and why.
+ */
+export function describeRemovalDivergence(
+  previewed: { transactions: number; rules: number; bills: number },
+  moved: { transactions: number; rules: number; bills: number }
+): string | null {
+  if (
+    previewed.transactions === moved.transactions &&
+    previewed.rules === moved.rules &&
+    previewed.bills === moved.bills
+  ) {
+    return null;
+  }
+  return `The preview showed ${previewed.transactions} transaction${previewed.transactions === 1 ? '' : 's'}, ${
+    previewed.rules
+  } rule${previewed.rules === 1 ? '' : 's'}, ${previewed.bills} bill${
+    previewed.bills === 1 ? '' : 's'
+  } — activity between the preview and Apply changed that, so the counts above are what actually moved.`;
+}
+
 export default function DataChatSheet({ open, onClose, seed }: {
   open: boolean;
   onClose: () => void;
@@ -570,9 +599,10 @@ export default function DataChatSheet({ open, onClose, seed }: {
    * transaction writes + M rule writes + bill writes + the settings archive,
    * none of it atomic, none of it reachable from mobile). It now calls
    * removeCategory (functions/src/categoryRemoval.ts), which does the whole
-   * sweep server-side in one request and hands back the real counts. The
-   * local settings/bills mirroring below is NOT a second write path — the
-   * server already wrote both — it just keeps THIS session's state (neither
+   * sweep server-side in one request — five stores now, not three; see that
+   * file's own doc comment — and hands back the real counts. The local
+   * settings/bills mirroring below is NOT a second write path — the server
+   * already wrote both — it just keeps THIS session's state (neither
    * UserProfileContext nor this component's own `bills` state has a live
    * listener) from reading stale until the next reload.
    */
@@ -602,13 +632,26 @@ export default function DataChatSheet({ open, onClose, seed }: {
       } else {
         const { value, reassignTo } = m.category;
 
+        // FIN-SETTLEMENT-003: recomputed from the SAME live state the card
+        // just rendered, so this is exactly what the owner approved — the
+        // basis for the divergence check below, once the server answers.
+        const previewPlan = planCategoryRemoval(value, transactions, rules, bills);
+        const previewed = {
+          transactions: previewPlan.transactionIds.length,
+          rules: previewPlan.ruleIds.length,
+          bills: previewPlan.billIds.length,
+        };
+
         // cashflow-mobile#28: ONE server-side callable does the whole sweep —
-        // every transaction, rule and bill filed under `value`, then the
+        // five stores now (see categoryRemoval.ts's doc comment), then the
         // settings archive — as chunked Firestore batches, atomically per
         // chunk. Either this resolves with the real counts, or it throws;
         // there is no client-visible partial-success state to reconcile.
         const result = await removeCategoryCallable(value, reassignTo);
-        const { transactions: txMoved, rules: ruleMoved, bills: billMoved } = result.moved;
+        const {
+          transactions: txMoved, rules: ruleMoved, bills: billMoved,
+          budgets: budgetMoved, plannedTransactions: plannedMoved,
+        } = result.moved;
 
         // Mirrors the server's own writes into local state — see the doc
         // comment above applyCategory for why this isn't a second write path.
@@ -621,10 +664,16 @@ export default function DataChatSheet({ open, onClose, seed }: {
           `${txMoved} transaction${txMoved === 1 ? '' : 's'}`,
           `${ruleMoved} rule${ruleMoved === 1 ? '' : 's'}`,
           `${billMoved} bill${billMoved === 1 ? '' : 's'}`,
+          `${budgetMoved} budget${budgetMoved === 1 ? '' : 's'}`,
+          `${plannedMoved} planned payment${plannedMoved === 1 ? '' : 's'}`,
         ];
+        // FIN-SETTLEMENT-003: when the preview and the server disagree, say
+        // so plainly instead of letting the server's number silently stand in
+        // for what was actually approved.
+        const divergence = describeRemovalDivergence(previewed, { transactions: txMoved, rules: ruleMoved, bills: billMoved });
         setMessages((prev) => [
           ...prev.map((x) => (x.id === m.id ? { ...x, status: 'applied' as const } : x)),
-          mk('assistant', `Saved — ${parts.join(', ')} moved to ${reassignLabel}.`),
+          mk('assistant', `Saved — ${parts.join(', ')} moved to ${reassignLabel}.${divergence ? ` ${divergence}` : ''}`),
         ]);
       }
     } catch {

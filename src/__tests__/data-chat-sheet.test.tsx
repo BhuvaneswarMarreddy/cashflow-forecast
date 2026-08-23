@@ -103,7 +103,7 @@ beforeEach(() => {
   addRule.mockReset();
   addBill.mockReset().mockResolvedValue('new-bill-id');
   getBills.mockReset().mockResolvedValue([]);
-  removeCategory.mockReset().mockResolvedValue({ moved: { transactions: 0, rules: 0, bills: 0 } });
+  removeCategory.mockReset().mockResolvedValue({ moved: { transactions: 0, rules: 0, bills: 0, budgets: 0, plannedTransactions: 0 } });
   updateProfile.mockReset().mockResolvedValue(undefined);
   PROFILE_SETTINGS = {};
   RULES = [];
@@ -930,7 +930,7 @@ describe('the remove_category proposal card', () => {
     RULES = [vacationRule];
     EXTRA_TRANSACTIONS = [vacationTxn];
     getBills.mockResolvedValue([vacationBill]);
-    removeCategory.mockResolvedValue({ moved: { transactions: 1, rules: 1, bills: 1 } });
+    removeCategory.mockResolvedValue({ moved: { transactions: 1, rules: 1, bills: 1, budgets: 0, plannedTransactions: 0 } });
   });
 
   it('shows the exact counts BEFORE applying, and calls NOTHING until Apply', async () => {
@@ -959,9 +959,56 @@ describe('the remove_category proposal card', () => {
       settings: { categories: [{ value: 'vacations', label: 'Vacations', archived: true }] },
     });
     // The server's counts, not a client-side recount — this message would lie
-    // if it echoed the PREVIEW instead of `result.moved`.
-    expect(await screen.findByText('Saved — 1 transaction, 1 rule, 1 bill moved to Other.')).toBeInTheDocument();
+    // if it echoed the PREVIEW instead of `result.moved`. Preview and server
+    // agree here (fixture matches the mock 1-for-1), so no divergence note.
+    expect(await screen.findByText('Saved — 1 transaction, 1 rule, 1 bill, 0 budgets, 0 planned payments moved to Other.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+  });
+
+  /**
+   * cashflow-mobile#28-followup: the sweep now covers categoryBudgets and
+   * plannedTransactions too — the applied message must report those counts,
+   * not just transactions/rules/bills.
+   */
+  it('reports non-zero budget and planned-payment counts the preview never showed', async () => {
+    removeCategory.mockResolvedValue({ moved: { transactions: 1, rules: 1, bills: 1, budgets: 2, plannedTransactions: 3 } });
+    aiChat.mockResolvedValue(proposal());
+    render(<DataChatSheet open onClose={() => {}} />);
+    await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+    send('remove the Vacations category');
+    await screen.findByText(/will move to Other/);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    expect(await screen.findByText('Saved — 1 transaction, 1 rule, 1 bill, 2 budgets, 3 planned payments moved to Other.')).toBeInTheDocument();
+  });
+
+  /**
+   * FIN-SETTLEMENT-003: the preview reads local state (bills fetched once per
+   * profile, never refreshed); the server recomputes fresh at click time. When
+   * they genuinely disagree, the applied message must say so — never let the
+   * server's number silently stand in for what the owner actually approved.
+   */
+  it('names the preview\'s numbers when the server moved a different count than the preview showed', async () => {
+    // Preview (fixture) shows 1 transaction, 1 rule, 1 bill. The server
+    // reports 3 transactions moved — new activity arrived between preview and
+    // Apply (e.g. another Cabo charge landed in the meantime).
+    removeCategory.mockResolvedValue({ moved: { transactions: 3, rules: 1, bills: 1, budgets: 0, plannedTransactions: 0 } });
+    aiChat.mockResolvedValue(proposal());
+    render(<DataChatSheet open onClose={() => {}} />);
+    await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+    send('remove the Vacations category');
+    await screen.findByText('Remove "Vacations" — 1 transaction, 1 rule, 1 bill will move to Other');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    // The actual (server) counts lead the sentence...
+    expect(await screen.findByText(
+      /Saved — 3 transactions, 1 rule, 1 bill, 0 budgets, 0 planned payments moved to Other\./
+    )).toBeInTheDocument();
+    // ...and the divergence note names the preview's own number and why it changed.
+    expect(screen.getByText(/The preview showed 1 transaction, 1 rule, 1 bill/)).toBeInTheDocument();
+    expect(screen.getByText(/activity between the preview and Apply changed that/)).toBeInTheDocument();
   });
 
   it('reassigns to an explicit target when the model named one, instead of the "other" default', async () => {
@@ -991,7 +1038,7 @@ describe('the remove_category proposal card', () => {
     RULES = [];
     EXTRA_TRANSACTIONS = [];
     getBills.mockResolvedValue([]);
-    removeCategory.mockResolvedValue({ moved: { transactions: 0, rules: 0, bills: 0 } });
+    removeCategory.mockResolvedValue({ moved: { transactions: 0, rules: 0, bills: 0, budgets: 0, plannedTransactions: 0 } });
     aiChat.mockResolvedValue(proposal());
     render(<DataChatSheet open onClose={() => {}} />);
     await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
@@ -1024,7 +1071,7 @@ describe('the remove_category proposal card', () => {
     // Not marked applied: the same Apply button is still there to retry.
     expect(screen.getByRole('button', { name: 'Apply' })).toBeInTheDocument();
 
-    removeCategory.mockResolvedValue({ moved: { transactions: 1, rules: 1, bills: 1 } });
+    removeCategory.mockResolvedValue({ moved: { transactions: 1, rules: 1, bills: 1, budgets: 0, plannedTransactions: 0 } });
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     await waitFor(() => expect(updateProfile).toHaveBeenCalledTimes(1));
   });
