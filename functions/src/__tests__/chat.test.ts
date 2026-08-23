@@ -474,7 +474,13 @@ describe('ChatContext — bills/upcoming/recurring sections (#22)', () => {
     // Bumped again (cashflow-mobile#34): the same +2839 chars as the test above — EDIT
     // OR REMOVE A BILL is constant text, unaffected by how many bills are in context.
     // Measured 46975.
-    expect(system.length).toBeLessThan(47200);
+    // Bumped again: the rule that set.sourceCategory must accompany set.category
+    // (rows render sourceCategory ?? category, so category alone left the row
+    // showing its old label). Constant text, unaffected by context size. The
+    // first draft of that wording overshot this bound and failed CI at 47346 —
+    // it was tightened rather than accommodated, since every character here is
+    // paid on every call. Measured 47155.
+    expect(system.length).toBeLessThan(47400);
   });
 
   it('caps bills/upcoming/recurring and reports what was left out, same convention as merchants/months', () => {
