@@ -22,7 +22,7 @@ import { HttpsError, onCall } from 'firebase-functions/v2/https';
 
 import { currentOf, isUnanchored, sortAccounts } from '@/lib/accounts';
 import { billUpcomingEvents, isCharging, nonNegotiableMonthly, PAYMENT_METHODS, type Bill } from '@/lib/bills';
-import { isPositive, type IncomeContext } from '@/lib/classify';
+import { classifyTransaction, isPositive, type IncomeContext } from '@/lib/classify';
 import {
   calculateCurrentCash,
   generateForecast,
@@ -242,6 +242,15 @@ export function mapTransaction(transaction: Transaction, accounts: PaymentAccoun
   // The SAME sign resolver `deriveAccountBalance` uses, so a row's displayed
   // direction can never contradict its effect on the balance.
   const inflow = isPositive(transaction, accounts);
+  // Finding 3. The raw stored `transaction.type` names which LEG of a
+  // credit-card payment a row is — the card-side leg is stored 'income' even
+  // though no income occurred — so reading it directly labelled a $500
+  // self-payment with the phone's green income icon. classifyTransaction()
+  // is the authoritative call (also used by isPositive above, and by the web
+  // equivalent at src/app/history/page.tsx:137,248): it recognises that same
+  // leg as a transfer. No total changes — mapTransaction never fed a sum,
+  // only this display label.
+  const type = classifyTransaction(transaction, accounts);
   return {
     id: transaction.id,
     accountId: transaction.accountId ?? '',
@@ -253,9 +262,9 @@ export function mapTransaction(transaction: Transaction, accounts: PaymentAccoun
     category: transaction.sourceCategory ?? transaction.category,
     pending: transaction.pending ?? false,
     kind:
-      transaction.type === 'income'
+      type === 'income'
         ? ('income' as const)
-        : transaction.type === 'transfer'
+        : type === 'transfer'
           ? ('transfer' as const)
           : ('purchase' as const),
   };

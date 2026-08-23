@@ -88,6 +88,70 @@ describe('snapshot mapping', () => {
     };
     expect(mapAccount(unanchored).status).toBe('stale');
   });
+
+  /**
+   * Finding 3. `kind` used to read the RAW stored `transaction.type` — but a
+   * credit-card settlement arrives as TWO legs, and the card-side leg is
+   * stored `type: 'income'` even though nothing was earned. Reading it raw
+   * rendered a $500 self-payment on the phone's Activity feed with the green
+   * income icon. classifyTransaction() (also what `isPositive` above and the
+   * web equivalent, src/app/history/page.tsx:137,248, both call) recognises
+   * both legs of the settlement as transfers.
+   */
+  describe('mapTransaction — kind comes from classifyTransaction, not the raw stored type', () => {
+    const card: PaymentAccount = {
+      id: 'card',
+      name: 'Chase Card',
+      type: 'credit_card',
+      provider: 'chase',
+      color: '#000000',
+      isActive: true,
+      openingBalance: 0,
+      openingDate: '2026-01-01',
+      creditLimit: 5000,
+    };
+    const bank: PaymentAccount = {
+      id: 'bank',
+      name: 'Checking',
+      type: 'bank_account',
+      provider: 'bank-transfer',
+      color: '#000000',
+      isActive: true,
+      openingBalance: 1000,
+      openingDate: '2026-01-01',
+    };
+    const accounts = [card, bank];
+
+    it('the CARD leg — stored type "income" — maps to kind "transfer", not "income"', () => {
+      const cardLeg = txn({
+        id: 'card-leg', title: 'Chase Card Payment', amount: 500, type: 'income', accountId: 'card',
+      });
+      expect(mapTransaction(cardLeg, accounts).kind).toBe('transfer');
+    });
+
+    it('the BANK leg — the funding debit — also maps to kind "transfer", not "purchase"', () => {
+      const bankLeg = txn({
+        id: 'bank-leg', title: 'Chase Card Payment', amount: 500, type: 'expense', accountId: 'bank',
+      });
+      expect(mapTransaction(bankLeg, accounts).kind).toBe('transfer');
+    });
+
+    it('an ordinary purchase on the card still maps to kind "purchase" — the fix does not over-widen', () => {
+      const purchase = txn({
+        id: 'groceries', title: 'Trader Joes', amount: 40, type: 'expense', accountId: 'card',
+      });
+      expect(mapTransaction(purchase, accounts).kind).toBe('purchase');
+    });
+
+    it('amountCents is untouched — only the label changes, never a total', () => {
+      const cardLeg = txn({
+        id: 'card-leg', title: 'Chase Card Payment', amount: 500, type: 'income', accountId: 'card',
+      });
+      // A card-side settlement credit reduces debt, so isPositive() renders it
+      // positive on the card — same sign as before this fix.
+      expect(mapTransaction(cardLeg, accounts).amountCents).toBe(50_000);
+    });
+  });
 });
 
 /**
