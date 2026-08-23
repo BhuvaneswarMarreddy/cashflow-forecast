@@ -109,6 +109,7 @@ export default function AccountsPage() {
     dueDate: '',
     lastFourDigits: '',
     paymentFromAccountId: '', // Which checking account pays this card/loan
+    feedless: false, // #14: no transaction feed of its own — a payment IS the expense
     // Loan specific
     originalAmount: '',
     monthlyPayment: '',
@@ -226,6 +227,7 @@ export default function AccountsPage() {
       dueDate: account.dueDate?.toString() || '',
       lastFourDigits: account.lastFourDigits || '',
       paymentFromAccountId: account.paymentFromAccountId || '',
+      feedless: account.feedless || false,
       originalAmount: account.originalAmount?.toString() || '',
       monthlyPayment: account.monthlyPayment?.toString() || '',
       loanTerm: account.loanTerm?.toString() || '',
@@ -300,6 +302,9 @@ export default function AccountsPage() {
       dueDate: (isCard || isLoan) ? (accountForm.dueDate ? parseInt(accountForm.dueDate) : undefined) : undefined,
       lastFourDigits: accountForm.lastFourDigits || undefined,
       paymentFromAccountId: needsPaymentSource && accountForm.paymentFromAccountId ? accountForm.paymentFromAccountId : undefined,
+      // #14: only meaningful on a card — a payment into it stands in for the
+      // itemized purchases there is no feed to supply. See src/lib/classify.ts.
+      feedless: isCard && accountForm.feedless ? true : undefined,
       originalAmount: isLoan ? parseFloat(accountForm.originalAmount) || undefined : undefined,
       monthlyPayment: isLoan ? parseFloat(accountForm.monthlyPayment) || undefined : undefined,
       loanTerm: isLoan ? parseInt(accountForm.loanTerm) || undefined : undefined,
@@ -357,6 +362,7 @@ export default function AccountsPage() {
       dueDate: '',
       lastFourDigits: '',
       paymentFromAccountId: '',
+      feedless: false,
       originalAmount: '',
       monthlyPayment: '',
       loanTerm: '',
@@ -1118,6 +1124,20 @@ export default function AccountsPage() {
                       className="input-field"
                     />
                   </div>
+                  <label className="flex items-start gap-2 p-3 rounded-control bg-[var(--accent-primary)]/5 border border-[var(--accent-primary)]/20 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={accountForm.feedless}
+                      onChange={(e) => setAccountForm({ ...accountForm, feedless: e.target.checked })}
+                      className="mt-0.5"
+                    />
+                    <span className="text-sm text-[var(--foreground-secondary)]">
+                      <span className="font-medium text-[var(--foreground)]">No transaction feed</span>
+                      {' '}(e.g. an Amazon Store Card). Each payment INTO this card counts as the expense
+                      itself, on the payment date — see the double-count guard note in classify.ts if this
+                      card later gains a feed.
+                    </span>
+                  </label>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">Statement Date</label>

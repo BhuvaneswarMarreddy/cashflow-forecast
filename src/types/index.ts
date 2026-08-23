@@ -190,6 +190,24 @@ export interface PaymentAccount {
    */
   openingDate?: string;
   currentBalance?: number; // DERIVED in memory by withDerivedBalances; never stored
+  /**
+   * No transaction feed of its own — an Amazon-store-card-style account whose
+   * purchases never arrive as itemized rows (#14). A PAYMENT into this account
+   * then stands in for the missing itemized spend and counts as the expense
+   * itself, on the payment's own date — see interpretTransaction() (classify.ts)
+   * and deriveAccountBalance() (forecast.ts). Undefined/false = ordinary
+   * account, behavior unchanged.
+   */
+  feedless?: boolean;
+  /**
+   * DERIVED in memory by withDerivedBalances(); never stored. Earliest date this
+   * FEEDLESS account has ITEMIZED rows of its own (a feed connected, or a CSV
+   * import) — the double-count guard boundary (#14). A payment naming this card
+   * stops counting as spend once ITS OWN date reaches this one: the real
+   * itemized rows are the truth from there on. Undefined = still no feed, so
+   * every payment still counts.
+   */
+  feedStartsAt?: string;
   // Payment linking - which account pays this card/loan
   paymentFromAccountId?: string; // ID of the account that pays this credit card or loan
   // Loan specific fields

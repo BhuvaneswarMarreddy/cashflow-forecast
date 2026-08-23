@@ -16,8 +16,8 @@ import {
   AccountForecast 
 } from '@/types';
 import { addDays, format, parseISO, startOfDay, isBefore, isAfter, isSameDay } from 'date-fns';
-import { isPositive, classifyTransaction, interpretTransaction, isPosted, IncomeContext } from '@/lib/classify';
-import { currentOf } from '@/lib/accounts';
+import { isPositive, classifyTransaction, interpretTransaction, isPosted, IncomeContext, feedlessCardTargetOf } from '@/lib/classify';
+import { currentOf, earliestRowDate } from '@/lib/accounts';
 import { buildAssumptions, behaviorEvents, AssumptionOverrides } from '@/lib/behavior';
 import { normalizeMerchant } from '@/lib/flows';
 
@@ -116,25 +116,50 @@ export function calculateCurrentCash(accounts: PaymentAccount[]): number {
 export function deriveAccountBalance(
   account: PaymentAccount,
   transactions: Transaction[],
-  policy: IncomeContext
+  policy: IncomeContext,
+  /**
+   * FEEDLESS-CARD-001 (#14). Every OTHER account, needed ONLY to identify which
+   * feedless card a payment sitting on a DIFFERENT account names — see the
+   * cross-account branch below. Every pre-existing caller omits it, and a
+   * feedless card's balance then simply never moves off its anchor, which is
+   * the safe do-nothing default.
+   */
+  allAccounts?: PaymentAccount[]
 ): number {
   const includePending = policy?.includePending ?? false;
   const todayKey = format(new Date(), 'yyyy-MM-dd');
   const openingKey = account.openingDate || '0000-00-00';
   const isDebt = account.type === 'credit_card' || account.type === 'personal_loan';
-  const net = transactions.reduce((sum, t) => {
-    if (t.accountId !== account.id) return sum;
+  const inWindow = (t: Transaction) => {
     // PENDING: excluded by DEFAULT. The anchor this is added to is the provider's POSTED
     // balance (simplefin.py re-anchors from `balance`, not available-balance), so
     // folding holds in here counts the same money twice and moves the hero number.
     // `includePending` is the owner's explicit "show me the balance once these clear"
     // view — opt-in only, and never the number any total or forecast reads.
-    if (!isPosted(t) && !includePending) return sum;
+    if (!isPosted(t) && !includePending) return false;
     // Compare calendar days, not instants (IST timezone; see git history).
     const day = t.date.split('T')[0];
-    if (day > todayKey) return sum;   // future = forecast, not current balance
-    if (day < openingKey) return sum; // pre-anchor = already inside openingBalance
-    return sum + (isPositive(t, [account]) ? t.amount : -t.amount);
+    return day <= todayKey && day >= openingKey; // future/pre-anchor excluded
+  };
+  // A feedless card's OWN rows (once a feed connects) are the guard boundary: a
+  // payment dated on/after this stops standing in for them. Reuses earliestRowDate
+  // (src/lib/accounts.ts) instead of re-deriving "the earliest own row" a second way.
+  const feedless = !!account.feedless && account.type === 'credit_card';
+  const feedStart = feedless ? earliestRowDate(account.id, transactions) : undefined;
+
+  const net = transactions.reduce((sum, t) => {
+    if (t.accountId === account.id) {
+      return inWindow(t) ? sum + (isPositive(t, [account]) ? t.amount : -t.amount) : sum;
+    }
+    // FEEDLESS-CARD-001: a payment landing on ANOTHER account that names THIS
+    // feedless card stands in for its missing feed — the same rule classify.ts's
+    // interpretTransaction applies to the expense side, so the balance this card
+    // shows and the spend the payment counts as never disagree.
+    if (!feedless || !allAccounts || !inWindow(t)) return sum;
+    const day = t.date.split('T')[0];
+    if (feedStart !== undefined && day >= feedStart) return sum; // guard: own rows take over
+    if (feedlessCardTargetOf(t, allAccounts)?.id !== account.id) return sum;
+    return sum + t.amount; // a payment always reduces debt
   }, 0);
   const opening = account.openingBalance || 0;
   // Debt is stored as a positive amount owed: a purchase (signedEffect < 0) raises it,
@@ -154,7 +179,16 @@ export function withDerivedBalances(
   transactions: Transaction[],
   policy: IncomeContext
 ): PaymentAccount[] {
-  return accounts.map((a) => ({ ...a, currentBalance: deriveAccountBalance(a, transactions, policy) }));
+  return accounts.map((a) => {
+    // FEEDLESS-CARD-001 (#14): attach the guard boundary onto the account object
+    // itself so interpretTransaction() — which only ever sees `accounts`, never
+    // the full transaction list — can see it too, wherever these derived
+    // accounts get passed on from here.
+    const feedStartsAt =
+      a.feedless && a.type === 'credit_card' ? earliestRowDate(a.id, transactions) : undefined;
+    const withGuard = feedStartsAt ? { ...a, feedStartsAt } : a;
+    return { ...withGuard, currentBalance: deriveAccountBalance(withGuard, transactions, policy, accounts) };
+  });
 }
 
 /**

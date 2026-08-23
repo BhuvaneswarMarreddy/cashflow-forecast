@@ -91,6 +91,33 @@ function isCardSettlement(t: Classifiable, accounts?: PaymentAccount[]): boolean
   return t.type !== 'income' && namesOwnCard(title, accounts);
 }
 
+/**
+ * Which FEEDLESS credit card, if any, this row is a PAYMENT TO — the "no
+ * transaction feed of its own" case FEEDLESS-CARD-001 (#14) exists for.
+ *
+ * A normal card settlement is caught on ITS OWN leg (the credit landing on the
+ * card account) — see isCardSettlement. A feedless card never has one, so the
+ * funding leg's title is the only evidence there is; this resolves it to a
+ * SPECIFIC account rather than isCardSettlement's plain yes/no. lastFourDigits
+ * is preferred (unambiguous); an issuer alias only resolves when exactly one
+ * feedless card of that issuer exists — two feedless Chase cards with no digits
+ * on file is a real ambiguity, not a guess this function should make.
+ */
+export function feedlessCardTargetOf(
+  t: Classifiable,
+  accounts?: PaymentAccount[]
+): PaymentAccount | undefined {
+  if (!isCardSettlement(t, accounts)) return undefined;
+  const account = linkedAccount(t, accounts);
+  if (account?.type === 'credit_card') return undefined; // this row IS the card leg
+  const title = t.title.toLowerCase();
+  const feedlessCards = (accounts ?? []).filter((a) => a.type === 'credit_card' && a.feedless);
+  const byDigits = feedlessCards.find((a) => a.lastFourDigits && title.includes(a.lastFourDigits));
+  if (byDigits) return byDigits;
+  const byIssuer = feedlessCards.filter((a) => (ISSUER_ALIASES[a.provider] ?? []).some((w) => title.includes(w)));
+  return byIssuer.length === 1 ? byIssuer[0] : undefined;
+}
+
 export function classifyTransaction(
   t: Classifiable,
   accounts?: PaymentAccount[]
@@ -416,7 +443,7 @@ export interface TransactionInterpretation {
 }
 
 export function interpretTransaction(
-  t: Inflow,
+  t: Inflow & Pick<Transaction, 'date'>,
   accounts?: PaymentAccount[],
   income?: IncomeContext
 ): TransactionInterpretation {
@@ -426,6 +453,18 @@ export function interpretTransaction(
   const inflow = isPositive(t, accounts);
   const settlement = type === 'transfer' && isCardSettlement(t, accounts);
   const pending: 'posted' | 'pending' = t.pending ? 'pending' : 'posted';
+
+  // FEEDLESS-CARD-001 (#14). A payment naming a FEEDLESS card stands in for its
+  // missing itemized feed — UNLESS the guard has tripped: that card already has
+  // rows of its own (feedStartsAt, attached by withDerivedBalances) on/after
+  // THIS payment's date, in which case the real rows are the truth and this
+  // reverts to the ordinary settlement reading below. Inclusive boundary: a
+  // payment dated the SAME day the feed's first row appears already has a real
+  // row to double with.
+  const feedlessTarget = settlement ? feedlessCardTargetOf(t, accounts) : undefined;
+  const feedGuardTripped =
+    !!feedlessTarget?.feedStartsAt && t.date.slice(0, 10) >= feedlessTarget.feedStartsAt;
+  const feedless = feedlessTarget && !feedGuardTripped ? feedlessTarget : undefined;
 
   // Refund/reward only on a debt account for the inbound case, mirroring how
   // buildFlowGraph() already splits them out — so Flow and every other surface
@@ -444,19 +483,23 @@ export function interpretTransaction(
     // says the derived meaning sets what a proposal DEFAULTS to, and only a confirmation
     // moves a number.
     const external = !settlement && namesExternalCounterparty(t);
-    meaning = settlement ? 'card_payment' : external ? 'external_transfer' : 'internal_transfer';
+    meaning = feedless ? 'spending' : settlement ? 'card_payment' : external ? 'external_transfer' : 'internal_transfer';
     if (t.type === 'transfer') {
-      confidence = 1;
-      reason = external
-        ? 'stored type is transfer, but the row names someone who is not you'
-        : 'stored type is transfer (provider-sourced); never re-derived';
-    } else {
-      confidence = 0.8;
-      reason = settlement
-        ? 'title matches a card-payment form and names a card account of yours'
+      confidence = feedless ? 0.7 : 1;
+      reason = feedless
+        ? `${feedlessTarget!.name} has no transaction feed of its own — this payment is treated as the expense (#14)`
         : external
-          ? 'title matches a transfer form but names an external counterparty'
-          : 'title matches a transfer form';
+          ? 'stored type is transfer, but the row names someone who is not you'
+          : 'stored type is transfer (provider-sourced); never re-derived';
+    } else {
+      confidence = feedless ? 0.7 : 0.8;
+      reason = feedless
+        ? `${feedlessTarget!.name} has no transaction feed of its own — this payment is treated as the expense (#14)`
+        : settlement
+          ? 'title matches a card-payment form and names a card account of yours'
+          : external
+            ? 'title matches a transfer form but names an external counterparty'
+            : 'title matches a transfer form';
     }
   } else if (debt && inflow && isReward(named)) {
     meaning = 'reward';
@@ -539,6 +582,12 @@ export function interpretTransaction(
   // forgets to ask still gets 'excluded', which is why the default is the safe one.
   const held = pending === 'pending' && !income?.includePending;
   if (held) reason += '; pending hold, excluded from posted totals';
+  // FEEDLESS-CARD-001 (#14) double-count guard, made LOUD: say exactly why a
+  // payment that would otherwise count as spend does not, once the card it
+  // names already has itemized rows of its own for this period.
+  if (feedGuardTripped) {
+    reason += `; ${feedlessTarget!.name} already has itemized rows on/after ${feedlessTarget!.feedStartsAt} — this payment is excluded to avoid double-counting, flagged for review`;
+  }
 
   // A CONFIRMED meaning decides its own treatment; a DERIVED one still defers to the
   // classifier's type. Without this split the override above would change the label and
@@ -553,7 +602,7 @@ export function interpretTransaction(
   // Recurrence detection is what stops a finished loan projecting, not the meaning.
   const settledAsTransfer = confirmed
     ? financialMeaning === 'internal_transfer' || financialMeaning === 'card_payment'
-    : type === 'transfer';
+    : type === 'transfer' && !feedless; // FEEDLESS-CARD-001: this leg IS the spend now
 
   // The ONE earned-income gate. `type === 'income'` alone used to be enough, which is
   // how refunds, reimbursements and one-off deposits became salary.
@@ -562,7 +611,7 @@ export function interpretTransaction(
       ? 'counted'
       : 'excluded';
   const expense: Treatment =
-    !held && (confirmed ? personalCostSign(financialMeaning) === 1 : type === 'expense')
+    !held && (confirmed ? personalCostSign(financialMeaning) === 1 : type === 'expense' || !!feedless)
       ? 'counted'
       : 'excluded';
 
@@ -580,6 +629,7 @@ export function interpretTransaction(
     // having confirmed anything, which is the line FIN-SETTLEMENT-003 draws.
     transfer:
       type !== 'transfer' ? 'none'
+      : feedless ? 'none' // FEEDLESS-CARD-001: spend now, not a settlement leg
       : settlement ? 'card_settlement'
       : confirmed && financialMeaning === 'gift_or_personal_transfer' ? 'none'
       : 'internal_leg',
@@ -634,7 +684,7 @@ export function withoutSupersededHolds<T extends Pick<Transaction, 'id' | 'pendi
   return ts.filter((t) => !(t.pending && superseded.has(t.id)));
 }
 
-type Summable = Inflow & Pick<Transaction, 'amount'>;
+type Summable = Inflow & Pick<Transaction, 'amount' | 'date'>;
 
 const sumBy = (
   ts: Summable[],
