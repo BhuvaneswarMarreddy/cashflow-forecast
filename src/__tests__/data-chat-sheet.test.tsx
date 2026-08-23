@@ -17,6 +17,7 @@ const addBill = jest.fn();
 const getBills = jest.fn();
 // cashflow-mobile#34
 const updateBill = jest.fn();
+const deleteBill = jest.fn();
 // cashflow-mobile#28: the server-side sweep — replaces the old per-row
 // updateTransactionAwaited/updateRuleCategoryAwaited/updateBill mocks below.
 const removeCategory = jest.fn();
@@ -31,6 +32,7 @@ jest.mock('@/lib/firestore', () => ({
   addBill: (...args: unknown[]) => addBill(...args),
   getBills: (...args: unknown[]) => getBills(...args),
   updateBill: (...args: unknown[]) => updateBill(...args),
+  deleteBill: (...args: unknown[]) => deleteBill(...args),
 }));
 
 const txn = (id: string, title: string, merchant: string): Transaction => ({
@@ -107,6 +109,7 @@ beforeEach(() => {
   addBill.mockReset().mockResolvedValue('new-bill-id');
   getBills.mockReset().mockResolvedValue([]);
   updateBill.mockReset().mockResolvedValue(undefined);
+  deleteBill.mockReset().mockResolvedValue(undefined);
   removeCategory.mockReset().mockResolvedValue({ moved: { transactions: 0, rules: 0, bills: 0, budgets: 0, plannedTransactions: 0 } });
   updateProfile.mockReset().mockResolvedValue(undefined);
   PROFILE_SETTINGS = {};
@@ -670,12 +673,14 @@ describe('the record_bill card and Defect 1 — nextDueDate wires anchorDate thr
 });
 
 /**
- * cashflow-mobile#34. The owner scenario this closes (part 1): an installment named
- * only "A"/"B"/"C"/"D" (a statement line never says what an installment bought) needs
- * to be renamed to the real product, or marked finished. RESOLUTION is the hard part:
- * a vendor match that could mean more than one row must refuse, never guess.
+ * cashflow-mobile#34. The owner scenario this closes: "clear the rest apple card
+ * instalment c b a" — the chat could record_bill but had no way to edit or remove
+ * one, so a finished installment sat in Upcoming forever and an installment named
+ * only "A"/"B"/"C"/"D" (a statement line never says what it bought) could never be
+ * renamed to the real product. RESOLUTION is the hard part: a vendor match that
+ * could mean more than one row must refuse, never guess.
  */
-describe('update_bill — cashflow-mobile#34', () => {
+describe('update_bill / remove_bill — cashflow-mobile#34', () => {
   const installmentA = {
     id: 'bill-a', vendor: 'Apple Card Installment A', amount: 45.79, frequency: 'monthly' as const,
     paymentMethodId: 'apple-card', migrationStatus: 'to-review' as const, lifecycleStatus: 'active' as const,
@@ -690,7 +695,7 @@ describe('update_bill — cashflow-mobile#34', () => {
     getBills.mockResolvedValue(INSTALLMENTS);
   });
 
-  describe('resolveBill — the resolution both the update and remove cards are built on', () => {
+  describe('resolveBill — the resolution the cards are built on', () => {
     it('billId resolves exactly, even when the vendor field alone would be ambiguous', () => {
       expect(resolveBill({ billId: 'bill-c', vendor: 'Apple Card Installment' }, INSTALLMENTS)).toBe(installmentC);
     });
@@ -811,6 +816,55 @@ describe('update_bill — cashflow-mobile#34', () => {
 
       fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
       expect(updateBill).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('the remove_bill card', () => {
+    const proposal = (over: Record<string, unknown> = {}) => ({
+      success: true,
+      result: {
+        action: 'remove_bill',
+        match: { vendor: 'Apple Card Installment D' },
+        reason: 'Installment D was recorded by mistake.',
+        ...over,
+      },
+    });
+
+    it('names exactly what will disappear — writes NOTHING until Apply', async () => {
+      aiChat.mockResolvedValue(proposal());
+      render(<DataChatSheet open onClose={() => {}} />);
+      await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+      send('installment D was a mistake, remove it');
+
+      expect(await screen.findByText('Remove Apple Card Installment D — $59.00 monthly, permanently')).toBeInTheDocument();
+      expect(deleteBill).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+      await waitFor(() => expect(deleteBill).toHaveBeenCalledWith('user-1', 'bill-d'));
+      expect(await screen.findByText('Saved — Apple Card Installment D removed. $59.00 monthly is no longer in Upcoming.')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+    });
+
+    it('an ambiguous vendor gets words and NO button', async () => {
+      aiChat.mockResolvedValue(proposal({ match: { vendor: 'Apple Card Installment' } }));
+      render(<DataChatSheet open onClose={() => {}} />);
+      await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+      send('remove the apple card installment');
+
+      expect(await screen.findByText(/couldn't match .Apple Card Installment. to exactly one of your bills/)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+      expect(deleteBill).not.toHaveBeenCalled();
+    });
+
+    it('Cancel drops the proposal without deleting anything', async () => {
+      aiChat.mockResolvedValue(proposal());
+      render(<DataChatSheet open onClose={() => {}} />);
+      await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
+      send('remove installment D');
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+      expect(deleteBill).not.toHaveBeenCalled();
     });
   });
 

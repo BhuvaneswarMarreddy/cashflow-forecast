@@ -707,6 +707,53 @@ describe('update_bill — cashflow-mobile#34', () => {
   });
 });
 
+describe('remove_bill — cashflow-mobile#34', () => {
+  const valid = { action: 'remove_bill', match: { vendor: 'Apple Card installment C' }, reason: 'You said installment C was recorded by mistake.' };
+
+  it('accepts a well-formed proposal verbatim', () => {
+    expect(parseChatAction(valid)).toEqual(valid);
+  });
+
+  it('accepts matching by billId alone', () => {
+    const byId = { ...valid, match: { billId: 'bill-abc123' } };
+    expect(parseChatAction(byId)).toEqual(byId);
+  });
+
+  it('rejects a match with neither billId nor vendor', () => {
+    expect(parseChatAction({ ...valid, match: {} })).toBeNull();
+  });
+
+  it('rejects an empty vendor or billId rather than treating it as absent', () => {
+    expect(parseChatAction({ ...valid, match: { vendor: '' } })).toBeNull();
+    expect(parseChatAction({ ...valid, match: { billId: '   ' } })).toBeNull();
+  });
+
+  it('rejects an unknown top-level key — remove_bill carries no `set`', () => {
+    expect(parseChatAction({ ...valid, set: { vendor: 'X' } })).toBeNull();
+  });
+
+  it('rejects an unknown key inside match', () => {
+    expect(parseChatAction({ ...valid, match: { vendor: 'X', confirm: true } })).toBeNull();
+  });
+
+  it('rejects an empty reason — a silent action', () => {
+    expect(parseChatAction({ ...valid, reason: '' })).toBeNull();
+  });
+
+  it('rejects hostile top-level shapes', () => {
+    expect(parseChatAction(null)).toBeNull();
+    expect(parseChatAction('remove_bill')).toBeNull();
+    expect(parseChatAction([valid])).toBeNull();
+    expect(parseChatAction({ action: 'remove_bill' })).toBeNull(); // missing match/reason
+  });
+
+  it('rejects a prototype-pollution shaped payload', () => {
+    expect(parseChatAction(JSON.parse(
+      '{"action":"remove_bill","match":{"vendor":"X"},"reason":"r","__proto__":{"x":1}}'
+    ))).toBeNull();
+  });
+});
+
 /**
  * cashflow-mobile#24 — custom categories are CLOSED over the owner's own resolved
  * set, not the hardcoded 13. buildChatContext's `categories` field is what the

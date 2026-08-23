@@ -12,7 +12,7 @@ import { formatMoney } from '@/lib/money';
 import { sanitizeAssumedSpend } from '@/lib/profile-settings';
 import { matchIncomeDeposits } from '@/lib/ask';
 import { deriveAccountBalance, monthlyAverages } from '@/lib/forecast';
-import { addBill, getBills, updateBill } from '@/lib/firestore';
+import { addBill, deleteBill, getBills, updateBill } from '@/lib/firestore';
 import { Bill, BillFrequency, PAYMENT_METHODS } from '@/lib/bills';
 import type { IncomeContext } from '@/lib/classify';
 import {
@@ -81,6 +81,8 @@ interface ChatMessage {
       nonNegotiable?: boolean;
     };
   };
+  /** cashflow-mobile#34: set when the assistant proposed REMOVING a bill outright. */
+  billRemoval?: { match: { billId?: string; vendor?: string } };
   /** cashflow-mobile#24: set when the assistant proposed adding, renaming or
    *  removing one of the owner's own categories. */
   category?:
@@ -467,6 +469,11 @@ export default function DataChatSheet({ open, onClose, seed }: {
                 billEdit: { match: reply.match, set: reply.set },
                 status: 'pending',
               })
+          : reply?.action === 'remove_bill'
+            ? mk('assistant', reply.reason, {
+                billRemoval: { match: reply.match },
+                status: 'pending',
+              })
           : reply?.action === 'add_category'
             ? mk('assistant', reply.reason, {
                 category: { kind: 'add', label: reply.label, icon: reply.icon },
@@ -522,7 +529,7 @@ export default function DataChatSheet({ open, onClose, seed }: {
   };
 
   const dismiss = (id: string) =>
-    setMessages((prev) => prev.map((x) => (x.id === id ? { ...x, rule: undefined, balance: undefined, income: undefined, spend: undefined, bill: undefined, billEdit: undefined, category: undefined, status: undefined } : x)));
+    setMessages((prev) => prev.map((x) => (x.id === id ? { ...x, rule: undefined, balance: undefined, income: undefined, spend: undefined, bill: undefined, billEdit: undefined, billRemoval: undefined, category: undefined, status: undefined } : x)));
 
   /** THE one path from a balance proposal to the store — a button press, same
    *  reconcile() the accounts screen used before its manual knob was removed. */
@@ -696,6 +703,30 @@ export default function DataChatSheet({ open, onClose, seed }: {
       setMessages((prev) => [
         ...prev.map((x) => (x.id === m.id ? { ...x, status: 'applied' as const } : x)),
         mk('assistant', describeBillUpdate(before, after, profile?.currency)),
+      ]);
+    } catch {
+      setMessages((prev) => [...prev, mk('assistant', 'That could not be saved. Please try again.')]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * cashflow-mobile#34. remove_bill -> deleteBill() (src/lib/firestore.ts) — a genuine
+   * deletion, unlike update_bill's installmentsRemaining-0/endDate path, which keeps
+   * the row's history. Re-resolves `match` for the same reason applyUpdateBill does.
+   */
+  const applyRemoveBill = async (m: ChatMessage) => {
+    if (!m.billRemoval || busy || !profile?.id) return;
+    const target = resolveBill(m.billRemoval.match, bills);
+    if (!target) return;
+    setBusy(true);
+    try {
+      await deleteBill(profile.id, target.id);
+      setBills((prev) => prev.filter((b) => b.id !== target.id));
+      setMessages((prev) => [
+        ...prev.map((x) => (x.id === m.id ? { ...x, status: 'applied' as const } : x)),
+        mk('assistant', `Saved — ${target.vendor} removed. ${formatMoney(target.amount, profile?.currency, 2)} ${target.frequency} is no longer in Upcoming.`),
       ]);
     } catch {
       setMessages((prev) => [...prev, mk('assistant', 'That could not be saved. Please try again.')]);
@@ -950,6 +981,17 @@ export default function DataChatSheet({ open, onClose, seed }: {
                   pending={m.status === 'pending'}
                   busy={busy}
                   onApply={() => applyUpdateBill(m)}
+                  onCancel={() => dismiss(m.id)}
+                />
+              )}
+              {m.billRemoval && (
+                <RemoveBillProposalCard
+                  proposal={m.billRemoval}
+                  bills={bills}
+                  currency={profile?.currency}
+                  pending={m.status === 'pending'}
+                  busy={busy}
+                  onApply={() => applyRemoveBill(m)}
                   onCancel={() => dismiss(m.id)}
                 />
               )}
@@ -1375,6 +1417,54 @@ function UpdateBillProposalCard({ proposal, bills, currency, pending, busy, onAp
           after.endDate ? `ends ${after.endDate}` : null,
           after.nonNegotiable ? 'locked — reserved first in every plan' : null,
         ].filter(Boolean).join(' · ') || 'The rest of this bill is unchanged.'}
+      </p>
+      {pending ? (
+        <div className="flex gap-2 mt-3">
+          <button type="button" onClick={onApply} disabled={busy} className="btn-primary min-h-[44px] px-4 text-sm disabled:opacity-50">Apply</button>
+          <button type="button" onClick={onCancel} disabled={busy} className="min-h-[44px] px-4 text-sm rounded-card border border-[var(--border-color)] text-[var(--foreground-secondary)] hover:bg-[var(--background-tertiary)] transition-colors disabled:opacity-50">Cancel</button>
+        </div>
+      ) : (
+        <p className="mt-3 text-xs text-[var(--accent-success)]">Applied</p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * cashflow-mobile#34. What will disappear, plainly, before it does. Genuine deletion —
+ * prefers update_bill's installmentsRemaining-0/endDate path for a FINISHED
+ * installment, which keeps the row's history; this is for a bill that should never
+ * have been recorded. Same unresolvable-means-no-button contract as every card above.
+ */
+function RemoveBillProposalCard({ proposal, bills, currency, pending, busy, onApply, onCancel }: {
+  proposal: NonNullable<ChatMessage['billRemoval']>;
+  bills: readonly Bill[];
+  currency?: string;
+  pending: boolean;
+  busy: boolean;
+  onApply: () => void;
+  onCancel: () => void;
+}) {
+  const m2 = (n: number) => formatMoney(n, currency, 2);
+  const resolved = resolveBill(proposal.match, bills);
+
+  if (!resolved) {
+    const named = proposal.match.vendor ?? proposal.match.billId ?? '';
+    return (
+      <p className="mt-3 text-xs text-[var(--foreground-muted)]">
+        I couldn&apos;t match &ldquo;{named}&rdquo; to exactly one of your bills, so nothing is offered.
+        Your bills: {describeBills(bills, m2)}.
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-3 rounded-card border border-[var(--border-color)] bg-[var(--background)] p-3">
+      <p className="font-medium text-[var(--foreground)]">
+        {`Remove ${resolved.vendor} — ${m2(resolved.amount)} ${resolved.frequency}, permanently`}
+      </p>
+      <p className="text-xs text-[var(--foreground-muted)] mt-1">
+        Deletes the row and its history, and it leaves Upcoming. For a finished installment, ending it instead keeps the record.
       </p>
       {pending ? (
         <div className="flex gap-2 mt-3">

@@ -169,6 +169,11 @@ export type ChatAction =
       };
       reason: string;
     }
+  /** cashflow-mobile#34. Proposes REMOVING a Bill row outright — for a
+   *  genuine mistake, never for a finished installment (update_bill's
+   *  installmentsRemaining 0 / endDate keeps that row's history; this
+   *  deletes it). Same match/resolve contract as update_bill above. */
+  | { action: 'remove_bill'; match: { billId?: string; vendor?: string }; reason: string }
   /** cashflow-mobile#24. Proposes a NEW category. No `value` — the app derives a
    *  unique slug from the label, never the model. */
   | { action: 'add_category'; label: string; icon?: string; reason: string }
@@ -946,6 +951,23 @@ export function parseChatAction(
     if (!Object.keys(set).length) return null; // an update that changes nothing
 
     return { action: 'update_bill', match, set, reason };
+  }
+
+  // cashflow-mobile#34: remove_bill. Genuine deletion — for a bill that should never
+  // have been recorded, never for a finished installment (update_bill's
+  // installmentsRemaining 0 / endDate keeps that history). Same shape-only match as
+  // update_bill above.
+  if (action === 'remove_bill') {
+    const o = record(raw, ['action', 'match', 'reason']);
+    if (!o) return null;
+
+    const reason = str(o.reason, MAX.explanation);
+    if (!reason) return null;
+
+    const match = parseBillMatch(o.match);
+    if (!match) return null;
+
+    return { action: 'remove_bill', match, reason };
   }
 
   // cashflow-mobile#24: add_category. No `value` accepted from the model — the app

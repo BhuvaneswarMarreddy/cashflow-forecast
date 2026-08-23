@@ -136,10 +136,11 @@ describe('buildChatMessages', () => {
     // CATEGORY, THIS MONTH / LAST MONTH) — this fixture supplies no `summary`, so those
     // render as empty-list headers only, not maxed rows. Measured worst-case went
     // 20450 -> 22245 (+1795 chars).
-    // Bumped again from 22500 (cashflow-mobile#34): the EDIT A BILL block (prompts.ts)
-    // teaches update_bill and the ambiguous-vendor-must-ask rule — constant text on
-    // every system prompt. Measured worst-case went 22245 -> 24374 (+2129 chars).
-    expect(system.length).toBeLessThan(24600);
+    // Bumped again from 22500 (cashflow-mobile#34): the EDIT OR REMOVE A BILL block
+    // (prompts.ts) teaches update_bill/remove_bill, the ambiguous-vendor-must-ask rule,
+    // and installmentsRemaining 0 for finishing an installment — constant text on every
+    // system prompt. Measured worst-case went 22245 -> 25084 (+2839 chars).
+    expect(system.length).toBeLessThan(25300);
   });
 
   it('survives a garbage context without throwing', () => {
@@ -238,13 +239,14 @@ describe('the record_bill action travels with the contract', () => {
  * cashflow-mobile#34. The scene this fixes: the owner asked the chat on his phone to
  * "clear the rest apple card instalment c b a" and it could not — record_bill existed,
  * nothing else did. His installments are named A/B/C/D because a statement line never
- * says what an installment bought; he wants them renamed to the real products.
- * update_bill is the fix (remove_bill, and finishing-vs-removing, follow separately).
+ * says what an installment bought; he wants them renamed to the real products and the
+ * finished ones removed from Upcoming. update_bill/remove_bill are the fix.
  */
-describe('the update_bill action travels with the contract (cashflow-mobile#34)', () => {
-  it('teaches the model the shape and the six closed frequency values', () => {
+describe('the update_bill / remove_bill actions travel with the contract (cashflow-mobile#34)', () => {
+  it('teaches the model both shapes and the six closed frequency values', () => {
     const system = buildChatMessages({ message: 'installment C is the MacBook Air' })[0].content;
     expect(system).toContain('"action":"update_bill"');
+    expect(system).toContain('"action":"remove_bill"');
     expect(system).toContain('"weekly"|"biweekly"|"monthly"|"quarterly"|"semiannual"|"annual"');
   });
 
@@ -255,15 +257,26 @@ describe('the update_bill action travels with the contract (cashflow-mobile#34)'
     expect(system).toMatch(/A.\/.B.\/.C.\/.D./); // the actual naming problem, named explicitly
   });
 
-  it('teaches installmentsRemaining 0 as the way to mark an installment finished, distinct from record_bill\'s 1..480 floor', () => {
+  it('teaches installmentsRemaining 0 as the way to finish an installment, distinct from record_bill\'s 1..480 floor', () => {
     const system = buildChatMessages({ message: 'installment C is finished' })[0].content;
     expect(system).toMatch(/installmentsRemaining here also accepts 0/i);
     expect(system).toMatch(/marked finished/i);
   });
 
-  it('extends the existing overpromise rule to cover "updated", not just recorded/saved/added', () => {
+  it('teaches the model to prefer FINISHING (update_bill) over REMOVING for a paid-off installment', () => {
     const system = buildChatMessages({ message: 'installment C is finished' })[0].content;
-    expect(system).toMatch(/never claim.*updated/i);
+    expect(system).toMatch(/prefer finishing over removing/i);
+    expect(system).toMatch(/never remove_bill/i);
+  });
+
+  it('teaches remove_bill is reserved for a genuine recording mistake, not a finished bill', () => {
+    const system = buildChatMessages({ message: 'installment C is finished' })[0].content;
+    expect(system).toMatch(/recorded by mistake/i);
+  });
+
+  it('extends the existing overpromise rule to cover updated/removed, not just recorded/saved/added', () => {
+    const system = buildChatMessages({ message: 'installment C is finished' })[0].content;
+    expect(system).toMatch(/never claim.*updated.*removed/i);
   });
 });
 
@@ -374,10 +387,10 @@ describe('ChatContext — bills/upcoming/recurring sections (#22)', () => {
     // Bumped again (cashflow-mobile#25): the same +1795 chars as the test above — this
     // fixture supplies no `summary` either, so the new sections are still headers only.
     // Measured 44136.
-    // Bumped again (cashflow-mobile#34): the same +2129 chars as the test above — EDIT
-    // A BILL is constant text, unaffected by how many bills are in context.
-    // Measured 46265.
-    expect(system.length).toBeLessThan(46500);
+    // Bumped again (cashflow-mobile#34): the same +2839 chars as the test above — EDIT
+    // OR REMOVE A BILL is constant text, unaffected by how many bills are in context.
+    // Measured 46975.
+    expect(system.length).toBeLessThan(47200);
   });
 
   it('caps bills/upcoming/recurring and reports what was left out, same convention as merchants/months', () => {
