@@ -180,22 +180,59 @@ export const isCharging = (b: Bill, today: string): boolean => {
  * calendar date parses to local midnight in every zone, which is what keeps
  * `homeSnapshot` and the web agreeing by construction.
  */
-function installmentEndISO(b: Bill): string | undefined {
+/**
+ * The date `count` payments from `anchorISO` runs out — the ONE definition.
+ *
+ * **Call this at WRITE time and store the result in `endDate`.** Deriving it at
+ * read time from `updatedAt` ratchets: `updateBill` re-stamps `updatedAt` on
+ * every write, and `update_bill` accepts vendor/amount/frequency/nextDueDate/
+ * nonNegotiable — none of which is the count. So renaming a bill re-anchored
+ * the plan and, because `installmentsRemaining` never decrements, re-added the
+ * FULL original term. `update_bill`'s own worked example in prompts.ts is a
+ * rename, so this was the normal path, not an edge case, and it silently grew
+ * the Home "Locked" tile every time the register was maintained.
+ *
+ * Anchoring on `createdAt` instead was worse: correcting a count then retired
+ * the bill early and silently. Neither read-time anchor can be right, because
+ * only the writer knows whether the count it is storing is fresh.
+ *
+ * `.slice(0, 10)` matters: `parseISO` on a full timestamp yields a UTC instant
+ * while `addMonths`/`format` work in local time, so the deployed callable (UTC)
+ * and the browser (America/Chicago) derived ends one day apart.
+ */
+export function installmentEndFrom(
+  anchorISO: string,
+  frequency: BillFrequency,
+  count: number,
+): string | undefined {
   // Not `!== undefined`: a null from a hand-edited doc would multiply to 0 and
   // retire the bill instantly. An empty/absent stamp would throw RangeError out
   // of `format` and take the whole homeSnapshot callable — and with it the
   // phone's Home screen — down with it.
-  if (typeof b.installmentsRemaining !== 'number') return undefined;
-  const anchor = b.updatedAt || b.createdAt;
-  if (!anchor) return undefined;
-  const from = parseISO(anchor.slice(0, 10));
+  if (typeof count !== 'number') return undefined;
+  if (!anchorISO) return undefined;
+  const from = parseISO(anchorISO.slice(0, 10));
   if (Number.isNaN(from.getTime())) return undefined;
-  const months = MONTH_STEP[b.frequency];
+  const months = MONTH_STEP[frequency];
   const end =
     months !== undefined
-      ? addMonths(from, months * b.installmentsRemaining)
-      : addDays(from, (b.frequency === 'weekly' ? 7 : 14) * b.installmentsRemaining);
+      ? addMonths(from, months * count)
+      : addDays(from, (frequency === 'weekly' ? 7 : 14) * count);
   return format(end, 'yyyy-MM-dd');
+}
+
+/**
+ * Read-time FALLBACK for rows written before `endDate` was stored at write
+ * time. Ratchets on edit (see `installmentEndFrom`) — which is still far better
+ * than charging forever, but it is not the answer for new writes.
+ */
+function installmentEndISO(b: Bill): string | undefined {
+  if (typeof b.installmentsRemaining !== 'number') return undefined;
+  return installmentEndFrom(
+    b.updatedAt || b.createdAt,
+    b.frequency,
+    b.installmentsRemaining,
+  );
 }
 
 export function monthlyCostRaw(bill: Bill): number {

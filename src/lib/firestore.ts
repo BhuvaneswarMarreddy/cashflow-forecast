@@ -38,7 +38,7 @@ import {
   Timestamp,
   writeBatch,
 } from './firebase';
-import type { Bill } from '@/lib/bills';
+import { installmentEndFrom, type Bill } from '@/lib/bills';
 import { 
   Transaction, 
   PaymentAccount, 
@@ -1279,13 +1279,37 @@ export async function getBills(userId: string): Promise<Bill[]> {
   }
 }
 
+/**
+ * Stamps an installment plan's end at WRITE time.
+ *
+ * Deriving it at read time from `updatedAt` ratchets — every unrelated edit
+ * re-anchors the plan and, since `installmentsRemaining` never decrements,
+ * re-adds the full original term. Only the writer knows whether the count it is
+ * storing is current, so only the writer can date it. `isCharging`'s existing
+ * `endDate` branch then does the work and cannot drift.
+ *
+ * An explicit `endDate` always wins: `record_bill` sends at most one of the
+ * two, and a caller that names a real end date means it.
+ */
+function withInstallmentEnd<T extends Partial<Bill>>(bill: T): T {
+  if (typeof bill.installmentsRemaining !== 'number') return bill;
+  if (bill.endDate) return bill;
+  if (!bill.frequency) return bill;
+  const end = installmentEndFrom(
+    new Date().toISOString(),
+    bill.frequency,
+    bill.installmentsRemaining,
+  );
+  return end ? { ...bill, endDate: end } : bill;
+}
+
 export async function addBill(
   userId: string,
   bill: Omit<Bill, 'id' | 'createdAt' | 'updatedAt'>
 ): Promise<string> {
   const billsRef = collection(db, 'users', userId, 'bills');
   const docRef = await addDoc(billsRef, {
-    ...removeUndefined(bill),
+    ...removeUndefined(withInstallmentEnd(bill)),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
@@ -1299,7 +1323,10 @@ export async function updateBill(
 ): Promise<void> {
   const billRef = doc(db, 'users', userId, 'bills', billId);
   const { id: _id, createdAt: _c, updatedAt: _u, ...rest } = updates;
-  await updateDoc(billRef, { ...removeUndefined(rest), updatedAt: serverTimestamp() });
+  await updateDoc(billRef, {
+    ...removeUndefined(withInstallmentEnd(rest)),
+    updatedAt: serverTimestamp(),
+  });
 }
 
 export async function deleteBill(userId: string, billId: string): Promise<void> {
