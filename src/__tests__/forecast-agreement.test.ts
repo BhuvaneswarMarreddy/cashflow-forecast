@@ -10,6 +10,37 @@
 import { IncomeSource, PaymentAccount, Transaction } from '@/types';
 import { FinancialPolicy, POSTED_ONLY } from '@/lib/classify';
 import { calculateCurrentCash, generateForecast, withDerivedBalances } from '@/lib/forecast';
+import { addDays, format } from 'date-fns';
+
+/**
+ * Frozen clock + a non-UTC TZ, both deliberate.
+ *
+ * forecast.ts's `today` is `startOfDay(new Date())` — a LOCAL day boundary (see
+ * its comment: "Compare calendar days, not instants (IST timezone; see git
+ * history)"). This file's old `day()` helper computed "today" via
+ * `new Date(...).toISOString().slice(0, 10)` — a UTC day boundary. Near local
+ * midnight in a timezone ahead of or behind UTC, those two boundaries land on
+ * different calendar dates, so a transaction meant to sit "yesterday" could
+ * silently land on "today" (or vice versa) depending on the exact moment the
+ * suite happened to run — exactly the class of bug the source comment warns
+ * about, reproduced here in the test fixtures.
+ *
+ * Fixed two ways: `day()` below now builds dates with date-fns `format`/`addDays`
+ * — LOCAL, like the source — instead of `toISOString`. And the clock is frozen
+ * at a fixed instant, pinned to Asia/Kolkata (UTC+5:30, and deliberately NOT
+ * UTC), near local midnight, so this exact scenario is exercised on every run
+ * instead of only near real local midnight in a non-UTC dev machine.
+ */
+const ORIGINAL_TZ = process.env.TZ;
+beforeAll(() => {
+  process.env.TZ = 'Asia/Kolkata';
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date(2026, 7, 15, 23, 50, 0)); // 11:50pm local — near local midnight
+});
+afterAll(() => {
+  jest.useRealTimers();
+  process.env.TZ = ORIGINAL_TZ;
+});
 
 const bank: PaymentAccount = {
   id: 'b', name: 'Checking', type: 'bank_account', provider: 'chase',
@@ -22,8 +53,9 @@ const source: IncomeSource = {
   isActive: true, matchAliases: ['acme'],
 } as IncomeSource;
 
-const day = (offset: number) =>
-  new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+/** LOCAL calendar day, offset from "now" — matches forecast.ts's own local-day
+ *  convention instead of drifting to a UTC one (see the comment above). */
+const day = (offset: number) => format(addDays(new Date(), offset), 'yyyy-MM-dd');
 
 const tx = (o: Partial<Transaction> & { id: string; amount: number }): Transaction => ({
   title: o.id, type: 'expense', category: 'other', paymentMethod: 'bank-transfer',
