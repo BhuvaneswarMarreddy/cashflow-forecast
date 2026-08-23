@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Loader2, Send, Sparkles, X } from 'lucide-react';
-import { aiChat, callableErrorMessage } from '@/lib/callables';
+import { aiChat, callableErrorMessage, removeCategory as removeCategoryCallable } from '@/lib/callables';
 import { parseChatAction, buildChatContext, explanationOf, fallbackText } from '@/lib/chat-actions';
 import { describeRule, rulePreview, MappingRule, NewMappingRule } from '@/lib/mapping-rules';
 import { useTransactions } from '@/context/TransactionContext';
@@ -12,11 +12,10 @@ import { formatMoney } from '@/lib/money';
 import { sanitizeAssumedSpend } from '@/lib/profile-settings';
 import { matchIncomeDeposits } from '@/lib/ask';
 import { deriveAccountBalance, monthlyAverages } from '@/lib/forecast';
-import { addBill, getBills, updateBill } from '@/lib/firestore';
+import { addBill, getBills } from '@/lib/firestore';
 import { Bill, BillFrequency, PAYMENT_METHODS } from '@/lib/bills';
 import type { IncomeContext } from '@/lib/classify';
 import {
-  ExpenseCategory,
   PaymentAccount,
   resolveCategories,
   ResolvedCategory,
@@ -182,7 +181,7 @@ export default function DataChatSheet({ open, onClose, seed }: {
   /** A question to ask on open — set when the owner clicked a specific node or group. */
   seed?: string;
 }) {
-  const { transactions, addRule, rules, updateTransactionAwaited, updateRuleCategoryAwaited } = useTransactions();
+  const { transactions, addRule, rules } = useTransactions();
   const { profile, reconcileAccount, addIncomeSource, incomeContext, updateProfile } = useUserProfile();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -567,10 +566,15 @@ export default function DataChatSheet({ open, onClose, seed }: {
    * remove_category to the store — settings.categories via the SAME
    * updateProfile round trip FIN-SPEND-001 uses, no new write path.
    *
-   * remove_category additionally reassigns every transaction, rule and bill
-   * currently filed under the removed value BEFORE archiving it, using the
-   * exact same planCategoryRemoval() the card previewed — never orphaning a
-   * category value.
+   * cashflow-mobile#28: remove_category no longer sweeps client-side (N
+   * transaction writes + M rule writes + bill writes + the settings archive,
+   * none of it atomic, none of it reachable from mobile). It now calls
+   * removeCategory (functions/src/categoryRemoval.ts), which does the whole
+   * sweep server-side in one request and hands back the real counts. The
+   * local settings/bills mirroring below is NOT a second write path — the
+   * server already wrote both — it just keeps THIS session's state (neither
+   * UserProfileContext nor this component's own `bills` state has a live
+   * listener) from reading stale until the next reload.
    */
   const applyCategory = async (m: ChatMessage) => {
     if (!m.category || busy || !profile?.id) return;
@@ -597,55 +601,20 @@ export default function DataChatSheet({ open, onClose, seed }: {
         ]);
       } else {
         const { value, reassignTo } = m.category;
-        const plan = planCategoryRemoval(value, transactions, rules, bills);
 
-        // Each write is genuinely awaited and its real outcome kept — never
-        // assumed. updateTransaction/updateRuleCategory (TransactionContext)
-        // fire the Firestore write with `.catch(console.warn)` and never await
-        // it, so their promises always resolve regardless of what actually
-        // landed; updateTransactionAwaited/updateRuleCategoryAwaited exist
-        // ONLY for this sweep, for exactly that reason. updateBill (below)
-        // already throws on a real failure, so it needs no awaited twin.
-        const txOutcomes = await Promise.all(
-          plan.transactionIds.map((id) => updateTransactionAwaited(id, { category: reassignTo as ExpenseCategory }))
-        );
-        const ruleOutcomes = await Promise.all(
-          plan.ruleIds.map((id) => updateRuleCategoryAwaited(id, reassignTo))
-        );
-        const billOutcomes = await Promise.all(
-          plan.billIds.map((id) =>
-            updateBill(profile.id, id, { category: reassignTo })
-              .then(() => true)
-              .catch((err) => { console.warn('Bill category update failed:', err); return false; })
-          )
-        );
+        // cashflow-mobile#28: ONE server-side callable does the whole sweep —
+        // every transaction, rule and bill filed under `value`, then the
+        // settings archive — as chunked Firestore batches, atomically per
+        // chunk. Either this resolves with the real counts, or it throws;
+        // there is no client-visible partial-success state to reconcile.
+        const result = await removeCategoryCallable(value, reassignTo);
+        const { transactions: txMoved, rules: ruleMoved, bills: billMoved } = result.moved;
 
-        // Local `bills` state (this component's own, not context-managed) only
-        // moves for bills that actually confirmed — a bill whose write failed
-        // must keep showing the removed category, or planCategoryRemoval would
-        // never find it again on a repeat sweep.
-        const movedBillIds = plan.billIds.filter((_, i) => billOutcomes[i]);
-        if (movedBillIds.length) {
-          setBills((prev) => prev.map((b) => (movedBillIds.includes(b.id) ? { ...b, category: reassignTo } : b)));
-        }
-
-        const txMoved = txOutcomes.filter(Boolean).length;
-        const ruleMoved = ruleOutcomes.filter(Boolean).length;
-        const billMoved = billOutcomes.filter(Boolean).length;
-        const totalPlanned = plan.transactionIds.length + plan.ruleIds.length + plan.billIds.length;
-        const totalMoved = txMoved + ruleMoved + billMoved;
-        const allMoved = totalMoved === totalPlanned;
-
-        // Archived, not deleted — the value stays resolvable for any row still
-        // showing it mid-reassignment, same reasoning resolveCategories documents.
-        // This proceeds even on a partial failure above: archiving only touches
-        // settings.categories, never the transactions/rules/bills themselves, and
-        // planCategoryRemoval matches on THEIR stored `category`/`set.category`
-        // field, not on whether the settings entry is archived — so a straggler
-        // stays targetable and a repeat of this same proposal (the Apply button
-        // stays live below when anything failed) sweeps it up.
+        // Mirrors the server's own writes into local state — see the doc
+        // comment above applyCategory for why this isn't a second write path.
         const next = current.map((c) => (c.value === value ? { ...c, archived: true } : c));
         await updateProfile({ settings: { categories: next } });
+        setBills((prev) => prev.map((b) => (b.category === value ? { ...b, category: reassignTo } : b)));
 
         const reassignLabel = resolvedCategories.find((c) => c.value === reassignTo)?.label ?? reassignTo;
         const parts = [
@@ -654,15 +623,8 @@ export default function DataChatSheet({ open, onClose, seed }: {
           `${billMoved} bill${billMoved === 1 ? '' : 's'}`,
         ];
         setMessages((prev) => [
-          // Only marked 'applied' — which hides the Apply button — once every
-          // planned write actually confirmed. A partial failure leaves the card
-          // pending so the SAME Apply button re-runs this path: plan is
-          // recomputed fresh from current state next time, which by now only
-          // still shows the rows that never moved.
-          ...prev.map((x) => (x.id === m.id ? { ...x, status: allMoved ? ('applied' as const) : x.status } : x)),
-          mk('assistant', allMoved
-            ? `Saved — ${parts.join(', ')} moved to ${reassignLabel}.`
-            : `${parts.join(', ')} moved to ${reassignLabel}; ${totalPlanned - totalMoved} could not be saved. Press Apply again to move the rest.`),
+          ...prev.map((x) => (x.id === m.id ? { ...x, status: 'applied' as const } : x)),
+          mk('assistant', `Saved — ${parts.join(', ')} moved to ${reassignLabel}.`),
         ]);
       }
     } catch {

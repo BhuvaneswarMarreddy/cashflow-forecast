@@ -79,6 +79,31 @@ export async function undoDecision(decisionId: string): Promise<{ ok: true }> {
 }
 
 /**
+ * What removeCategory's callable hands back — mirrors
+ * functions/src/categoryRemoval.ts's own return shape, redefined here for the
+ * same reason ChangeSummary above is: that file lives in the functions/ build,
+ * outside this app's `@/*` path. Counts only — never the rows themselves.
+ */
+export type CategoryRemovalCounts = { transactions: number; rules: number; bills: number };
+
+/**
+ * Calls the removeCategory callable (functions/src/categoryRemoval.ts,
+ * cashflow-mobile#28) — the ONE validated write path for removing one of the
+ * owner's own categories: reassigns every transaction/rule/bill filed under
+ * `value` to `reassignTo` (default 'other'), then archives the entry in
+ * settings.categories, in a single server-side sweep. Errors are thrown
+ * (HttpsError): 'unauthenticated' | 'invalid-argument'.
+ */
+export async function removeCategory(
+  value: string,
+  reassignTo?: string,
+): Promise<{ moved: CategoryRemovalCounts }> {
+  return (await httpsCallable(functions(), 'removeCategory')({ value, reassignTo })).data as {
+    moved: CategoryRemovalCounts;
+  };
+}
+
+/**
  * Maps Firebase HttpsError codes to user-facing messages. `fallback` exists
  * because the default wording ("AI request failed") is wrong for a non-AI
  * callable — applyDecision failing is not the AI being unavailable, it's a rule

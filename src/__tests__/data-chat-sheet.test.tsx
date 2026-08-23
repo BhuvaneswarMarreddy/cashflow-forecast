@@ -15,19 +15,19 @@ const aiChat = jest.fn();
 const addRule = jest.fn();
 const addBill = jest.fn();
 const getBills = jest.fn();
-const updateBill = jest.fn();
-const updateTransactionAwaited = jest.fn();
-const updateRuleCategoryAwaited = jest.fn();
+// cashflow-mobile#28: the server-side sweep — replaces the old per-row
+// updateTransactionAwaited/updateRuleCategoryAwaited/updateBill mocks below.
+const removeCategory = jest.fn();
 
 jest.mock('@/lib/callables', () => ({
   aiChat: (...args: unknown[]) => aiChat(...args),
+  removeCategory: (...args: unknown[]) => removeCategory(...args),
   callableErrorMessage: () => 'AI request failed. Please try again.',
 }));
 
 jest.mock('@/lib/firestore', () => ({
   addBill: (...args: unknown[]) => addBill(...args),
   getBills: (...args: unknown[]) => getBills(...args),
-  updateBill: (...args: unknown[]) => updateBill(...args),
 }));
 
 const txn = (id: string, title: string, merchant: string): Transaction => ({
@@ -61,8 +61,6 @@ jest.mock('@/context/TransactionContext', () => ({
     transactions: [...TRANSACTIONS, ...EXTRA_TRANSACTIONS],
     addRule,
     rules: RULES,
-    updateTransactionAwaited: (...args: unknown[]) => updateTransactionAwaited(...args),
-    updateRuleCategoryAwaited: (...args: unknown[]) => updateRuleCategoryAwaited(...args),
   }),
 }));
 
@@ -105,9 +103,7 @@ beforeEach(() => {
   addRule.mockReset();
   addBill.mockReset().mockResolvedValue('new-bill-id');
   getBills.mockReset().mockResolvedValue([]);
-  updateBill.mockReset().mockResolvedValue(undefined);
-  updateTransactionAwaited.mockReset().mockResolvedValue(true);
-  updateRuleCategoryAwaited.mockReset().mockResolvedValue(true);
+  removeCategory.mockReset().mockResolvedValue({ moved: { transactions: 0, rules: 0, bills: 0 } });
   updateProfile.mockReset().mockResolvedValue(undefined);
   PROFILE_SETTINGS = {};
   RULES = [];
@@ -894,10 +890,13 @@ describe('the rename_category proposal card', () => {
 });
 
 /**
- * cashflow-mobile#24 — remove_category. The one card with real stakes: it MUST
- * show the exact counts (transactions/rules/bills) BEFORE applying, and the
- * apply path must move exactly what was previewed, then archive the category —
- * never orphaning a value. Fixture below carries one live row of each kind.
+ * cashflow-mobile#24/#28 — remove_category. The preview (planCategoryRemoval,
+ * client-side, unchanged) MUST show the exact counts BEFORE applying; Apply
+ * now calls the removeCategory callable (functions/src/categoryRemoval.ts)
+ * instead of sweeping transactions/rules/bills one write at a time — the
+ * whole sweep happens server-side, atomically, and this component only
+ * reports the counts the server hands back. Fixture below carries one live
+ * row of each kind, matching what the preview shows.
  */
 describe('the remove_category proposal card', () => {
   // 'vacations' is a CUSTOM category — not a member of the closed ExpenseCategory
@@ -931,22 +930,21 @@ describe('the remove_category proposal card', () => {
     RULES = [vacationRule];
     EXTRA_TRANSACTIONS = [vacationTxn];
     getBills.mockResolvedValue([vacationBill]);
+    removeCategory.mockResolvedValue({ moved: { transactions: 1, rules: 1, bills: 1 } });
   });
 
-  it('shows the exact counts BEFORE applying, and writes NOTHING until Apply', async () => {
+  it('shows the exact counts BEFORE applying, and calls NOTHING until Apply', async () => {
     aiChat.mockResolvedValue(proposal());
     render(<DataChatSheet open onClose={() => {}} />);
     await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
     send('remove the Vacations category');
 
     expect(await screen.findByText('Remove "Vacations" — 1 transaction, 1 rule, 1 bill will move to Other')).toBeInTheDocument();
-    expect(updateTransactionAwaited).not.toHaveBeenCalled();
-    expect(updateRuleCategoryAwaited).not.toHaveBeenCalled();
-    expect(updateBill).not.toHaveBeenCalled();
+    expect(removeCategory).not.toHaveBeenCalled();
     expect(updateProfile).not.toHaveBeenCalled();
   });
 
-  it('Apply moves exactly what was previewed, archives the category, and reports what moved', async () => {
+  it('Apply calls removeCategory, archives the category locally, and reports the SERVER\'s counts', async () => {
     aiChat.mockResolvedValue(proposal());
     render(<DataChatSheet open onClose={() => {}} />);
     await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
@@ -955,13 +953,13 @@ describe('the remove_category proposal card', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 
-    await waitFor(() => expect(updateTransactionAwaited).toHaveBeenCalledWith('vac-1', { category: 'other' }));
-    expect(updateRuleCategoryAwaited).toHaveBeenCalledWith('rule-vac', 'other');
-    expect(updateBill).toHaveBeenCalledWith('user-1', 'bill-vac', { category: 'other' });
+    await waitFor(() => expect(removeCategory).toHaveBeenCalledWith('vacations', 'other'));
     // Archived, not deleted — never orphaning the value for a row still mid-flight.
     expect(updateProfile).toHaveBeenCalledWith({
       settings: { categories: [{ value: 'vacations', label: 'Vacations', archived: true }] },
     });
+    // The server's counts, not a client-side recount — this message would lie
+    // if it echoed the PREVIEW instead of `result.moved`.
     expect(await screen.findByText('Saved — 1 transaction, 1 rule, 1 bill moved to Other.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
   });
@@ -974,10 +972,10 @@ describe('the remove_category proposal card', () => {
 
     expect(await screen.findByText(/will move to Shopping/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
-    await waitFor(() => expect(updateTransactionAwaited).toHaveBeenCalledWith('vac-1', { category: 'shopping' }));
+    await waitFor(() => expect(removeCategory).toHaveBeenCalledWith('vacations', 'shopping'));
   });
 
-  it('Cancel drops the proposal without writing anything', async () => {
+  it('Cancel drops the proposal without calling removeCategory or writing anything', async () => {
     aiChat.mockResolvedValue(proposal());
     render(<DataChatSheet open onClose={() => {}} />);
     await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
@@ -986,13 +984,14 @@ describe('the remove_category proposal card', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(updateProfile).not.toHaveBeenCalled();
-    expect(updateTransactionAwaited).not.toHaveBeenCalled();
+    expect(removeCategory).not.toHaveBeenCalled();
   });
 
   it('a category with nothing filed under it still previews and applies cleanly — zero everywhere', async () => {
     RULES = [];
     EXTRA_TRANSACTIONS = [];
     getBills.mockResolvedValue([]);
+    removeCategory.mockResolvedValue({ moved: { transactions: 0, rules: 0, bills: 0 } });
     aiChat.mockResolvedValue(proposal());
     render(<DataChatSheet open onClose={() => {}} />);
     await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
@@ -1001,20 +1000,17 @@ describe('the remove_category proposal card', () => {
     expect(await screen.findByText('Remove "Vacations" — 0 transactions, 0 rules, 0 bills will move to Other')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     await waitFor(() => expect(updateProfile).toHaveBeenCalledTimes(1));
-    expect(updateTransactionAwaited).not.toHaveBeenCalled();
+    expect(removeCategory).toHaveBeenCalledWith('vacations', 'other');
   });
 
   /**
-   * The reviewed finding: updateTransaction/updateRuleCategory's promises always
-   * resolve (fire-and-forget with .catch(console.warn)), and updateProfile
-   * swallows too, so "Saved — N moved" used to be printed whether or not
-   * anything actually reached Firestore. These three prove the honest version:
-   * full success only when every write confirmed; a partial failure reports the
-   * true counts and leaves Apply live for a genuine retry; a failed write is
-   * never counted as moved.
+   * cashflow-mobile#28: the sweep is now server-side and chunked-atomic — there
+   * is no client-visible partial-success state to reconcile anymore. A failed
+   * call throws, nothing local is mutated, and the same Apply button stays up
+   * for a genuine retry (which simply calls removeCategory again).
    */
-  it('reports partial failure honestly when a write does not confirm, and leaves Apply live to retry', async () => {
-    updateTransactionAwaited.mockResolvedValue(false); // the write "failed" — never counted as moved
+  it('a failed call writes nothing locally and leaves Apply live to retry', async () => {
+    removeCategory.mockRejectedValueOnce(new Error('unavailable'));
     aiChat.mockResolvedValue(proposal());
     render(<DataChatSheet open onClose={() => {}} />);
     await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
@@ -1023,40 +1019,14 @@ describe('the remove_category proposal card', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 
-    expect(await screen.findByText(
-      '0 transactions, 1 rule, 1 bill moved to Other; 1 could not be saved. Press Apply again to move the rest.'
-    )).toBeInTheDocument();
-    // The category is still archived — a straggler stays targetable by its own
-    // stored `category` value regardless, so archiving does not orphan it.
-    expect(updateProfile).toHaveBeenCalledWith({
-      settings: { categories: [{ value: 'vacations', label: 'Vacations', archived: true }] },
-    });
+    expect(await screen.findByText('That could not be saved. Please try again.')).toBeInTheDocument();
+    expect(updateProfile).not.toHaveBeenCalled();
     // Not marked applied: the same Apply button is still there to retry.
     expect(screen.getByRole('button', { name: 'Apply' })).toBeInTheDocument();
-  });
 
-  it('a bill that failed to move stays out of local state, so a retry does not skip it', async () => {
-    // This component's own `bills` state (unlike the mocked transactions/rules
-    // context) only advances for a CONFIRMED write — the same guarantee
-    // planCategoryRemoval's retry sweep depends on for every write channel.
-    updateBill.mockRejectedValueOnce(new Error('permission-denied'));
-    aiChat.mockResolvedValue(proposal());
-    render(<DataChatSheet open onClose={() => {}} />);
-    await waitFor(() => expect(getBills).toHaveBeenCalledWith('user-1'));
-    send('remove the Vacations category');
-    await screen.findByText(/will move to Other/);
-
+    removeCategory.mockResolvedValue({ moved: { transactions: 1, rules: 1, bills: 1 } });
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
-    expect(await screen.findByText(
-      '1 transaction, 1 rule, 0 bills moved to Other; 1 could not be saved. Press Apply again to move the rest.'
-    )).toBeInTheDocument();
-
-    updateBill.mockClear().mockResolvedValue(undefined);
-    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
-
-    // The bill still shows 'vacations' locally (the failed write never advanced
-    // it), so it is still in the retried plan and gets attempted again.
-    await waitFor(() => expect(updateBill).toHaveBeenCalledWith('user-1', 'bill-vac', { category: 'other' }));
+    await waitFor(() => expect(updateProfile).toHaveBeenCalledTimes(1));
   });
 });
 
