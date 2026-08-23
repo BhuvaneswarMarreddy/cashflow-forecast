@@ -111,11 +111,27 @@ export function feedlessCardTargetOf(
   const account = linkedAccount(t, accounts);
   if (account?.type === 'credit_card') return undefined; // this row IS the card leg
   const title = t.title.toLowerCase();
-  const feedlessCards = (accounts ?? []).filter((a) => a.type === 'credit_card' && a.feedless);
-  const byDigits = feedlessCards.find((a) => a.lastFourDigits && title.includes(a.lastFourDigits));
-  if (byDigits) return byDigits;
-  const byIssuer = feedlessCards.filter((a) => (ISSUER_ALIASES[a.provider] ?? []).some((w) => title.includes(w)));
-  return byIssuer.length === 1 ? byIssuer[0] : undefined;
+  // Resolve among EVERY credit card FIRST, then ask whether the winner happens to be
+  // feedless — filtering to the feedless subset before matching let a NORMAL card's
+  // own last four (or issuer, with no digits on file) be silently misread as a
+  // feedless-card match, because the normal card that actually owned that evidence
+  // was never in the candidate pool to begin with. Measured: $1,000 of spend
+  // attributed to a feedless card where $500 was the real feedless payment, and the
+  // NORMAL card's balance moved for money it never received.
+  //
+  // `.filter().length === 1`, not `.find()`, for BOTH digits and issuer: two cards
+  // both matching is a real ambiguity (two cards sharing an issuer word, or a
+  // corrupt/duplicate last-four) — refuse rather than guess which one the payment
+  // meant. Issuer is only consulted when NO card's digits matched at all; a digit
+  // match is the more specific evidence and wins outright.
+  const cards = (accounts ?? []).filter((a) => a.type === 'credit_card');
+  const byDigits = cards.filter((a) => a.lastFourDigits && title.includes(a.lastFourDigits));
+  const byIssuer = cards.filter((a) => (ISSUER_ALIASES[a.provider] ?? []).some((w) => title.includes(w)));
+  const resolved =
+    byDigits.length === 1 ? byDigits[0]
+    : byDigits.length === 0 && byIssuer.length === 1 ? byIssuer[0]
+    : undefined;
+  return resolved?.feedless ? resolved : undefined;
 }
 
 export function classifyTransaction(

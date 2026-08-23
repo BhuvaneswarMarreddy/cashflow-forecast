@@ -17,7 +17,7 @@
  * Sanitized fixtures only — invented merchants, invented amounts.
  */
 import { PaymentAccount, Transaction } from '@/types';
-import { interpretTransaction, sumExpenseCents, POSTED_ONLY } from '@/lib/classify';
+import { feedlessCardTargetOf, interpretTransaction, sumExpenseCents, POSTED_ONLY } from '@/lib/classify';
 import { deriveAccountBalance, withDerivedBalances } from '@/lib/forecast';
 
 const chk: PaymentAccount = {
@@ -212,6 +212,51 @@ describe('FEEDLESS-CARD-001: a historical statement import guards only ITS OWN p
     expect(interpretTransaction(payJan, accs).expense).toBe('counted');
     expect(interpretTransaction(payFeb, accs).expense).toBe('counted');
     expect(interpretTransaction(payMar, accs).expense).toBe('counted');
+  });
+});
+
+describe('FEEDLESS-CARD-001: attribution resolves among ALL cards first, THEN checks feedless (#14 round 2)', () => {
+  const normalDiscover: PaymentAccount = {
+    id: 'disc-normal', name: 'Discover It', type: 'credit_card', provider: 'discover',
+    lastFourDigits: '1234', openingBalance: 300, openingDate: '2026-01-01', color: '#444', isActive: true,
+  };
+  const feedlessDiscover: PaymentAccount = {
+    id: 'disc-feedless', name: 'Discover Store Card', type: 'credit_card', provider: 'discover',
+    lastFourDigits: '5678', feedless: true, openingBalance: 500, openingDate: '2026-01-01', color: '#555', isActive: true,
+  };
+  const accounts = [chk, normalDiscover, feedlessDiscover];
+
+  it("a title carrying the NORMAL card's own last four is never attributed to the feedless card", () => {
+    // Measured bug: an issuer-only fallback used to win here because the resolver
+    // only ever searched inside the feedless subset, so the NORMAL card's own last
+    // four — the more specific evidence, and proof the payment was for THAT card —
+    // never got a chance to rule the feedless card out.
+    const toNormal = txn({ id: 'p1', title: 'DISCOVER PAYMENT ACH PMT 1234', amount: 500, accountId: 'chk', date: '2026-03-15' });
+    expect(feedlessCardTargetOf(toNormal, accounts)).toBeUndefined();
+    expect(interpretTransaction(toNormal, accounts).financialMeaning).toBe('card_payment'); // ordinary settlement
+    expect(interpretTransaction(toNormal, accounts).expense).toBe('excluded');
+  });
+
+  it("a title carrying the FEEDLESS card's own last four still resolves correctly", () => {
+    const toFeedless = txn({ id: 'p2', title: 'DISCOVER PAYMENT ACH PMT 5678', amount: 500, accountId: 'chk', date: '2026-03-15' });
+    expect(feedlessCardTargetOf(toFeedless, accounts)?.id).toBe('disc-feedless');
+    expect(interpretTransaction(toFeedless, accounts).expense).toBe('counted');
+  });
+
+  it('the two payments together are $500 of spend, not $1,000', () => {
+    const toNormal = txn({ id: 'p1', title: 'DISCOVER PAYMENT ACH PMT 1234', amount: 500, accountId: 'chk', date: '2026-03-15' });
+    const toFeedless = txn({ id: 'p2', title: 'DISCOVER PAYMENT ACH PMT 5678', amount: 500, accountId: 'chk', date: '2026-03-15' });
+    expect(sumExpenseCents([toNormal, toFeedless], accounts, POSTED_ONLY)).toBe(50_000); // exact cents — $500, not $1,000
+  });
+
+  it('two feedless cards of the same issuer with no digits in the title is a refused ambiguity, not a guess', () => {
+    const secondFeedless: PaymentAccount = {
+      id: 'disc-feedless-2', name: 'Discover Rewards', type: 'credit_card', provider: 'discover',
+      feedless: true, openingBalance: 0, color: '#666', isActive: true,
+    };
+    const noDigitsAccounts = [chk, { ...feedlessDiscover, lastFourDigits: undefined }, secondFeedless];
+    const ambiguous = txn({ id: 'p3', title: 'DISCOVER PAYMENT ACH PMT', amount: 500, accountId: 'chk', date: '2026-03-15' });
+    expect(feedlessCardTargetOf(ambiguous, noDigitsAccounts)).toBeUndefined();
   });
 });
 
