@@ -35,7 +35,7 @@ import { CARD_CREDIT_TO_INFLOW_MEANING, CardCreditKind } from '@/lib/card-credit
 import { selectInflowReviewQueue } from '@/lib/classify';
 import { DuplicateCostEstimate, SubscriptionCancellation, emitDuplicateDecision, generateDuplicateCandidates } from '@/lib/duplicates';
 import { emitRefundDecision, generateRefundCandidates } from '@/lib/refunds';
-import { LinkDraft, REFUND_SOURCE_TYPES, TransactionLink, buildLink, toTxRef } from '@/lib/relations';
+import { LinkDraft, LinkValidationContext, REFUND_SOURCE_TYPES, TransactionLink, buildLink, toTxRef } from '@/lib/relations';
 import { getLinks, getReviewCandidates, recordCandidateDecision, saveLink, saveReviewCandidate } from '@/lib/relations-store';
 import { buildAliasIndex, resolveServiceIdentity } from '@/lib/service-identity';
 import { useRecoveryObservability } from '@/lib/obs/useRecoveryObservability';
@@ -47,6 +47,25 @@ import {
 } from '@/lib/review-queue';
 
 const money = (cents: number) => formatMoneyCents(cents);
+
+/**
+ * The one place a link write turns into a plain yes/no. `saveLink` signals a
+ * rejected write by RESOLVING `{ ok: false }`, not throwing — and a network
+ * failure throws instead of resolving — so both have to be caught here, or a
+ * rejected write reads as a success to every caller (write-honesty audit).
+ */
+async function persistLink(
+  uid: string,
+  draft: LinkDraft & { createdAt?: string; updatedAt?: string },
+  ctx: LinkValidationContext
+): Promise<boolean> {
+  try {
+    const result = await saveLink(uid, draft, ctx);
+    return result.ok;
+  } catch {
+    return false;
+  }
+}
 
 // Three ways to look at time, not six chips: everything, one year, one month.
 // The year list is DERIVED from the ledger — a hard-coded list once hid Dec 2023
@@ -1013,7 +1032,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
    * transaction, link or candidate object.
    */
   const onDecide = useCallback(
-    (item: ReviewQueueItem, decision: RecoveryDecision, override?: ReviewCandidate) => {
+    async (item: ReviewQueueItem, decision: RecoveryDecision, override?: ReviewCandidate) => {
       const uid = user?.id;
       const startedAt = Date.now();
       const candidate = override ?? item.candidate;
@@ -1049,15 +1068,23 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
         };
         const built = buildLink(draft, { transactions: txRefs, links });
         if (built.ok) {
+          if (!(await persistLink(uid, draft, { transactions: txRefs, links }))) {
+            setAnnouncement('That link could not be saved. Please try again.');
+            return;
+          }
           setLinks((prev) => [...prev, built.link]);
-          void saveLink(uid, draft, { transactions: txRefs, links }).catch(() => {});
         }
       }
 
       const writtenLinks: TransactionLink[] = [];
       if (candidate && decision.status === 'confirmed' && decision.allocations?.length) {
+        if (!uid) {
+          setAnnouncement('That allocation could not be saved. Please try again.');
+          return;
+        }
         const confirmedAt = new Date().toISOString();
         const accumulated = [...links];
+        const pending: { link: TransactionLink; draft: LinkDraft }[] = [];
         for (const allocation of decision.allocations) {
           const draft: LinkDraft = {
             linkType: candidate.candidateType === 'partial_refund_match' ? 'partial_refund_of' : 'refund_of',
@@ -1076,9 +1103,17 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
             return;
           }
           accumulated.push(built.link);
-          writtenLinks.push(built.link);
-          if (uid) void saveLink(uid, draft, { transactions: txRefs, links: accumulated }).catch(() => {});
+          pending.push({ link: built.link, draft });
         }
+        // Persist every allocation before any of them counts as written — a
+        // partially-saved refund is a worse lie than a refused one.
+        for (const { draft } of pending) {
+          if (!(await persistLink(uid, draft, { transactions: txRefs, links: accumulated }))) {
+            setAnnouncement('That allocation could not be saved. Please try again.');
+            return;
+          }
+        }
+        writtenLinks.push(...pending.map((p) => p.link));
         // §7.2 — re-allocating a credit SUPERSEDES the allocation it replaces; it never
         // deletes it. The link id is derived from the pair, so a changed amount on the
         // same pair is an upsert; only a changed TARGET produces a second document, and
@@ -1092,12 +1127,13 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
           confirmedAt
         );
         for (const l of superseded) {
-          if (uid) {
-            void saveLink(
-              uid,
-              { id: l.id, linkType: l.linkType, sourceTransactionId: l.sourceTransactionId, targetTransactionId: l.targetTransactionId, allocatedAmountCents: l.allocatedAmountCents, status: 'superseded', supersededByLinkId: l.supersededByLinkId, algorithmVersion: l.algorithmVersion },
-              { transactions: txRefs, links: accumulated }
-            ).catch(() => {});
+          if (!(await persistLink(
+            uid,
+            { id: l.id, linkType: l.linkType, sourceTransactionId: l.sourceTransactionId, targetTransactionId: l.targetTransactionId, allocatedAmountCents: l.allocatedAmountCents, status: 'superseded', supersededByLinkId: l.supersededByLinkId, algorithmVersion: l.algorithmVersion },
+            { transactions: txRefs, links: accumulated }
+          ))) {
+            setAnnouncement('That allocation could not be saved. Please try again.');
+            return;
           }
         }
 
@@ -1134,12 +1170,16 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
           ...(writtenLinks.length ? { linkIds: writtenLinks.map((l) => l.id) } : {}),
           ...(decision.effectiveDate ? { cancelledEffectiveDate: decision.effectiveDate } : {}),
         };
-        setStoredCandidates((prev) => [...prev.filter((c) => c.id !== doc.id), doc]);
         if (uid) {
-          void saveReviewCandidate(uid, doc)
-            .then(() => recordCandidateDecision(uid, doc.id, decision.status, { linkIds: doc.linkIds }))
-            .catch(() => setAnnouncement('That decision could not be saved. Please try again.'));
+          try {
+            await saveReviewCandidate(uid, doc);
+            await recordCandidateDecision(uid, doc.id, decision.status, { linkIds: doc.linkIds });
+          } catch {
+            setAnnouncement('That decision could not be saved. Please try again.');
+            return;
+          }
         }
+        setStoredCandidates((prev) => [...prev.filter((c) => c.id !== doc.id), doc]);
         emitDuplicateDecision(candidate.candidateType, decision.status, decision.reasonCode);
         setUndoRecord({
           candidate,
@@ -1175,17 +1215,19 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
    * — each confirmation is still individually reversible through its candidate.
    */
   const onBatchConfirm = useCallback(
-    (selected: ReviewQueueItem[]) => {
+    async (selected: ReviewQueueItem[]) => {
       const uid = user?.id;
       const confirmedAt = new Date().toISOString();
       const accumulated = [...links];
       const allWritten: TransactionLink[] = [];
       const docs: CandidateDoc[] = [];
       let skipped = 0;
+      let writeFailed = 0;
 
       for (const item of selected) {
         const candidate = item.candidate;
         if (!candidate || candidate.candidateType !== 'refund_match') { skipped++; continue; }
+        if (!uid) { skipped++; continue; }
         const drafts: LinkDraft[] = candidate.proposedLinks.map((p) => ({
           linkType: 'refund_of',
           sourceTransactionId: p.sourceTransactionId,
@@ -1198,7 +1240,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
           candidateId: candidate.candidateId,
         }));
         // Validate the whole candidate before saving any of it.
-        const built = [];
+        const built: { link: TransactionLink; draft: LinkDraft }[] = [];
         let ok = drafts.length > 0;
         for (const draft of drafts) {
           const b = buildLink(draft, { transactions: txRefs, links: [...accumulated, ...built.map((x) => x.link)] });
@@ -1207,10 +1249,11 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
         }
         if (!ok) { skipped++; continue; }
 
-        for (const { link, draft } of built) {
-          accumulated.push(link);
-          allWritten.push(link);
-          if (uid) void saveLink(uid, draft, { transactions: txRefs, links: accumulated }).catch(() => {});
+        // Persist every link before any of this candidate counts as confirmed —
+        // a partially-saved refund is a worse lie than a skipped one.
+        let persisted = true;
+        for (const { draft } of built) {
+          if (!(await persistLink(uid, draft, { transactions: txRefs, links: accumulated }))) { persisted = false; break; }
         }
         const doc: CandidateDoc = {
           ...candidate,
@@ -1219,12 +1262,21 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
           reviewedAt: confirmedAt,
           linkIds: built.map((x) => x.link.id),
         };
-        docs.push(doc);
-        if (uid) {
-          void saveReviewCandidate(uid, doc)
-            .then(() => recordCandidateDecision(uid, doc.id, 'confirmed', { linkIds: doc.linkIds }))
-            .catch(() => {});
+        if (persisted) {
+          try {
+            await saveReviewCandidate(uid, doc);
+            await recordCandidateDecision(uid, doc.id, 'confirmed', { linkIds: doc.linkIds });
+          } catch {
+            persisted = false;
+          }
         }
+        if (!persisted) { writeFailed++; continue; }
+
+        for (const { link } of built) {
+          accumulated.push(link);
+          allWritten.push(link);
+        }
+        docs.push(doc);
         obs.trackLinkConfirmed({
           candidateType: candidate.candidateType,
           allocationCount: built.length,
@@ -1244,37 +1296,55 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
       setAnnouncement(
         `Confirmed ${docs.length} refund${docs.length === 1 ? '' : 's'} — ${money(cents)} folded back into the categories it came from.`
         + (skipped ? ` ${skipped} skipped — they no longer validate and stay in the queue.` : '')
+        + (writeFailed ? ` ${writeFailed} could not be saved — please try again.` : '')
       );
     },
     [user?.id, txRefs, links, obs]
   );
 
-  /** One step, panel-scoped. Undo never DELETES a link — FIN-RELATION-001 §6 denies it. */
-  const onUndo = useCallback(() => {
+  /**
+   * One step, panel-scoped. Undo never DELETES a link — FIN-RELATION-001 §6 denies it.
+   * Writes land BEFORE local state changes: an undo the server rejected must never look
+   * like an undo that happened. `undoRecord` is left in place on failure so the same
+   * press can be retried.
+   */
+  const onUndo = useCallback(async () => {
     if (!undoRecord) return;
     const uid = user?.id;
     const startedAt = Date.now();
+    if (!uid) {
+      setAnnouncement('That undo could not be saved. Please try again.');
+      return;
+    }
+    for (const link of undoRecord.links) {
+      const ok = await persistLink(
+        uid,
+        {
+          id: link.id, linkType: link.linkType,
+          sourceTransactionId: link.sourceTransactionId, targetTransactionId: link.targetTransactionId,
+          allocatedAmountCents: link.allocatedAmountCents, status: 'rejected',
+          algorithmVersion: link.algorithmVersion, candidateId: link.candidateId,
+        },
+        { transactions: txRefs, links }
+      );
+      if (!ok) {
+        setAnnouncement('That undo could not be saved. Please try again.');
+        return;
+      }
+    }
+    try {
+      await recordCandidateDecision(uid, undoRecord.candidate.id, undoRecord.previousStatus);
+    } catch {
+      setAnnouncement('That undo could not be saved. Please try again.');
+      return;
+    }
+
     const undoneIds = new Set(undoRecord.links.map((l) => l.id));
     setLinks((prev) => prev.map((l) => (undoneIds.has(l.id) ? { ...l, status: 'rejected' as const } : l)));
     setStoredCandidates((prev) => [
       ...prev.filter((c) => c.id !== undoRecord.candidate.id),
       { ...undoRecord.candidate, status: undoRecord.previousStatus },
     ]);
-    if (uid) {
-      for (const link of undoRecord.links) {
-        void saveLink(
-          uid,
-          {
-            id: link.id, linkType: link.linkType,
-            sourceTransactionId: link.sourceTransactionId, targetTransactionId: link.targetTransactionId,
-            allocatedAmountCents: link.allocatedAmountCents, status: 'rejected',
-            algorithmVersion: link.algorithmVersion, candidateId: link.candidateId,
-          },
-          { transactions: txRefs, links }
-        ).catch(() => {});
-      }
-      void recordCandidateDecision(uid, undoRecord.candidate.id, undoRecord.previousStatus).catch(() => {});
-    }
     obs.trackUndoCompleted({ undoneEventName: undoRecord.eventName, durationMs: Date.now() - startedAt, resultStatus: 'ok' });
     setAnnouncement('Undone. Nothing was deleted — the links are recorded as rejected.');
     setUndoRecord(null);

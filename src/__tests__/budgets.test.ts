@@ -12,6 +12,7 @@ import {
   getSuggestedBudgets,
 } from '../lib/budgets';
 import { Transaction, CategoryBudget, ExpenseCategory } from '../types';
+import { IncomeContext } from '../lib/classify';
 
 // Helper to create mock transaction
 const mockTransaction = (
@@ -149,6 +150,61 @@ describe('Budget Calculations', () => {
     });
   });
   
+  describe('calculateBudgetStatuses — isAtRisk', () => {
+    // Fixed "today" so daysElapsed/totalDays are known: June 2026 has 30 days,
+    // day 10 of 30 → totalDays/daysElapsed = 3, so projectMonthEndSpending's
+    // Math.round never has to round — exact boundaries are reachable.
+    const TODAY = new Date('2026-06-10T12:00:00Z');
+    const budgets: CategoryBudget[] = [
+      { categoryId: 'food', monthlyLimit: 300, isEnabled: true },
+    ];
+
+    beforeEach(() => {
+      jest.useFakeTimers();
+      jest.setSystemTime(TODAY);
+    });
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('flags a budget on pace to exceed its limit, though nothing is spent yet in the OLD dead-code sense', () => {
+      // spent=101 by day 10 of 30 → projected = round(101/10*30) = 303 > 300, and not yet over.
+      const transactions = [mockTransaction('food', 101)];
+      const status = calculateBudgetStatuses(budgets, transactions, TODAY).find(s => s.categoryId === 'food')!;
+      expect(status.projectedMonthEnd).toBe(303);
+      expect(status.isOverBudget).toBe(false);
+      expect(status.isAtRisk).toBe(true);
+    });
+
+    it('is false once the projection lands exactly on the limit (needs strictly greater)', () => {
+      // spent=100 → projected = round(100/10*30) = 300, exactly the limit.
+      const transactions = [mockTransaction('food', 100)];
+      const status = calculateBudgetStatuses(budgets, transactions, TODAY).find(s => s.categoryId === 'food')!;
+      expect(status.projectedMonthEnd).toBe(300);
+      expect(status.isAtRisk).toBe(false);
+    });
+
+    it('is false once already over budget — isOverBudget and isAtRisk are exclusive', () => {
+      const transactions = [mockTransaction('food', 320)];
+      const status = calculateBudgetStatuses(budgets, transactions, TODAY).find(s => s.categoryId === 'food')!;
+      expect(status.isOverBudget).toBe(true);
+      expect(status.isAtRisk).toBe(false);
+    });
+
+    it('is false with nothing spent (the old `!spent` dead-code path)', () => {
+      const status = calculateBudgetStatuses(budgets, [], TODAY).find(s => s.categoryId === 'food')!;
+      expect(status.spent).toBe(0);
+      expect(status.isAtRisk).toBe(false);
+    });
+
+    it('is false when on pace to land comfortably under the limit', () => {
+      const transactions = [mockTransaction('food', 50)]; // projected = 150 < 300
+      const status = calculateBudgetStatuses(budgets, transactions, TODAY).find(s => s.categoryId === 'food')!;
+      expect(status.projectedMonthEnd).toBeLessThan(300);
+      expect(status.isAtRisk).toBe(false);
+    });
+  });
+
   describe('getTopBudgetRisks', () => {
     it('should return top N overspending risks', () => {
       const budgets: CategoryBudget[] = [
@@ -198,6 +254,62 @@ describe('Budget Calculations', () => {
     });
   });
   
+  // Finding 1: countsAgainstBudget() called interpretTransaction() with no `income`
+  // argument at all, so a review the owner CONFIRMED could never reach it — a
+  // transfer-typed row (e.g. all 22 real Upstart loan-payment rows, per classify.ts's
+  // own documentation) stayed short-circuited to `expense: 'excluded'` regardless of
+  // what the owner said it was, while every other screen (which does pass `income`)
+  // honoured the confirmation.
+  describe('review-confirmed transfers (Finding 1 — income context threading)', () => {
+    const loanPayment: Transaction = {
+      id: 'txn_upstart_1',
+      title: 'Upstart Loan Payment',
+      amount: 350,
+      type: 'transfer',
+      category: 'other',
+      paymentMethod: 'chase',
+      date: new Date().toISOString(),
+    };
+
+    const confirmedAsLoanRepayment: IncomeContext = {
+      reviews: {
+        txn_upstart_1: {
+          transactionId: 'txn_upstart_1',
+          state: 'confirmed',
+          meaning: 'loan_repayment',
+          updatedAt: new Date().toISOString(),
+          source: 'user',
+        },
+      },
+    };
+
+    it('a confirmed loan-repayment transfer counts against its category budget when the income context is passed', () => {
+      const spending = getCategorySpending([loanPayment], 'other', new Date(), undefined, undefined, confirmedAsLoanRepayment);
+      expect(spending).toBe(350);
+
+      const all = getAllCategorySpending([loanPayment], new Date(), undefined, undefined, confirmedAsLoanRepayment);
+      expect(all.other).toBe(350);
+
+      const budgets: CategoryBudget[] = [{ categoryId: 'other', monthlyLimit: 300, isEnabled: true }];
+      const statuses = calculateBudgetStatuses(budgets, [loanPayment], new Date(), undefined, undefined, confirmedAsLoanRepayment);
+      expect(statuses.find(s => s.categoryId === 'other')?.spent).toBe(350);
+      expect(statuses.find(s => s.categoryId === 'other')?.isOverBudget).toBe(true);
+    });
+
+    it('regression: the same transfer counts for nothing when no review confirmation is available — matches pre-fix behaviour', () => {
+      expect(getCategorySpending([loanPayment], 'other')).toBe(0);
+      expect(getAllCategorySpending([loanPayment]).other).toBe(0);
+
+      const budgets: CategoryBudget[] = [{ categoryId: 'other', monthlyLimit: 300, isEnabled: true }];
+      const statuses = calculateBudgetStatuses(budgets, [loanPayment]);
+      expect(statuses.find(s => s.categoryId === 'other')?.spent).toBe(0);
+
+      // Passing an income context with no matching review is likewise a no-op.
+      const emptyIncome: IncomeContext = { reviews: {} };
+      expect(getCategorySpending([loanPayment], 'other', new Date(), undefined, undefined, emptyIncome)).toBe(0);
+    });
+  });
+
   describe('getSuggestedBudgets', () => {
     it('should calculate suggested budgets based on income', () => {
       const monthlyIncome = 5000;

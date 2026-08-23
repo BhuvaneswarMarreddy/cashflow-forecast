@@ -18,7 +18,15 @@ export interface UserProfileContextType {
   isLoading: boolean;
   isOnboarded: boolean;
   error: string | null;
-  updateProfile: (updates: Partial<UserProfile>) => Promise<void>;
+  // Returns false only on a CONFIRMED write failure (the Firestore SDK actually threw
+  // while online) — not a durable-write guarantee. src/lib/firestore.ts's
+  // updateUserSettings swallows an offline error and resolves normally (the SDK
+  // queues the write in its local cache for when connectivity returns), so `true`
+  // can mean "written to Firestore's cache, not yet confirmed by the server" as well
+  // as "confirmed". Callers that need a real success/failure state read this instead
+  // of assuming the promise settling means it landed; just don't read `true` as proof
+  // of a server round trip.
+  updateProfile: (updates: Partial<UserProfile>) => Promise<boolean>;
   addPaymentAccount: (account: Omit<PaymentAccount, 'id'>) => Promise<void>;
   // Create several accounts in one state update and return their ids in order. Used by
   // CSV import to auto-create the accounts a file references; a per-account loop over
@@ -221,38 +229,61 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
   }, [isAuthenticated, authLoading, user?.id, user, loadLocalProfile, syncFromFirestore, saveLocalProfile, profile]);
 
   // Update profile
-  const updateProfile = async (updates: Partial<UserProfile>) => {
-    if (!profile || !user?.id) return;
+  const updateProfile = async (updates: Partial<UserProfile>): Promise<boolean> => {
+    if (!profile || !user?.id) return false;
 
     // Merge settings properly
     const mergedSettings = updates.settings 
       ? { ...profile.settings, ...updates.settings }
       : profile.settings;
 
-    const updatedProfile = { 
-      ...profile, 
+    // Captured BEFORE the optimistic set below, so a confirmed write failure can
+    // restore exactly what was there a moment ago.
+    const previousProfile = profile;
+    const updatedProfile = {
+      ...profile,
       ...updates,
       settings: mergedSettings,
     };
     setProfile(updatedProfile);
     saveLocalProfile(user.id, updatedProfile);
 
-    {
-      try {
-        // #100: every settings key goes, not a hand-listed subset. The old allowlist
-        // here silently dropped anything not named in it — `includePendingInCalculations`
-        // was never written at all, and `timezone`/`notifications` never had been either.
-        const firestoreSettings = toFirestoreSettings(mergedSettings, {
-          monthlyBudget: updates.monthlyBudget ?? profile.monthlyBudget,
-          currency: updates.currency ?? profile.currency,
-        });
+    try {
+      // #100: every settings key goes, not a hand-listed subset. The old allowlist
+      // here silently dropped anything not named in it — `includePendingInCalculations`
+      // was never written at all, and `timezone`/`notifications` never had been either.
+      const firestoreSettings = toFirestoreSettings(mergedSettings, {
+        monthlyBudget: updates.monthlyBudget ?? profile.monthlyBudget,
+        currency: updates.currency ?? profile.currency,
+      });
 
-        await firestoreService.updateUserSettings(user.id, firestoreSettings);
-        setIsFirestoreOnline(true);
-      } catch (err) {
-        console.error('Failed to sync profile update:', err);
-        setIsFirestoreOnline(false);
-      }
+      await firestoreService.updateUserSettings(user.id, firestoreSettings);
+      setIsFirestoreOnline(true);
+      return true;
+    } catch (err) {
+      // A CONFIRMED failure (the offline path never reaches here — see this
+      // function's JSDoc on the context type above). The optimistic setProfile and
+      // saveLocalProfile above already left the unsaved change in state and in
+      // localStorage; leaving them there is exactly how a caller ends up showing
+      // "could not save" while the list still shows the new entry.
+      console.error('Failed to sync profile update:', err);
+      setIsFirestoreOnline(false);
+      // Roll back — but only if nothing newer has landed. `profile` above is a
+      // snapshot from when this call started; by the time the `await` above settles,
+      // a second updateProfile call (or any other write in this context) may have
+      // already applied a NEWER successful change on top of ours, and blindly
+      // restoring `previousProfile` would silently erase it. The functional form of
+      // setProfile is the one place React hands us the true-latest state, so the
+      // compare-and-swap happens there: restore only if state is still exactly what
+      // we optimistically set. The localStorage write is paired inside the same
+      // check (rather than a second, separately-timed compare) so the two stores
+      // can't disagree about which write won the race.
+      setProfile((current) => {
+        if (current !== updatedProfile) return current; // superseded — leave it alone
+        saveLocalProfile(user.id, previousProfile);
+        return previousProfile;
+      });
+      return false;
     }
   };
 

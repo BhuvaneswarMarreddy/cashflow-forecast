@@ -21,7 +21,19 @@ const EMPLOYER: IncomeSource = {
   id: 'src1', name: 'Larkspur Studio', amount: 4000, frequency: 'monthly', isActive: true,
 };
 
-const now = new Date();
+// Frozen clock: monthlyAverages() windows off `new Date()`, and this fixture's
+// month-back math depended on real wall-clock time — non-deterministic near a
+// month boundary. Pinned so every run sees the same "now".
+const FROZEN_NOW = new Date(2026, 7, 15, 12, 0, 0);
+beforeAll(() => {
+  jest.useFakeTimers();
+  jest.setSystemTime(FROZEN_NOW);
+});
+afterAll(() => {
+  jest.useRealTimers();
+});
+
+const now = FROZEN_NOW;
 const m = (back: number) =>
   new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - back, 15)).toISOString().slice(0, 10);
 

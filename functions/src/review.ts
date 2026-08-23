@@ -103,6 +103,11 @@ export const resolveReview = onCall({ cors: true }, async (request) => {
   };
 
   if (!transactionId) throw new HttpsError('invalid-argument', 'Which transaction?');
+  // A doc id containing '/' changes the path .doc() resolves — same guard
+  // decisions.ts applies to decisionId, for the identical reason.
+  if (transactionId.includes('/')) {
+    throw new HttpsError('invalid-argument', 'Malformed transaction id.');
+  }
   if (decision !== 'confirm' && decision !== 'dismiss') {
     throw new HttpsError('invalid-argument', 'Confirm or dismiss.');
   }
@@ -110,6 +115,12 @@ export const resolveReview = onCall({ cors: true }, async (request) => {
   // read by every surface, so an unknown string must never reach Firestore.
   if (decision === 'confirm' && !isFinancialMeaning(meaning)) {
     throw new HttpsError('invalid-argument', 'That is not a meaning Cashflow knows.');
+  }
+  // `explanation.slice(0, 500)` below assumes a string; request.data is
+  // attacker-controlled JSON, so a non-string must be rejected here rather
+  // than throwing inside the write path.
+  if (explanation !== undefined && typeof explanation !== 'string') {
+    throw new HttpsError('invalid-argument', 'Malformed explanation.');
   }
 
   const db = getFirestore();

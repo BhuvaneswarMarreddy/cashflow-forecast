@@ -16,7 +16,8 @@
  * Same contract as the runway hero's `hasBurn` — never print what the data
  * cannot back.
  */
-import { observedCadence, reconcileIncome, monthlyFromCadence } from '@/lib/income-cadence';
+import { observedCadence, reconcileIncome, monthlyFromCadence, reconcileAllIncome, totalMonthlyIncome } from '@/lib/income-cadence';
+import type { IncomeSource, Transaction } from '@/types';
 
 /** n deposits, `gap` days apart, most recent first. */
 const series = (n: number, gap: number, from = '2026-08-01'): string[] => {
@@ -117,5 +118,59 @@ describe('reconcileIncome', () => {
     expect(r.conflict).toBe(true);
     expect(r.observed).toBe('biweekly');
     expect(r.observedMonthly).toBeCloseTo((2000 * 26) / 12, 2);
+  });
+});
+
+/**
+ * reconcileAllIncome/totalMonthlyIncome — the all-or-nothing aggregation across
+ * every approved source. totalMonthlyIncome's own docstring names the failure
+ * this guards against: summing the sources that happen to agree and quietly
+ * dropping the one in dispute would produce "a confident total that is wrong by
+ * exactly the amount in dispute". These tests pin the agreeing case, the disputed
+ * case, and that a mixed set never resolves to the partial (wrong) sum.
+ */
+describe('reconcileAllIncome / totalMonthlyIncome', () => {
+  const acme: IncomeSource = { id: 's1', name: 'Acme', amount: 4300, frequency: 'monthly', isActive: true } as IncomeSource;
+  // Declared biweekly; its deposits below actually land monthly — the exact #75 defect.
+  const bside: IncomeSource = { id: 's2', name: 'Bside Gigs', amount: 4300, frequency: 'biweekly', isActive: true } as IncomeSource;
+
+  const dep = (title: string, date: string): Transaction => ({
+    id: `${title}-${date}`, title, amount: 4300, type: 'income',
+    category: 'other', paymentMethod: 'chase', date,
+  } as Transaction);
+
+  it('agreeing source: no conflict, and the total is the sum of its (one) monthly figure', () => {
+    const txns = series(6, 30).map((d) => dep('ACME PAYROLL', d));
+    const rec = reconcileAllIncome([acme], txns);
+    expect(rec).toHaveLength(1);
+    expect(rec[0].sourceName).toBe('Acme');
+    expect(rec[0].conflict).toBe(false);
+    expect(totalMonthlyIncome(rec)).toBe(4300);
+  });
+
+  it('disputed source: reconciliation carries the conflict, and the total is null', () => {
+    const txns = series(4, 30).map((d) => dep('BSIDE GIGS', d));
+    const rec = reconcileAllIncome([bside], txns);
+    expect(rec[0].conflict).toBe(true);
+    expect(totalMonthlyIncome(rec)).toBeNull();
+  });
+
+  it('mixed set: the disputed source is NOT silently dropped — the whole total goes null, not the partial sum', () => {
+    const agreeing = series(6, 30).map((d) => dep('ACME PAYROLL', d));
+    const disputed = series(4, 30, '2026-07-15').map((d) => dep('BSIDE GIGS', d));
+    const rec = reconcileAllIncome([acme, bside], [...agreeing, ...disputed]);
+
+    expect(rec.map((r) => r.sourceName).sort()).toEqual(['Acme', 'Bside Gigs']);
+    expect(rec.some((r) => r.conflict)).toBe(true);
+    // The failure this exists to prevent: quietly summing only Acme would read as
+    // a confident $4,300 total while Bside Gigs' real figure sits in dispute.
+    expect(totalMonthlyIncome(rec)).not.toBe(4300);
+    expect(totalMonthlyIncome(rec)).toBeNull();
+  });
+
+  it('a paused source is not reconciled, and an empty set totals to zero (not null)', () => {
+    const rec = reconcileAllIncome([{ ...acme, isActive: false }], []);
+    expect(rec).toHaveLength(0);
+    expect(totalMonthlyIncome(rec)).toBe(0);
   });
 });

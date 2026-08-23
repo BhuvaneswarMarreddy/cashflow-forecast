@@ -578,9 +578,16 @@ describe('modelFor — vision model selection', () => {
 // merchant text or base64. The narrow return type is the enforcement — a future field
 // has to fit boolean | number, not free text.
 describe('successLogFields — counts-only success log', () => {
-  it('carries only hasImage and durationMs', () => {
-    expect(successLogFields(true, 42)).toEqual({ hasImage: true, durationMs: 42 });
-    expect(successLogFields(false, 0)).toEqual({ hasImage: false, durationMs: 0 });
-    expect(Object.keys(successLogFields(true, 1))).toEqual(['hasImage', 'durationMs']);
+  it('carries only hasImage, durationMs and truncated', () => {
+    expect(successLogFields(true, 42, false)).toEqual({ hasImage: true, durationMs: 42, truncated: false });
+    expect(successLogFields(false, 0, false)).toEqual({ hasImage: false, durationMs: 0, truncated: false });
+    expect(Object.keys(successLogFields(true, 1, false))).toEqual(['hasImage', 'durationMs', 'truncated']);
+  });
+
+  // Audit finding #2: a truncated completion returned before this log line ran,
+  // so a truncated turn was invisible in logs — no way to notice max_tokens
+  // starting to bite as the prompt grows.
+  it('flags a truncated completion so it is visible in logs, not just to the owner', () => {
+    expect(successLogFields(true, 1200, true)).toEqual({ hasImage: true, durationMs: 1200, truncated: true });
   });
 });
