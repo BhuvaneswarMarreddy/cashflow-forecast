@@ -16,6 +16,7 @@ import {
   billsOnRetiredMethods,
   billUpcomingEvents,
   isCharging,
+  installmentEndFrom,
   PAYMENT_METHODS,
 } from '@/lib/bills';
 import starter from '@/data/bills-starter.json';
@@ -489,5 +490,48 @@ describe('installment anchor survives a correction', () => {
       installmentsRemaining: null as unknown as number,
     });
     expect(isCharging(nulled, '2026-08-07')).toBe(true);
+  });
+});
+
+/**
+ * The ratchet (issue #165). Deriving the end at read time from `updatedAt`
+ * meant every unrelated edit re-anchored the plan — and since the count never
+ * decrements, each edit re-added the FULL original term. `update_bill`'s own
+ * worked example in prompts.ts is a rename, so this was the normal path.
+ *
+ * The end is now stamped once, at write time, into `endDate`.
+ */
+describe('installmentEndFrom — the write-time stamp', () => {
+  test('13 monthly payments from the anchor date', () => {
+    expect(installmentEndFrom('2026-08-06T00:00:00.000Z', 'monthly', 13)).toBe('2027-09-06');
+  });
+
+  test('weekly and biweekly step in days, not months', () => {
+    expect(installmentEndFrom('2026-08-06T00:00:00.000Z', 'weekly', 4)).toBe('2026-09-03');
+    expect(installmentEndFrom('2026-08-06T00:00:00.000Z', 'biweekly', 4)).toBe('2026-10-01');
+  });
+
+  test('quarterly, semiannual and annual use their real month steps', () => {
+    expect(installmentEndFrom('2026-08-06T00:00:00.000Z', 'quarterly', 2)).toBe('2027-02-06');
+    expect(installmentEndFrom('2026-08-06T00:00:00.000Z', 'semiannual', 2)).toBe('2027-08-06');
+    expect(installmentEndFrom('2026-08-06T00:00:00.000Z', 'annual', 2)).toBe('2028-08-06');
+  });
+
+  test('a stored endDate makes the bill immune to the ratchet', () => {
+    // The whole point: with endDate present, isCharging never consults the
+    // updatedAt-based fallback, so later edits cannot move the plan's end.
+    const stamped = mk(45.79, 'monthly', {
+      installmentsRemaining: 13,
+      endDate: '2027-09-06',
+      createdAt: '2026-08-06T00:00:00.000Z',
+      updatedAt: '2027-06-01T00:00:00.000Z', // a rename, long after recording
+    });
+    expect(isCharging(stamped, '2027-09-05')).toBe(true);
+    expect(isCharging(stamped, '2027-09-07')).toBe(false);
+  });
+
+  test('refuses a malformed anchor rather than throwing', () => {
+    expect(installmentEndFrom('', 'monthly', 3)).toBeUndefined();
+    expect(installmentEndFrom('not-a-date', 'monthly', 3)).toBeUndefined();
   });
 });
