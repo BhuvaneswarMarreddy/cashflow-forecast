@@ -10,7 +10,7 @@
  * round once, so per-row rounding can never drift a header total.
  */
 
-import { addDays, differenceInCalendarDays, format, getDaysInMonth, isAfter, isBefore, parseISO } from 'date-fns';
+import { addDays, addMonths, differenceInCalendarDays, format, getDaysInMonth, isAfter, isBefore, parseISO } from 'date-fns';
 
 import type { Transaction } from '@/types';
 
@@ -80,8 +80,11 @@ export interface Bill {
   /**
    * Payments left as of when this was recorded — caps how many future due
    * dates `billUpcomingEvents()` projects (mirrors `FirestoreIncome.remainingPayments`
-   * / forecast.ts's `maxPayments`). Does NOT auto-decrement with time; re-record
-   * to update it.
+   * / forecast.ts's `maxPayments`). The stored number does NOT auto-decrement;
+   * correct it with `update_bill`, which re-stamps `updatedAt`. It does,
+   * however, EXPIRE: `isCharging()` derives the plan's end from `updatedAt` +
+   * this many periods, so an installment captured from a screenshot stops
+   * charging on its own instead of inflating "Locked" and Upcoming forever.
    */
   installmentsRemaining?: number;
   createdAt: string;
@@ -136,8 +139,64 @@ const TODAY = (): string => new Date().toISOString().slice(0, 10);
  * bills digest) filter to "current" bills with the SAME rule billUpcomingEvents
  * already uses, instead of a second definition of "active" drifting from this one.
  */
-export const isCharging = (b: Bill, today: string): boolean =>
-  b.lifecycleStatus !== 'cancelled' && !(b.endDate !== undefined && b.endDate < today);
+export const isCharging = (b: Bill, today: string): boolean => {
+  if (b.lifecycleStatus === 'cancelled') return false;
+  if (b.endDate !== undefined && b.endDate < today) return false;
+  const end = installmentEndISO(b);
+  return end === undefined || end >= today;
+};
+
+/**
+ * When an installment plan runs out — DERIVED, never stored.
+ *
+ * `installmentsRemaining` is a count captured at record time, and nothing
+ * anywhere decrements it (see the field's own doc). `isCharging` used to look
+ * only at `endDate`, and `record_bill`'s prompt deliberately instructs the
+ * model to send at most ONE of `endDate` / `installmentsRemaining` — so a bill
+ * captured from an installment screenshot has a count and no end date, and
+ * therefore charged FOREVER. It kept feeding `nonNegotiableMonthly` (the Home
+ * "Locked" tile), `upcomingTotalCents` and the bills digest, growing more
+ * wrong every month, and the only way to stop it was to remember to re-record
+ * the bill by hand.
+ *
+ * ANCHOR IS `updatedAt`, NOT `createdAt`. `updateBill` (firestore.ts) strips
+ * `createdAt` from every update, and `update_bill` — the documented way to
+ * correct a count — writes `installmentsRemaining` onto the existing row. So
+ * anchoring on `createdAt` meant correcting an old bill to "8 remaining" left
+ * the anchor months in the past and retired the bill EARLY, silently, while
+ * the confirmation card said "8 payments left". A bill quietly disappearing is
+ * worse than one that over-charges: over-charging is visible on the screen.
+ * `updatedAt` is stamped on every write, so a corrected count re-anchors to the
+ * moment it was corrected. Its own failure mode — an unrelated edit, like a
+ * vendor rename, extending the plan — errs toward charging too long, which is
+ * the visible direction.
+ *
+ * A count of 0 is how an installment is marked FINISHED (see `update_bill`'s
+ * prompt), and falls out naturally: the plan ended when it was last touched.
+ *
+ * `.slice(0, 10)` matters. `parseISO` on a full timestamp yields a UTC instant
+ * while `addMonths`/`format` work in LOCAL time, so the deployed callable (UTC)
+ * and the browser (America/Chicago) derived ends one day apart. A plain
+ * calendar date parses to local midnight in every zone, which is what keeps
+ * `homeSnapshot` and the web agreeing by construction.
+ */
+function installmentEndISO(b: Bill): string | undefined {
+  // Not `!== undefined`: a null from a hand-edited doc would multiply to 0 and
+  // retire the bill instantly. An empty/absent stamp would throw RangeError out
+  // of `format` and take the whole homeSnapshot callable — and with it the
+  // phone's Home screen — down with it.
+  if (typeof b.installmentsRemaining !== 'number') return undefined;
+  const anchor = b.updatedAt || b.createdAt;
+  if (!anchor) return undefined;
+  const from = parseISO(anchor.slice(0, 10));
+  if (Number.isNaN(from.getTime())) return undefined;
+  const months = MONTH_STEP[b.frequency];
+  const end =
+    months !== undefined
+      ? addMonths(from, months * b.installmentsRemaining)
+      : addDays(from, (b.frequency === 'weekly' ? 7 : 14) * b.installmentsRemaining);
+  return format(end, 'yyyy-MM-dd');
+}
 
 export function monthlyCostRaw(bill: Bill): number {
   return bill.amount * MONTHLY_FACTOR[bill.frequency];
@@ -400,6 +459,14 @@ export function billUpcomingEvents(
       dueDates = dueDates.filter((d) => !isAfter(d, end));
     }
     if (bill.installmentsRemaining !== undefined) {
+      // Cap by the plan's DERIVED end as well as by the count. The count alone
+      // is measured from today, so a plan recorded months ago would keep
+      // projecting its full original length forever.
+      const planEnd = installmentEndISO(bill);
+      if (planEnd) {
+        const end = parseISO(planEnd);
+        dueDates = dueDates.filter((d) => !isAfter(d, end));
+      }
       dueDates = dueDates.slice(0, bill.installmentsRemaining);
     }
 
