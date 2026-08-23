@@ -182,20 +182,30 @@ export function deriveAccountBalance(
   // doc for why a set of exact periods, not a floor/ceiling/span.
   const feedless = !!account.feedless && account.type === 'credit_card';
   const feedPeriods = feedless ? feedCoveredPeriods(account.id, transactions) : undefined;
-  // IMPORTANT-2 (#14 round 3): whether this card has ANY coverage at all — i.e. any
-  // qualifying row of its own, in any period. This, not the `feedless` FLAG, is what
-  // the zero clamp below must gate on.
-  const hasCoverage = !!feedPeriods && feedPeriods.size > 0;
 
-  const net = transactions.reduce((sum, t) => {
-    if (t.accountId === account.id) {
-      return inWindow(t) ? sum + (isPositive(t, [account]) ? t.amount : -t.amount) : sum;
-    }
+  // #14 round 4 (CRITICAL-3, reopened): TWO separate arms, summed separately, not
+  // one shared `net`. The OWN-ROW arm (this card's own posted rows) can legitimately
+  // go negative — a refund bigger than the balance is a real credit balance and must
+  // stay visible (round 3). The STAND-IN arm (a payment on ANOTHER account, standing
+  // in for this card's missing feed in an UNCOVERED month) has no purchases behind it
+  // by construction and must never pay the card past zero. Round 3's clamp gated on
+  // `hasCoverage` — "does this account have ANY covered period at all" — so a single
+  // covered month (e.g. a feed connecting this April) disabled the clamp for the
+  // WHOLE account while the stand-in pathology was still live in every uncovered
+  // month behind it. Measured: five months of recorded payments, then a feed
+  // connects in April — the card's derived balance went negative and Cards-owed
+  // was understated by the same amount. Capping only the stand-in arm fixes this
+  // without touching the own-row arithmetic at all; `hasCoverage` is gone.
+  const ownNet = transactions.reduce((sum, t) => {
+    if (t.accountId !== account.id || !inWindow(t)) return sum;
+    return sum + (isPositive(t, [account]) ? t.amount : -t.amount);
+  }, 0);
+  const standInNet = transactions.reduce((sum, t) => {
     // FEEDLESS-CARD-001: a payment landing on ANOTHER account that names THIS
     // feedless card stands in for its missing feed — the same rule classify.ts's
     // interpretTransaction applies to the expense side, so the balance this card
     // shows and the spend the payment counts as never disagree.
-    if (!feedless || !allAccounts || !inWindow(t)) return sum;
+    if (t.accountId === account.id || !feedless || !allAccounts || !inWindow(t)) return sum;
     const day = t.date.split('T')[0];
     if (feedPeriods?.has(day.slice(0, 7))) return sum; // guard: a real row already covers THIS period
     if (feedlessCardTargetOf(t, allAccounts)?.id !== account.id) return sum;
@@ -204,34 +214,23 @@ export function deriveAccountBalance(
   const opening = account.openingBalance || 0;
   // Debt is stored as a positive amount owed: a purchase (signedEffect < 0) raises it,
   // a payment (signedEffect > 0) lowers it — the opposite sign to a cash account.
-  const owed = isDebt ? opening - net : opening + net;
+  // Own-row arithmetic ONLY — untouched by the stand-in arm.
+  const owed = isDebt ? opening - ownNet : opening + ownNet;
 
-  // CRITICAL-1/3 (#14): a feedless card's derived balance only ever moves DOWN —
-  // payments reduce owed, and there is no feed to ever raise it back up — so an
-  // UNANCHORED feedless card with NO COVERAGE (opening = 0 by construction, #83)
-  // goes NEGATIVE the moment any payment is recorded. A negative "owed" is not a
-  // real credit balance; it SUBTRACTS from every other card's debt in Cards-owed
-  // and INFLATES net worth, exactly the #83 class of bug (history measured
-  // against an invented zero).
+  // CRITICAL-1/3 (#14): the stand-in arm has no purchases behind it by construction
+  // (it exists only because the feed is missing for that month), so it must never
+  // invent a negative balance. Cap it so it pays `owed` down to zero and never past —
+  // an UNANCHORED feedless card with no coverage at all (opening = 0 by construction,
+  // #83) also lands at exactly $0 this way. A negative "owed" INVENTED by the
+  // stand-in arm would subtract from every other card's debt in Cards-owed and
+  // inflate net worth, exactly the #83 class of bug.
   //
-  // The real fix is upstream: a feedless card should never be SAVED without an
-  // anchor in the first place (accounts/page.tsx refuses that save). This is the
-  // defensive floor for every account that predates that guard, or reached this
-  // state some other way. Ponytail choice: CLAMP rather than throw/refuse here —
-  // this function returns a `number` to dozens of callers that sum, sort and
-  // render it, and a mid-render exception is worse than a floor of $0 ("we don't
-  // owe less than nothing"). Clamping never HIDES money: it only stops an
-  // impossible negative from being invented in the first place.
-  //
-  // IMPORTANT-2 (#14 round 3): gated on `!hasCoverage`, NOT on the `feedless` flag
-  // alone. The flag is a permanent account setting; once a feedless card gains a
-  // real feed (rows of its own), `owed` is derived from those real rows same as any
-  // other card, and a negative owed there is a REAL credit balance (e.g. a refund
-  // larger than the balance) — clamping it to $0 would hide real money. Measured:
-  // the Amazon Store Card in this ledger carries $4,744 of refunds in
-  // (CSV_GROUND_TRUTH.md#3), the heaviest refund traffic of any account here; a
-  // $900 refund against a $100 balance must read -$800, not $0.
-  return feedless && !hasCoverage ? Math.max(0, owed) : owed;
+  // The own-row arm is completely untouched: a genuine credit balance from real
+  // refund rows (e.g. the Amazon Store Card's $4,744 of refunds in
+  // CSV_GROUND_TRUTH.md#3) still reads negative, never clamped, no matter what the
+  // stand-in arm is doing in other months.
+  const standInReduction = feedless ? Math.min(standInNet, Math.max(0, owed)) : standInNet;
+  return owed - standInReduction;
 }
 
 /**
