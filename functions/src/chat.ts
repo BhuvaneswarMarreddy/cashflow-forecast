@@ -14,6 +14,9 @@ import OpenAI from 'openai';
 import { AI_CONFIG } from './ai-config';
 import { buildChatMessages, AiChatRequest } from './prompts';
 import { checkRateLimit, LIMITS } from './rate-limit';
+import { readLedger } from './snapshot';
+import { buildLedgerSummary } from '@/lib/chat-summary';
+import { withDerivedBalances } from '@/lib/forecast';
 
 // Generic "the model gave nothing back" fallback — JSON mode returned empty
 // content with no parse error to explain why. Not a quota/rate-limit case;
@@ -99,6 +102,22 @@ export function truncatedReply(): {
   };
 }
 
+/**
+ * Puts the SERVER's ledger totals into the request, replacing anything the
+ * caller sent.
+ *
+ * The totals block is introduced to the model as "computed by the app over
+ * EVERY transaction. Complete, not a sample." A figure carrying that claim must
+ * not be the caller's to supply — the client is untrusted input, and the phone
+ * only holds 50 rows in the first place.
+ */
+export function withServerSummary(
+  body: AiChatRequest,
+  summary: ReturnType<typeof buildLedgerSummary>,
+): AiChatRequest {
+  return { ...body, context: { ...body.context, summary } };
+}
+
 export function successLogFields(
   hasImage: boolean,
   durationMs: number,
@@ -129,6 +148,34 @@ export const aiChat = onCall(
 
     if (!process.env.OPENAI_API_KEY) {
       throw new HttpsError('unavailable', 'AI service not configured');
+    }
+
+    // LEDGER TOTALS are computed HERE, not sent by the client.
+    //
+    // The system prompt always renders a "LEDGER TOTALS — computed by the app
+    // over EVERY transaction" block, and the very next block tells the model
+    // the 20 sample rows may NEVER be used for totals or counts. Mobile never
+    // sent `summary`, so that block rendered "(no totals available)" and the
+    // phone's chat was structurally unable to answer any question involving a
+    // number — while the web, which built the summary client-side, could.
+    //
+    // Building it server-side fixes both clients at once and removes an
+    // untrusted-input surface: totals the model quotes as authoritative should
+    // never have been the caller's to supply. The phone only holds 50 rows
+    // anyway, so it could not have produced an honest answer locally.
+    try {
+      const ledger = await readLedger(request.auth.uid);
+      const accounts = withDerivedBalances(ledger.accounts, ledger.transactions, {
+        sources: ledger.incomeSources,
+        reviews: ledger.reviews,
+        includePending: ledger.includePending,
+      });
+      Object.assign(body, withServerSummary(body, buildLedgerSummary(ledger.transactions, accounts)));
+    } catch (err) {
+      // A ledger read failure must not take the whole turn down: the prompt
+      // degrades to "(no totals available)", which is the honest answer and
+      // already what every mobile turn produced before this.
+      console.warn('aiChat: ledger summary unavailable', err);
     }
 
     // Built (and validated — CHAT_IMAGE_CAPS) outside the try below, so a bad image throws
