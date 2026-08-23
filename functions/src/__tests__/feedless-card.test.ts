@@ -10,6 +10,8 @@
  */
 import { buildSnapshot } from '../snapshot';
 import type { Ledger } from '../snapshot';
+import { interpretTransaction, POSTED_ONLY } from '@/lib/classify';
+import { withDerivedBalances } from '@/lib/forecast';
 import type { PaymentAccount, Transaction } from '@/types';
 
 const checking: PaymentAccount = {
@@ -55,6 +57,14 @@ const lastMonthDate = (() => {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 15)).toISOString();
 })();
 
+/** `n` full calendar months before "now", on the given day — same reasoning as
+ *  lastMonthDate, generalised so the double-count guard test below can place
+ *  rows in two different months without ever naming a literal year. */
+const monthsAgo = (n: number, day: number): string => {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - n, day)).toISOString();
+};
+
 const amazonPayment: Transaction = {
   id: 'pay1',
   title: 'AMAZON STORE CARD PAYMENT ...4521',
@@ -90,26 +100,45 @@ describe('FEEDLESS-CARD-001: the $800 Amazon payment reaches the mobile snapshot
   });
 
   it('the double-count guard: once the card has itemized rows, later payments stop counting', () => {
-    // Fixed, well-in-the-past dates — never "today": deriveAccountBalance's window
-    // check is LOCAL-timezone (date-fns `format`), and a UTC "today" fixture can
-    // land on the wrong side of it depending on where this suite runs.
-    const itemizedDate = '2026-02-15';
+    // #14 round 2: the guard is a PER-PAYMENT predicate — a payment stops counting
+    // once the card has a POSTED row of its own dated ON/BEFORE it (a real row
+    // already covers that period). Relative dates (not literal year strings), same
+    // reasoning as lastMonthDate above — deterministic whenever this suite runs.
+    const twoMonthsAgo = monthsAgo(2, 1);   // earlyPayment: before the card's own row
+    const itemizedDate = monthsAgo(1, 15);  // the card's own (only) row
+    const oneMonthAgoLater = monthsAgo(1, 20); // laterPayment: after the card's own row
+
     const itemizedRow: Transaction = {
       id: 'own1', title: 'Household goods', amount: 45, type: 'expense', category: 'shopping',
       paymentMethod: 'other', date: itemizedDate, accountId: 'amzn',
     };
-    const earlyPayment: Transaction = { ...amazonPayment, id: 'pay1', date: '2026-02-01' }; // before the feed
-    const laterPayment: Transaction = { ...amazonPayment, id: 'pay2', date: '2026-03-01' }; // after — guarded
+    const earlyPayment: Transaction = { ...amazonPayment, id: 'pay1', date: twoMonthsAgo }; // guarded out
+    const laterPayment: Transaction = { ...amazonPayment, id: 'pay2', date: oneMonthAgoLater }; // still counts
 
-    const { accounts } = buildSnapshot({
-      ...baseLedger, transactions: [earlyPayment, itemizedRow, laterPayment],
-    });
+    const transactions = [earlyPayment, itemizedRow, laterPayment];
+    const { snapshot, accounts } = buildSnapshot({ ...baseLedger, transactions });
 
-    // earlyPayment (before the feed) still counts; laterPayment (after the itemized
-    // row) is guarded out — only the itemized row's own $45 counts from there on,
-    // not the $800 payment that would double it.
+    // earlyPayment is guarded out; laterPayment still counts — the itemized row's
+    // own $45 plus laterPayment's $800, not both payments plus the row.
     const card = accounts.find((a) => a.id === 'amzn')!;
-    expect(card.balanceCents).toBe(120_000 - 80_000 + 4_500); // anchor - earlyPayment + purchase
+    expect(card.balanceCents).toBe(120_000 - 80_000 + 4_500); // anchor - laterPayment + purchase
+
+    // IMPORTANT-7: balanceCents alone cannot tell an INERT guard from a working
+    // one when both payments are the same $800 — this whole suite passed with the
+    // classify guard inert, because the number comes out identical either way.
+    // avgMonthlySpendCents is a SUM across payments, not a difference: an inert
+    // guard counts BOTH ($845 + $800 = $1,645, spread over the same 2 months, so
+    // $823/mo), a working guard counts exactly one payment ($845 over 2 months =
+    // $423/mo, rounded — monthlyAverages() rounds to the nearest dollar before this
+    // converts to cents).
+    expect(snapshot.avgMonthlySpendCents).toBe(42_300);
+
+    // The `forecast` treatment (classify.ts) must agree with `expense`: a guarded
+    // payment must not silently keep projecting into the forecast baseline.
+    const derived = withDerivedBalances([checking, amazonCard], transactions, POSTED_ONLY);
+    const derivedAmzn = derived.find((a) => a.id === 'amzn')!;
+    expect(interpretTransaction(earlyPayment, [checking, derivedAmzn]).forecast).toBe('excluded');
+    expect(interpretTransaction(laterPayment, [checking, derivedAmzn]).forecast).toBe('counted');
   });
 });
 
