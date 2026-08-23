@@ -377,6 +377,48 @@ describe('FEEDLESS-CARD-001: the zero clamp is gated on COVERAGE, not the `feedl
   });
 });
 
+describe('FEEDLESS-CARD-001: the stand-in arm cannot invent a negative balance once the card gains PARTIAL coverage (#14 round 4)', () => {
+  // Round 3's clamp gated on `hasCoverage` — ANY covered period, anywhere in the
+  // account's life. The refund fixture above (a real row of its own) cannot tell
+  // an INVENTED negative from a REAL one, because it never has stand-in payments
+  // in play at the same time. This is the shape that does: a card with FIVE
+  // uncovered months of stand-in payments, THEN a feed connects (one real row,
+  // one covered month, elsewhere). Round 3's gate disabled the clamp for the
+  // whole account the moment that one row landed, so the still-live stand-in
+  // pathology (no purchases behind it, by construction) invented a negative
+  // balance — money that was never real, subtracting from every other card's
+  // debt in Cards-owed and inflating net worth.
+  const anchored: PaymentAccount = { ...feedlessCard, openingBalance: 700, openingDate: '2026-01-01' };
+  const monthlyPayment = (id: string, date: string) =>
+    txn({ id, title: 'DISCOVER PAYMENT ACH PMT', amount: 300, accountId: 'chk', date });
+  const payments = [
+    monthlyPayment('p1', '2026-01-05'),
+    monthlyPayment('p2', '2026-02-05'),
+    monthlyPayment('p3', '2026-03-05'),
+    monthlyPayment('p4', '2026-04-05'),
+    monthlyPayment('p5', '2026-05-05'),
+  ];
+  // The feed connects in June — a real row, covering June ONLY. None of the five
+  // payment months above are covered by it.
+  const feedConnects = txn({ id: 'own1', title: 'Some Merchant', amount: 20, accountId: 'amzn', date: '2026-06-01' });
+  const txns = [...payments, feedConnects];
+  const accounts = [chk, anchored];
+
+  it('feed-connects-in-June: the card clamps at $0, not an invented negative', () => {
+    // Old (round 3) arithmetic: opening 700, minus a COMBINED net of the five
+    // $300 stand-in payments ($1,500, all uncovered) and the $20 purchase
+    // (raises owed by 20) = 700 - 1480 = -780, and `hasCoverage` (June is
+    // covered) disabled the clamp that would have caught it. -780 is not a real
+    // credit balance — nothing refunded this card anything.
+    //
+    // Fixed: the own-row arm alone gives owed = 700 - (-20) = 720; the stand-in
+    // arm ($1,500) is capped at that 720, landing on exactly $0.
+    expect(deriveAccountBalance(anchored, txns, POSTED_ONLY, accounts)).toBe(0);
+    const [, card] = withDerivedBalances(accounts, txns, POSTED_ONLY);
+    expect(card.currentBalance).toBe(0);
+  });
+});
+
 describe('FEEDLESS-CARD-001: regression — a user with no feedless accounts is unaffected', () => {
   const accounts = [chk, normalCard];
   const purchase = txn({ id: 'x1', title: 'Groceries', amount: 60, accountId: 'rewards', category: 'food' });
