@@ -1291,7 +1291,7 @@ export async function getBills(userId: string): Promise<Bill[]> {
  * An explicit `endDate` always wins: `record_bill` sends at most one of the
  * two, and a caller that names a real end date means it.
  */
-function withInstallmentEnd<T extends Partial<Bill>>(patch: T, stored?: Bill): T {
+export function withInstallmentEnd<T extends Partial<Bill>>(patch: T, stored?: Bill): T {
   // Resolve against the STORED doc, not the patch alone. `update_bill`'s prompt
   // says "include only the fields actually changing", so single-key patches are
   // the normal path — and reading only the patch made this inert on exactly the
