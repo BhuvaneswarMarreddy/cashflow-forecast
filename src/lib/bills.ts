@@ -209,7 +209,7 @@ export function installmentEndFrom(
   // retire the bill instantly. An empty/absent stamp would throw RangeError out
   // of `format` and take the whole homeSnapshot callable — and with it the
   // phone's Home screen — down with it.
-  if (typeof count !== 'number') return undefined;
+  if (!Number.isFinite(count)) return undefined;
   if (!anchorISO) return undefined;
   const from = parseISO(anchorISO.slice(0, 10));
   if (Number.isNaN(from.getTime())) return undefined;
@@ -227,12 +227,19 @@ export function installmentEndFrom(
  * than charging forever, but it is not the answer for new writes.
  */
 function installmentEndISO(b: Bill): string | undefined {
-  if (typeof b.installmentsRemaining !== 'number') return undefined;
-  return installmentEndFrom(
-    b.updatedAt || b.createdAt,
-    b.frequency,
-    b.installmentsRemaining,
-  );
+  // A STORED endDate wins outright. Without this the derived end applied even
+  // to stamped rows, so the effective end was min(endDate, updatedAt + count) —
+  // and "this actually runs to 2030" left a bill that stopped charging in 2027,
+  // silently. That is the vanishing failure every commit in this series argues
+  // is the unacceptable direction. This function is the LEGACY path only.
+  if (b.endDate !== undefined) return undefined;
+  // Not `typeof !== 'number'`: that admits NaN and ±Infinity, which reach
+  // `format()` and throw RangeError — taking the whole homeSnapshot callable,
+  // and with it the phone's Home screen, down. Firestore stores NaN as a
+  // legitimate double, so a hand-edit or a script can produce one.
+  const count = b.installmentsRemaining;
+  if (!Number.isFinite(count)) return undefined;
+  return installmentEndFrom(b.updatedAt || b.createdAt, b.frequency, count as number);
 }
 
 export function monthlyCostRaw(bill: Bill): number {

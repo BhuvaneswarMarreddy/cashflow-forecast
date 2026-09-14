@@ -20,6 +20,7 @@ import {
   PAYMENT_METHODS,
 } from '@/lib/bills';
 import starter from '@/data/bills-starter.json';
+import { withInstallmentEnd } from '@/lib/firestore';
 
 const base: Omit<Bill, 'amount' | 'frequency'> = {
   id: 'x',
@@ -593,5 +594,108 @@ describe('re-stamping an installment plan on correction', () => {
     expect(original).toBe('2027-09-06');
     expect(original! < installmentEndFrom(NOW, 'monthly', 20)!).toBe(true);
     expect(original! < installmentEndFrom(NOW, 'annual', 13)!).toBe(true);
+  });
+});
+
+/**
+ * The branch table for the WRITE-time stamp.
+ *
+ * Its previous test named `withInstallmentEnd` and then only exercised
+ * `installmentEndFrom` — so replacing the whole function body with
+ * `return patch;` left all 1,784 tests green. That is a test that looks like
+ * proof and is not, which is the same failure as pinning only one anchor date.
+ */
+describe('withInstallmentEnd', () => {
+  const NOW = Date.parse('2026-08-23T12:00:00.000Z');
+  const stored = mk(45.79, 'monthly', {
+    installmentsRemaining: 13,
+    endDate: '2027-01-01',
+  });
+
+  const at = <T extends Partial<Bill>>(patch: T, existing?: Bill) => {
+    jest.useFakeTimers().setSystemTime(NOW);
+    try {
+      return withInstallmentEnd(patch, existing).endDate;
+    } finally {
+      jest.useRealTimers();
+    }
+  };
+
+  test('a patch that does not touch the plan leaves the stored end alone', () => {
+    // This is the ratchet fix: a rename must not re-date anything.
+    expect(at({ vendor: 'MacBook Air' }, stored)).toBeUndefined();
+    expect(at({ amount: 50 }, stored)).toBeUndefined();
+    expect(at({ autopayDay: 3 }, stored)).toBeUndefined();
+  });
+
+  test('a corrected count re-stamps from today', () => {
+    expect(at({ installmentsRemaining: 20 }, stored)).toBe('2028-04-23');
+  });
+
+  test('a corrected cadence re-stamps, taking the count from the stored bill', () => {
+    expect(at({ frequency: 'annual' }, stored)).toBe('2039-08-23');
+  });
+
+  test('an endDate in the SAME patch wins over the derived one', () => {
+    expect(at({ installmentsRemaining: 20, endDate: '2026-10-01' }, stored)).toBe('2026-10-01');
+  });
+
+  test('a count with no stored doc and no frequency cannot be stamped', () => {
+    expect(at({ installmentsRemaining: 20 })).toBeUndefined();
+  });
+
+  test('a create carries its own frequency', () => {
+    expect(at({ installmentsRemaining: 13, frequency: 'monthly' })).toBe('2027-09-23');
+  });
+
+  test('a non-finite count is refused rather than throwing', () => {
+    expect(() => at({ installmentsRemaining: NaN, frequency: 'monthly' })).not.toThrow();
+    expect(at({ installmentsRemaining: NaN, frequency: 'monthly' })).toBeUndefined();
+  });
+});
+
+/**
+ * A STORED endDate wins outright over the count-derived one.
+ *
+ * The read-time derivation used to apply even to stamped rows, so the effective
+ * end was min(endDate, updatedAt + count). Reachable in two ordinary steps:
+ * record "13 payments", then say "actually this runs to 2030". The parser's
+ * one-of-the-two rule only applies WITHIN a patch, never against the stored
+ * doc — so the bill kept a 13-month derived end and stopped charging years
+ * before the date the owner asked for, silently.
+ */
+describe('a stored endDate beats the derived one', () => {
+  const runsTo2030 = mk(45.79, 'monthly', {
+    installmentsRemaining: 13,
+    endDate: '2030-01-01',
+    createdAt: '2026-08-23T00:00:00.000Z',
+    updatedAt: '2026-08-23T00:00:00.000Z',
+  });
+
+  test('keeps charging to the date the owner gave, not to the count', () => {
+    // The count alone would have retired it on 2027-09-23.
+    expect(isCharging(runsTo2030, '2029-01-01')).toBe(true);
+    expect(isCharging(runsTo2030, '2030-01-01')).toBe(true);
+    expect(isCharging(runsTo2030, '2030-01-02')).toBe(false);
+  });
+
+  test('an earlier stored endDate still retires the bill', () => {
+    const endsSoon = mk(45.79, 'monthly', {
+      installmentsRemaining: 13,
+      endDate: '2026-09-01',
+      createdAt: '2026-08-23T00:00:00.000Z',
+      updatedAt: '2026-08-23T00:00:00.000Z',
+    });
+    expect(isCharging(endsSoon, '2026-09-02')).toBe(false);
+  });
+
+  test('a NaN count cannot crash the read path', () => {
+    const broken = mk(20, 'monthly', {
+      installmentsRemaining: NaN,
+      createdAt: '2026-08-23T00:00:00.000Z',
+      updatedAt: '2026-08-23T00:00:00.000Z',
+    });
+    expect(() => isCharging(broken, '2026-09-01')).not.toThrow();
+    expect(isCharging(broken, '2026-09-01')).toBe(true);
   });
 });
