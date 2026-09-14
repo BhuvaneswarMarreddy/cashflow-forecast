@@ -53,9 +53,16 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # issues: write is for exactly one thing: the hand-deploy alert below.
+    permissions:
+      contents: read
+      issues: write
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The hand-deploy alert diffs against the commit main was at before this push.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -96,6 +103,39 @@ jobs:
             --non-interactive \
             --force
 
+      # firestore:rules and functions:sync stay a human act (see the header). What was
+      # missing was anyone being TOLD: #118 shipped a client calling a sync callable
+      # that was never hand-deployed, and delete-account stayed broken until someone
+      # noticed. Open an issue the moment a push carries either one.
+      - name: Alert when a change needs a hand deploy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ -z "$BEFORE" ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "No previous commit to compare (manual run or new branch); skipping."
+            exit 0
+          fi
+          CHANGED=$(git diff --name-only "$BEFORE" "$GITHUB_SHA" -- firestore.rules functions-sync/)
+          if [ -z "$CHANGED" ]; then
+            echo "Nothing here needs a hand deploy."
+            exit 0
+          fi
+          ONLY=""
+          echo "$CHANGED" | grep -q '^firestore.rules$' && ONLY="firestore:rules"
+          echo "$CHANGED" | grep -q '^functions-sync/' && ONLY="${ONLY:+$ONLY,}functions:sync"
+          gh issue create \
+            --label P1 --label type:infra --label area:ops \
+            --title "Hand deploy needed: $ONLY (${GITHUB_SHA::7})" \
+            --body "$(printf '%s\n' \
+              "Commit ${GITHUB_SHA::7} reached main and CI deployed \`functions:api\` + hosting. It also changed files CI deliberately never deploys:" \
+              '' '```' "$CHANGED" '```' '' \
+              'From a checkout of main (firebase deploy ships the LOCAL tree):' \
+              '' '```' 'git checkout main && git pull --ff-only' \
+              "npx firebase-tools deploy --only $ONLY --project marreddy-cashflow" '```' '' \
+              'Close this issue once it is deployed.')"
+          echo "::warning::Hand deploy needed: $ONLY. An issue was opened."
+
       # Deploying is not the same as working. Hit the real site and go red if what just
       # shipped does not serve — otherwise a green tick only means "uploaded".
       - name: Smoke test the live site
@@ -112,6 +152,15 @@ jobs:
             CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "https://marreddy-cashflow.web.app$path")
             echo "  $path -> $CODE (expect 404)"
             [ "$CODE" = "404" ] || FAILED=1
+          done
+          # Every exported callable must exist (404 = not deployed) AND refuse a caller
+          # who is not signed in (anything but 401 = an auth check went missing). Read
+          # from index.ts so a new callable is covered the day it is exported.
+          CALLABLES=$(grep -oE 'export \{[^}]+\}' functions/src/index.ts | sed -E 's/export \{|\}|,/ /g')
+          for fn in $CALLABLES; do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -X POST -H 'Content-Type: application/json' -d '{"data":{}}' "https://us-central1-marreddy-cashflow.cloudfunctions.net/$fn")
+            echo "  callable $fn -> $CODE (expect 401)"
+            [ "$CODE" = "401" ] || FAILED=1
           done
           if [ "$FAILED" != "0" ]; then
             echo "::error::Live smoke test failed. Roll back with: npx firebase-tools hosting:rollback"
