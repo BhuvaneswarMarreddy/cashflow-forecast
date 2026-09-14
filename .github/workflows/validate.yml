@@ -245,3 +245,49 @@ jobs:
             diagnostic-bundles/
             playwright-report/
             test-results/observability/
+            test-results/screens/
+
+  # ---------------------------------------------------------------------
+  # The phone reads homeSnapshot, and a merge here deploys it with no phone
+  # release in step. Run cashflow-mobile's own contract checks against THIS
+  # branch's recorded payload (contracts/homeSnapshot.json, written by
+  # functions/src/__tests__/contract-homeSnapshot.test.ts) before it can ship.
+  # Both repos are public: no token, no secret.
+  #
+  # ponytail: checks cashflow-mobile MAIN, not the build installed on the phone. A mobile
+  # change merged but not yet on TestFlight can let a field removal through. Switch the
+  # checkout `ref` to the latest TestFlight tag once iOS releases are tagged (none exist yet).
+  # ---------------------------------------------------------------------
+  mobile-contract:
+    name: mobile contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: BhuvaneswarMarreddy/cashflow-mobile
+          path: mobile
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install cashflow-mobile
+        working-directory: mobile
+        run: npm ci
+
+      - name: Phone type-checks and maps this branch's homeSnapshot
+        working-directory: mobile
+        run: |
+          if [ ! -d src/contracts ]; then
+            echo "::error::cashflow-mobile main has no src/contracts yet. Merge its contract PR first."
+            exit 1
+          fi
+          cp ../contracts/homeSnapshot.json src/contracts/homeSnapshot.json
+          npx tsc --noEmit || { echo "::error::This branch changes homeSnapshot in a way cashflow-mobile's SnapshotPayload cannot read. Ship the phone change first, or keep the old field."; exit 1; }
+          npx jest src/contracts
