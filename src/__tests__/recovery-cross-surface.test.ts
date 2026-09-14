@@ -130,6 +130,15 @@ const netExpenseCents = (transactions: Transaction[], links: TransactionLink[]) 
     .reduce((s, t) => s + purchaseEconomics(t, links).netEconomicCostCents, 0);
 
 describe('FIN-RECOVERY-UI-001 · cross-surface consistency (X1-X12)', () => {
+  // The fixtures carry fixed 2026 dates, but the code under test reads the real clock
+  // for "today". Pin it, or the suite fails once the calendar passes the fixtures (it
+  // did on 2026-09-14 and blocked every deploy). Only Date is faked; timers stay real.
+  beforeAll(() => jest.useFakeTimers({
+    now: new Date('2026-08-24T12:00:00Z'),
+    doNotFake: ['nextTick', 'setImmediate', 'clearImmediate', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'queueMicrotask', 'requestAnimationFrame', 'cancelAnimationFrame', 'requestIdleCallback', 'cancelIdleCallback', 'hrtime', 'performance'],
+  }));
+  afterAll(() => jest.useRealTimers());
+
   it('X1 — every surface reports the same income total, and NO card credit contributes to it', () => {
     const shared = sumIncomeCents(LEDGER, accounts, INCOME);
     expect(shared).toBe(EXPECTED_INCOME_CENTS);
