@@ -57,6 +57,7 @@ jobs:
     permissions:
       contents: read
       issues: write
+      actions: read   # the hand-deploy alert looks up the last successful deploy
 
     steps:
       - uses: actions/checkout@v4
@@ -106,17 +107,30 @@ jobs:
       # firestore:rules and functions:sync stay a human act (see the header). What was
       # missing was anyone being TOLD: #118 shipped a client calling a sync callable
       # that was never hand-deployed, and delete-account stayed broken until someone
-      # noticed. Open an issue the moment a push carries either one.
+      # noticed. Open an issue whenever main carries either one.
+      #
+      # The baseline is the commit the last SUCCESSFUL deploy shipped, not the previous
+      # push. A push whose run failed or was cancelled never reaches this step (8 were
+      # cancelled on 2026-08-23 alone), and diffing only before..after would lose its
+      # rules change for good. A run that deployed but then failed its smoke test keeps
+      # the old baseline, so the next run would alert again: it comments on the open
+      # issue instead of opening a second one.
       - name: Alert when a change needs a hand deploy
         env:
           GH_TOKEN: ${{ github.token }}
           BEFORE: ${{ github.event.before }}
         run: |
-          if [ -z "$BEFORE" ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
-            echo "No previous commit to compare (manual run or new branch); skipping."
+          BASE=$(gh run list --workflow deploy.yml --branch main --status success --limit 1 --json headSha -q '.[0].headSha' || true)
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            echo "::warning::No earlier successful deploy found in history; comparing with the previous commit only."
+            BASE="$BEFORE"
+          fi
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            echo "::warning::No baseline commit to compare; cannot tell whether rules or sync changed."
             exit 0
           fi
-          CHANGED=$(git diff --name-only "$BEFORE" "$GITHUB_SHA" -- firestore.rules functions-sync/)
+          echo "Comparing ${BASE::7}..${GITHUB_SHA::7}"
+          CHANGED=$(git diff --name-only "$BASE" "$GITHUB_SHA" -- firestore.rules functions-sync/)
           if [ -z "$CHANGED" ]; then
             echo "Nothing here needs a hand deploy."
             exit 0
@@ -124,17 +138,22 @@ jobs:
           ONLY=""
           echo "$CHANGED" | grep -q '^firestore.rules$' && ONLY="firestore:rules"
           echo "$CHANGED" | grep -q '^functions-sync/' && ONLY="${ONLY:+$ONLY,}functions:sync"
-          gh issue create \
-            --label P1 --label type:infra --label area:ops \
-            --title "Hand deploy needed: $ONLY (${GITHUB_SHA::7})" \
-            --body "$(printf '%s\n' \
-              "Commit ${GITHUB_SHA::7} reached main and CI deployed \`functions:api\` + hosting. It also changed files CI deliberately never deploys:" \
-              '' '```' "$CHANGED" '```' '' \
-              'From a checkout of main (firebase deploy ships the LOCAL tree):' \
-              '' '```' 'git checkout main && git pull --ff-only' \
-              "npx firebase-tools deploy --only $ONLY --project marreddy-cashflow" '```' '' \
-              'Close this issue once it is deployed.')"
-          echo "::warning::Hand deploy needed: $ONLY. An issue was opened."
+          BODY="$(printf '%s\n' \
+            "Main is at ${GITHUB_SHA::7}. CI deployed \`functions:api\` + hosting, but these changed since the last successful deploy (${BASE::7}) and CI deliberately never deploys them:" \
+            '' '```' "$CHANGED" '```' '' \
+            'From a checkout of main (firebase deploy ships the LOCAL tree):' \
+            '' '```' 'git checkout main && git pull --ff-only' \
+            "npx firebase-tools deploy --only $ONLY --project marreddy-cashflow" '```' '' \
+            'Close this issue once it is deployed.')"
+          OPEN=$(gh issue list --state open --search 'in:title "Hand deploy needed"' --json number -q '.[0].number')
+          if [ -n "$OPEN" ]; then
+            gh issue comment "$OPEN" --body "$BODY"
+            echo "::warning::Hand deploy still needed: $ONLY. Commented on #$OPEN."
+          else
+            gh issue create --label P1 --label type:infra --label area:ops \
+              --title "Hand deploy needed: $ONLY (${GITHUB_SHA::7})" --body "$BODY"
+            echo "::warning::Hand deploy needed: $ONLY. An issue was opened."
+          fi
 
       # Deploying is not the same as working. Hit the real site and go red if what just
       # shipped does not serve — otherwise a green tick only means "uploaded".
@@ -157,6 +176,11 @@ jobs:
           # who is not signed in (anything but 401 = an auth check went missing). Read
           # from index.ts so a new callable is covered the day it is exported.
           CALLABLES=$(grep -oE 'export \{[^}]+\}' functions/src/index.ts | sed -E 's/export \{|\}|,/ /g')
+          # An index.ts rewritten to another export style must not turn this into zero checks and a PASS.
+          if [ -z "$(echo $CALLABLES)" ]; then
+            echo "::error::Found no callables in functions/src/index.ts (expected 'export { name } from'). Update this parser."
+            FAILED=1
+          fi
           for fn in $CALLABLES; do
             CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -X POST -H 'Content-Type: application/json' -d '{"data":{}}' "https://us-central1-marreddy-cashflow.cloudfunctions.net/$fn")
             echo "  callable $fn -> $CODE (expect 401)"

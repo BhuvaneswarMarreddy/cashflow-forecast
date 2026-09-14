@@ -253,6 +253,10 @@ jobs:
   # branch's recorded payload (contracts/homeSnapshot.json, written by
   # functions/src/__tests__/contract-homeSnapshot.test.ts) before it can ship.
   # Both repos are public: no token, no secret.
+  #
+  # ponytail: checks cashflow-mobile MAIN, not the build installed on the phone. A mobile
+  # change merged but not yet on TestFlight can let a field removal through. Switch the
+  # checkout `ref` to the latest TestFlight tag once iOS releases are tagged (none exist yet).
   # ---------------------------------------------------------------------
   mobile-contract:
     name: mobile contract
