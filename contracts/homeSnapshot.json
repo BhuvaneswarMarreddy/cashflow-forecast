@@ -1,0 +1,216 @@
+{
+  "generatedAt": "2026-09-01T17:00:00.000Z",
+  "snapshot": {
+    "cashCents": 680000,
+    "creditCardBalanceCents": 8412,
+    "upcomingTotalCents": 13000,
+    "lastBankSyncAt": "2026-09-01T12:00:00.000Z",
+    "savingsCents": null,
+    "nextPaycheck": {
+      "expectedDate": "2026-09-15",
+      "amountCents": 300000,
+      "source": "Salary",
+      "confidence": "estimated"
+    },
+    "runway": {
+      "hasBurn": true,
+      "label": "5.3 months",
+      "days": 161,
+      "months": 5.3,
+      "date": "2027-02-09",
+      "reserveProgress": 1,
+      "reserveTargetMonths": 5,
+      "nextMonthTarget": 0,
+      "amountToNextMonthCents": 0
+    },
+    "lockedMonthlyCents": 6500,
+    "avgMonthlySpendCents": 128400,
+    "avgMonthlyIncomeCents": 300000,
+    "includePending": false,
+    "assumedMonthlySpend": null
+  },
+  "accounts": [
+    {
+      "id": "chk",
+      "name": "Checking",
+      "institution": "Bank Account",
+      "kind": "checking",
+      "mask": "1234",
+      "balanceCents": 680000,
+      "availableCents": null,
+      "creditLimitCents": null,
+      "currency": "USD",
+      "lastSyncedAt": null,
+      "status": "ok"
+    },
+    {
+      "id": "card",
+      "name": "Amex",
+      "institution": "American Express",
+      "kind": "credit-card",
+      "mask": "",
+      "balanceCents": 8412,
+      "availableCents": 791588,
+      "creditLimitCents": 800000,
+      "currency": "USD",
+      "lastSyncedAt": null,
+      "status": "ok"
+    }
+  ],
+  "categories": [
+    {
+      "value": "food",
+      "label": "Food & Dining",
+      "icon": "🍽️",
+      "archived": false
+    },
+    {
+      "value": "transportation",
+      "label": "Transportation",
+      "icon": "🚗",
+      "archived": false
+    },
+    {
+      "value": "utilities",
+      "label": "Utilities",
+      "icon": "💡",
+      "archived": false
+    },
+    {
+      "value": "entertainment",
+      "label": "Entertainment",
+      "icon": "🎬",
+      "archived": false
+    },
+    {
+      "value": "shopping",
+      "label": "Shopping",
+      "icon": "🛍️",
+      "archived": false
+    },
+    {
+      "value": "healthcare",
+      "label": "Healthcare",
+      "icon": "🏥",
+      "archived": false
+    },
+    {
+      "value": "education",
+      "label": "Education",
+      "icon": "📚",
+      "archived": false
+    },
+    {
+      "value": "travel",
+      "label": "Travel",
+      "icon": "✈️",
+      "archived": false
+    },
+    {
+      "value": "subscriptions",
+      "label": "Subscriptions",
+      "icon": "📱",
+      "archived": false
+    },
+    {
+      "value": "rent",
+      "label": "Rent & Housing",
+      "icon": "🏠",
+      "archived": false
+    },
+    {
+      "value": "insurance",
+      "label": "Insurance",
+      "icon": "🛡️",
+      "archived": false
+    },
+    {
+      "value": "investments",
+      "label": "Investments",
+      "icon": "📈",
+      "archived": false
+    },
+    {
+      "value": "other",
+      "label": "Other",
+      "icon": "📋",
+      "archived": false
+    }
+  ],
+  "upcoming": [
+    {
+      "id": "bill-register-internet-2026-09-10-0",
+      "name": "Internet",
+      "dueDate": "2026-09-10",
+      "amountCents": 6500,
+      "accountId": null,
+      "kind": "bill",
+      "autopay": false
+    },
+    {
+      "id": "bill-register-internet-2026-10-10-1",
+      "name": "Internet",
+      "dueDate": "2026-10-10",
+      "amountCents": 6500,
+      "accountId": null,
+      "kind": "bill",
+      "autopay": false
+    }
+  ],
+  "bills": [
+    {
+      "id": "internet",
+      "vendor": "Internet",
+      "amountCents": 6500,
+      "frequency": "monthly",
+      "nonNegotiable": true,
+      "endDate": null,
+      "installmentsRemaining": null,
+      "method": null
+    }
+  ],
+  "goals": [
+    {
+      "id": "fund",
+      "name": "Emergency fund",
+      "targetCents": 1000000,
+      "savedCents": 250000,
+      "targetDate": "2027-06-01"
+    }
+  ],
+  "activity": [
+    {
+      "id": "food",
+      "accountId": "card",
+      "date": "2026-08-20",
+      "description": "Groceries",
+      "merchant": null,
+      "amountCents": -8412,
+      "category": "food",
+      "pending": false,
+      "kind": "purchase"
+    },
+    {
+      "id": "pay",
+      "accountId": "chk",
+      "date": "2026-08-15",
+      "description": "Salary",
+      "merchant": null,
+      "amountCents": 300000,
+      "category": "other",
+      "pending": false,
+      "kind": "income"
+    },
+    {
+      "id": "rent",
+      "accountId": "chk",
+      "date": "2026-08-01",
+      "description": "Rent",
+      "merchant": null,
+      "amountCents": -120000,
+      "category": "rent",
+      "pending": false,
+      "kind": "purchase"
+    }
+  ]
+}
