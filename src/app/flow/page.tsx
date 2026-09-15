@@ -1464,7 +1464,7 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
     <div className="min-h-screen relative">
       <div className="bg-pattern" />
       <Navbar />
-      <main className="pt-24 pb-40 md:pb-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto relative z-10 space-y-10">
+      <main className="pt-24 pb-24 md:pb-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto relative z-10 space-y-10">
         <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <h1 className="text-3xl font-bold text-[var(--foreground)]">Money flow</h1>

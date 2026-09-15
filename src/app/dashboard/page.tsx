@@ -196,7 +196,7 @@ export default function DashboardPage({ initialBills }: { initialBills?: Bill[] 
       {/* UI-112: content caps at the reading measure. At full desktop width a row's
           merchant and its amount sat a foot apart, which is a stretched phone
           layout, not a desktop one. */}
-      <main className="pt-24 pb-40 md:pb-16 px-4 lg:px-8 max-w-content mx-auto relative z-10">
+      <main className="pt-24 pb-24 md:pb-16 px-4 lg:px-8 max-w-content mx-auto relative z-10">
         {/* Setup Incomplete Banner */}
         {setupIncomplete && (
           <div className="mb-6 p-4 rounded-card bg-[var(--background-secondary)] border border-[var(--accent-primary)]">

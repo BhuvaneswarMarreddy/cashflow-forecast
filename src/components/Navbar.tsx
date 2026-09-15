@@ -15,6 +15,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { NAV_ITEMS, SECONDARY_ITEMS } from '@/lib/nav';
+import QuickAddFAB from './QuickAddFAB';
 import DataChatSheet from '@/components/DataChatSheet';
 import { onAsk } from '@/lib/ask';
 
@@ -176,8 +177,9 @@ export default function Navbar() {
             </div>
           </div>
 
-          {/* Mobile: chat + menu */}
+          {/* Mobile: add + chat + menu. Add lives here on phones (UI spec B3). */}
           <div className="md:hidden flex items-center gap-1">
+            <QuickAddFAB variant="header" />
             <button
               onClick={() => { setChatSeed(undefined); setIsChatOpen(true); }}
               aria-label="Ask about your data"
