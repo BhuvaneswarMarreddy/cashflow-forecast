@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { Mail, Lock, TrendingUp, ArrowRight, Eye, EyeOff } from 'lucide-react';
+import LoadingScreen from '@/components/LoadingScreen';
 
 // Google Icon Component
 const GoogleIcon = () => (
@@ -68,11 +69,7 @@ export default function LoginPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-pulse-glow w-16 h-16 rounded-card bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] flex items-center justify-center">
-          <TrendingUp className="w-8 h-8 text-white" />
-        </div>
-      </div>
+      <LoadingScreen />
     );
   }
 
@@ -85,13 +82,13 @@ export default function LoginPage() {
         {/* Logo */}
         <div className="text-center mb-8 animate-fade-in-up">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-card bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] mb-4 animate-float">
-            <TrendingUp className="w-8 h-8 text-white" />
+            <TrendingUp className="w-8 h-8 text-[#16181c]" aria-hidden="true" />
           </div>
           <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-[var(--accent-primary)] to-[var(--accent-secondary)]">
             CashFlow
           </h1>
           <p className="text-[var(--foreground-secondary)] mt-2">
-            Track expenses, forecast your future
+            See where the money went, and what the next 90 days look like.
           </p>
         </div>
 
@@ -220,10 +217,6 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* Demo hint */}
-        <p className="text-center text-[var(--foreground-muted)] text-sm mt-6 animate-fade-in-up delay-300">
-          New here? Create an account — it takes about a minute.
-        </p>
       </div>
     </main>
   );
