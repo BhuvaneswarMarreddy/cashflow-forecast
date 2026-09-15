@@ -22,7 +22,7 @@ import { PAYMENT_METHODS, ACCOUNT_TYPES, PaymentAccount, AccountType, PaymentMet
 import { withDerivedBalances, monthlyAverages, calculateCurrentCash } from '@/lib/forecast';
 import { currentOf, isCashAccount, isDebtAccount, isInvestmentAccount, isUnanchored, openingAnchor, balanceCaption } from '@/lib/accounts';
 import ReconcileSheet from '@/components/ReconcileSheet';
-import { syncNow, describeSync, connectBankWithPlaid } from '@/lib/sync-client';
+import { syncNow, describeSync, connectBankWithPlaid, describeConnect } from '@/lib/sync-client';
 import { useAccountsObservability } from '@/lib/obs/useAccountsObservability';
 import { safeSyncResult } from '@/lib/obs/sync-metadata';
 import {
@@ -113,6 +113,8 @@ export default function AccountsPage() {
   const [reconcileForAccount, setReconcileForAccount] = useState<PaymentAccount | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  // #183: the connection to reopen in update mode — a duplicate bank or zero shared accounts.
+  const [repairItemId, setRepairItemId] = useState<string | null>(null);
   const [syncErr, setSyncErr] = useState(false);
   
   const [accountForm, setAccountForm] = useState({
@@ -156,16 +158,19 @@ export default function AccountsPage() {
     );
   }
 
-  // Plaid Link: connect a new bank. The popup is Plaid's own; we get back only
-  // the institution name. First data arrives on the next refresh (Plaid needs
-  // a moment to prepare history after linking), so one is kicked off after.
-  const handleConnectBank = async () => {
-    setSyncErr(false); setSyncMsg(null);
+  // Plaid Link: connect a new bank, or with `itemId` repair one in place. The popup is
+  // Plaid's own; we get back only the institution and how many accounts were shared.
+  // First data arrives on the next refresh (Plaid needs a moment to prepare history
+  // after linking), so one is kicked off after.
+  const handleConnectBank = async (itemId?: string) => {
+    setSyncErr(false); setSyncMsg(null); setRepairItemId(null);
     try {
-      const institution = await connectBankWithPlaid();
-      if (institution === null) return; // user closed the popup — say nothing
-      setSyncMsg(`${institution} connected — pulling your data…`);
-      await handleRefresh();
+      const result = await connectBankWithPlaid(itemId);
+      if (result === null) return; // user closed the popup — say nothing
+      const outcome = describeConnect(result);
+      setSyncMsg(outcome.message);
+      setRepairItemId(outcome.repairItemId);
+      if (outcome.refresh) await handleRefresh();
     } catch (e) {
       setSyncErr(true);
       setSyncMsg(e instanceof Error ? e.message : 'Could not connect the bank.');
@@ -421,7 +426,7 @@ export default function AccountsPage() {
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <button
-              onClick={handleConnectBank}
+              onClick={() => handleConnectBank()}
               disabled={syncing}
               aria-label="Connect a bank through Plaid"
               className="btn-primary inline-flex items-center gap-2 min-h-[44px] disabled:opacity-60"
@@ -446,16 +451,27 @@ export default function AccountsPage() {
               <RefreshCw className={`w-5 h-5 ${syncing ? 'animate-spin' : ''}`} aria-hidden="true" />
             </button>
           </div>
-          {/* Import, not Connect: Plaid reaches neither (owner brief). */}
-          <p className="text-xs text-[var(--foreground-muted)]">
-            Apple Card and Indian accounts (NRE, NRO, FDs) can&apos;t be connected. Use Import CSV for those.
-          </p>
+          <div className="space-y-1 text-xs text-[var(--foreground-muted)]">
+            {/* Import, not Connect: Plaid reaches neither (owner brief). */}
+            <p>Apple Card and Indian accounts (NRE, NRO, FDs) can&apos;t be connected. Use Import CSV for those.</p>
+            {/* #183: said BEFORE Link opens — Schwab's consent screen shares nothing by default. */}
+            <p>At Schwab, tick each account you want. They start unchecked.</p>
+          </div>
           {syncMsg && (
               <p role="status" aria-live="polite"
                  className={`text-xs mt-2 ${syncErr ? 'text-[var(--accent-danger)]' : 'text-[var(--foreground-muted)]'}`}>
                 {syncMsg}
               </p>
             )}
+          {repairItemId && (
+            <button
+              onClick={() => handleConnectBank(repairItemId)}
+              disabled={syncing}
+              className="btn-secondary min-h-[44px] px-4 text-sm disabled:opacity-60"
+            >
+              Repair connection
+            </button>
+          )}
         </div>
 
         {/* R5: the mode must be legible where the money is, not only in Settings —
@@ -670,7 +686,7 @@ export default function AccountsPage() {
               <CreditCard className="w-12 h-12 text-[var(--foreground-muted)] mx-auto mb-4" aria-hidden="true" />
               <h3 className="text-lg font-medium text-[var(--foreground)] mb-2">No accounts yet</h3>
               <p className="text-[var(--foreground-secondary)] mb-4">Connect a bank, or import a CSV for accounts Plaid can&apos;t reach.</p>
-              <button onClick={handleConnectBank} disabled={syncing} className="btn-primary min-h-[44px] px-4">
+              <button onClick={() => handleConnectBank()} disabled={syncing} className="btn-primary min-h-[44px] px-4">
                 Connect bank
               </button>
             </div>

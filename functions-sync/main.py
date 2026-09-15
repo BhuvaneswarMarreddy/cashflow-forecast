@@ -186,9 +186,9 @@ def plaid_link_token(req: https_fn.CallableRequest) -> dict:
     _require_owner(req)
     db = firestore.client()
     access_token = None
+    items = (db.collection("meta").document("plaid").get().to_dict() or {}).get("items") or {}
     item_id = (req.data or {}).get("itemId")
     if item_id:
-        items = (db.collection("meta").document("plaid").get().to_dict() or {}).get("items") or {}
         entry = items.get(str(item_id))
         if not entry:
             raise https_fn.HttpsError(https_fn.FunctionsErrorCode.NOT_FOUND,
@@ -197,7 +197,9 @@ def plaid_link_token(req: https_fn.CallableRequest) -> dict:
     token = plaid_ingest.create_link_token(
         os.environ.get("PLAID_CLIENT_ID", ""), os.environ.get("PLAID_SECRET", ""),
         req.auth.uid, access_token)
-    return {"linkToken": token}
+    # #183: names and ids only, so Link can be closed the moment the owner picks a bank
+    # that is already connected — before a duplicate Item exists at Plaid at all.
+    return {"linkToken": token, "linked": plaid_ingest.linked_institutions(items)}
 
 
 @https_fn.on_call(
@@ -213,22 +215,25 @@ def plaid_exchange(req: https_fn.CallableRequest) -> dict:
     _require_owner(req)
     public_token = str((req.data or {}).get("publicToken") or "")
     institution = str((req.data or {}).get("institution") or "").strip() or "Bank"
+    institution_id = str((req.data or {}).get("institutionId") or "").strip()
     if not public_token:
         raise https_fn.HttpsError(https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
                                   "Missing publicToken.")
-    access_token, item_id = plaid_ingest.exchange_public_token(
-        os.environ.get("PLAID_CLIENT_ID", ""), os.environ.get("PLAID_SECRET", ""),
-        public_token)
     db = firestore.client()
-    db.collection("meta").document("plaid").set({
-        "items": {item_id: {
-            "accessToken": access_token,
-            "institution": institution,
-            "cursor": "",
-            "linkedAt": sync_core.now_iso(),
-        }},
-    }, merge=True)
-    return {"institution": institution}
+    ref = db.collection("meta").document("plaid")
+    items = (ref.get().to_dict() or {}).get("items") or {}
+    # #183: one Item per institution. Refused BEFORE the exchange: no token is minted.
+    outcome = plaid_ingest.exchange_new_item(
+        os.environ.get("PLAID_CLIENT_ID", ""), os.environ.get("PLAID_SECRET", ""),
+        items, public_token, institution, institution_id)
+    if outcome[0] == "exists":
+        raise https_fn.HttpsError(
+            https_fn.FunctionsErrorCode.ALREADY_EXISTS,
+            f"{institution} is already connected. Repair that connection instead.",
+            {"itemId": outcome[1], "institution": institution})
+    _, item_id, entry = outcome
+    ref.set({"items": {item_id: entry}}, merge=True)
+    return {"institution": institution, "itemId": item_id}
 
 
 @https_fn.on_call(

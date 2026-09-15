@@ -32,8 +32,15 @@ export async function syncNow(): Promise<SyncResult> {
 
 interface PlaidHandler {
   open: () => void;
+  /** Closes Link; onExit still fires. */
+  exit: (opts?: { force?: boolean }) => void;
   /** Removes Link's iframes. Not optional in practice — see ONE_AT_A_TIME below. */
   destroy: () => void;
+}
+
+interface PlaidSuccessMetadata {
+  institution?: { name?: string; institution_id?: string } | null;
+  accounts?: unknown[];
 }
 
 declare global {
@@ -41,11 +48,56 @@ declare global {
     Plaid?: {
       create: (opts: {
         token: string;
-        onSuccess: (publicToken: string, metadata: { institution?: { name?: string } }) => void;
+        onSuccess: (publicToken: string, metadata: PlaidSuccessMetadata) => void;
         onExit: (err: unknown) => void;
+        onEvent?: (eventName: string, metadata: { institution_id?: string | null; institution_name?: string | null }) => void;
       }) => PlaidHandler;
     };
   }
+}
+
+/** A connected Item as the server lets this client see it: never a token. */
+export interface LinkedInstitution {
+  itemId: string;
+  institution: string;
+  institutionId: string;
+}
+
+export type ConnectResult =
+  /** A new Item. `accountsShared` 0 means the owner ticked nothing (Schwab starts unchecked). */
+  | { status: 'linked'; institution: string; itemId: string; accountsShared: number }
+  /** One Item per institution (#183): nothing was created; repair `itemId` instead. */
+  | { status: 'already-linked'; institution: string; itemId: string }
+  /** Update mode finished on an existing Item. */
+  | { status: 'repaired'; institution: string; itemId: string; accountsShared: number };
+
+/**
+ * #183: the Item already connected for the bank picked in Link. Same rule as the
+ * server's existing_item_for (plaid_ingest.py): by institution_id, and by name only
+ * for an Item linked before ids were stored.
+ */
+export function findLinkedInstitution(
+  linked: readonly LinkedInstitution[],
+  institutionId: string | null | undefined,
+  institutionName: string | null | undefined,
+): LinkedInstitution | null {
+  const name = (institutionName ?? '').trim().toLowerCase();
+  return linked.find((l) => l.institutionId
+    ? !!institutionId && l.institutionId === institutionId
+    : !!name && l.institution.trim().toLowerCase() === name) ?? null;
+}
+
+/** What the owner is told after Link, and whether a Repair button belongs beside it. */
+export function describeConnect(r: ConnectResult): { message: string; repairItemId: string | null; refresh: boolean } {
+  if (r.status === 'already-linked') {
+    return { message: `${r.institution} is already connected. Repair that connection to change which accounts are shared.`, repairItemId: r.itemId, refresh: false };
+  }
+  if (r.accountsShared === 0) {
+    // Never an empty list that reads as "no money": say what happened and the next tap.
+    return { message: 'No accounts were shared. Open the connection again and tick the accounts you want.', repairItemId: r.itemId, refresh: false };
+  }
+  const verb = r.status === 'repaired' ? 'updated' : 'connected';
+  return { message: `${r.institution} ${verb} — pulling your data…`, repairItemId: null, refresh: true };
 }
 
 /**
@@ -85,14 +137,20 @@ function loadPlaidScript(): Promise<void> {
 }
 
 /**
- * Full connect flow: token -> Link popup -> exchange. Resolves with the
- * institution name, or null when the user closed the popup. Pass `itemId` to
- * REPAIR an existing connection (update mode) instead of linking a new one.
+ * Full connect flow: token -> Link popup -> exchange. Resolves with a ConnectResult,
+ * or null when the user closed the popup. Pass `itemId` to REPAIR an existing
+ * connection (update mode) instead of linking a new one.
+ *
+ * #183, one Item per institution, guarded twice:
+ *  - in Link: picking a bank that is already connected closes Link at once, before
+ *    the owner signs in, so no duplicate Item is ever created at Plaid;
+ *  - on the server: plaid_exchange refuses a second Item for the same institution
+ *    before minting a token (ALREADY_EXISTS), for anything that gets past the first.
  */
-export async function connectBankWithPlaid(itemId?: string): Promise<string | null> {
+export async function connectBankWithPlaid(itemId?: string): Promise<ConnectResult | null> {
   const fns = getFunctions(app, 'us-central1');
   const tokenRes = await httpsCallable(fns, 'plaid_link_token')(itemId ? { itemId } : {});
-  const linkToken = (tokenRes.data as { linkToken?: string })?.linkToken;
+  const { linkToken, linked = [] } = (tokenRes.data ?? {}) as { linkToken?: string; linked?: LinkedInstitution[] };
   if (!linkToken) throw new Error('No link token returned.');
   await loadPlaidScript();
   if (!window.Plaid) throw new Error('Plaid Link did not initialize.');
@@ -100,20 +158,43 @@ export async function connectBankWithPlaid(itemId?: string): Promise<string | nu
   closeActiveLink(); // never let two Link instances exist at once
 
   return new Promise((resolve, reject) => {
+    let duplicate: LinkedInstitution | null = null;
     const handler = window.Plaid!.create({
       token: linkToken,
+      onEvent: (eventName, metadata) => {
+        if (itemId || eventName !== 'SELECT_INSTITUTION') return;
+        duplicate = findLinkedInstitution(linked, metadata?.institution_id, metadata?.institution_name);
+        if (duplicate) handler.exit({ force: true });
+      },
       onSuccess: (publicToken, metadata) => {
         closeActiveLink();
+        const institution = metadata?.institution?.name ?? 'Bank';
+        const accountsShared = metadata?.accounts?.length ?? 0;
+        if (itemId) {
+          // Update mode: the Item and its access token are unchanged — nothing to exchange.
+          resolve({ status: 'repaired', institution, itemId, accountsShared });
+          return;
+        }
         httpsCallable(fns, 'plaid_exchange')({
           publicToken,
-          institution: metadata?.institution?.name ?? 'Bank',
+          institution,
+          institutionId: metadata?.institution?.institution_id ?? '',
         })
-          .then((r) => resolve((r.data as { institution?: string })?.institution ?? 'Bank'))
-          .catch(reject);
+          .then((r) => {
+            const data = (r.data ?? {}) as { institution?: string; itemId?: string };
+            resolve({ status: 'linked', institution: data.institution ?? institution, itemId: data.itemId ?? '', accountsShared });
+          })
+          .catch((e: { code?: string; details?: { itemId?: string } }) => {
+            if (e?.code === 'functions/already-exists' && e.details?.itemId) {
+              resolve({ status: 'already-linked', institution, itemId: e.details.itemId });
+            } else {
+              reject(e);
+            }
+          });
       },
       onExit: () => {
         closeActiveLink();
-        resolve(null);
+        resolve(duplicate ? { status: 'already-linked', institution: duplicate.institution, itemId: duplicate.itemId } : null);
       },
     });
     activeHandler = handler;

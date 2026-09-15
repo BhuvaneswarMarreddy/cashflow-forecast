@@ -8,7 +8,7 @@ import { useTransactions } from '@/context/TransactionContext';
 import { PAYMENT_METHODS, PaymentAccount, IncomeSource, AccountType, PaymentMethod } from '@/types';
 import { currentOf, openingAnchor } from '@/lib/accounts';
 import { formatMoney, monthlyIncomeOf } from '@/lib/money';
-import { connectBankWithPlaid, syncNow } from '@/lib/sync-client';
+import { connectBankWithPlaid, describeConnect, syncNow } from '@/lib/sync-client';
 import {
   TrendingUp,
   CreditCard,
@@ -533,9 +533,15 @@ function OnboardingContent() {
     setConnectError('');
     setIsConnecting(true);
     try {
-      const institution = await connectBankWithPlaid();
-      if (institution === null) return; // popup closed — say nothing
-      setConnectedBanks((prev) => [...prev, institution]);
+      const result = await connectBankWithPlaid();
+      if (result === null) return; // popup closed — say nothing
+      // #183: a duplicate bank or zero shared accounts is not "connected" — say so.
+      // Repair lives on Accounts, where the connection can be reopened.
+      if (describeConnect(result).repairItemId) {
+        setConnectError(`${describeConnect(result).message} You can repair it from Accounts.`);
+        return;
+      }
+      setConnectedBanks((prev) => [...prev, result.institution]);
     } catch (e) {
       setConnectError(e instanceof Error ? e.message : 'Could not connect that bank.');
     } finally {
