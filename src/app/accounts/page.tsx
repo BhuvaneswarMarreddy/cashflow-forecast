@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
+import dynamic from 'next/dynamic';
 import { formatMoney, monthlyIncomeOf } from '@/lib/money';
 import { reconcileAllIncome, type Cadence } from '@/lib/income-cadence';
 import Link from 'next/link';
@@ -19,29 +20,28 @@ import DebtPlannerPanel from '@/components/DebtPlannerPanel';
 import { UnanchoredNote } from '@/components/UnanchoredNote';
 import { PAYMENT_METHODS, ACCOUNT_TYPES, PaymentAccount, IncomeSource, AccountType, PaymentMethod, CategoryBudget } from '@/types';
 import { withDerivedBalances, monthlyAverages, calculateCurrentCash } from '@/lib/forecast';
-import { currentOf, isCashAccount, isDebtAccount, isUnanchored, netWorthOf, openingAnchor, balanceCaption, accountsBehindFigure } from '@/lib/accounts';
+import { currentOf, isCashAccount, isDebtAccount, isUnanchored, openingAnchor, balanceCaption } from '@/lib/accounts';
 import ReconcileSheet from '@/components/ReconcileSheet';
 import { syncNow, describeSync, connectBankWithPlaid } from '@/lib/sync-client';
 import { useAccountsObservability } from '@/lib/obs/useAccountsObservability';
 import { safeSyncResult } from '@/lib/obs/sync-metadata';
 import {
-  TrendingUp,
   CreditCard,
   DollarSign,
-  Calendar,
   Plus,
   Trash2,
   Edit3,
-  Wallet,
   Building2,
   Banknote,
   X,
   AlertCircle,
-  FileText,
   BarChart3,
   RefreshCw,
+  Upload,
 } from 'lucide-react';
 import LoadingScreen from '@/components/LoadingScreen';
+// Lazy (#41 pattern): CSVImportModal pulls in `xlsx` and is closed until someone taps Import.
+const CSVImportModal = dynamic(() => import('@/components/CSVImportModal'), { ssr: false });
 
 /**
  * #68 (UX-002): distinguishes "the owner typed a budget in", "no budget typed
@@ -81,7 +81,9 @@ export default function AccountsPage() {
   const { transactions, isLoading: transactionsLoading, error: transactionsError, refreshTransactions } = useTransactions();
   const router = useRouter();
   
-  const [activeTab, setActiveTab] = useState<'accounts' | 'subscriptions' | 'budgets' | 'debt'>('accounts');
+  // #200: the account list is always the page; these are the Tools under it.
+  const [activeTab, setActiveTab] = useState<'income' | 'subscriptions' | 'budgets' | 'debt'>('income');
+  const [showImport, setShowImport] = useState(false);
 
   // Live transfer pairing: match each leg leaving an account to the leg arriving in
   // another, so an internal move reads as ONE net-zero movement. Unpaired legs = the
@@ -168,21 +170,6 @@ export default function AccountsPage() {
       <LoadingScreen />
     );
   }
-
-  const getAccountIcon = (type: AccountType) => {
-    switch (type) {
-      case 'credit_card':
-      case 'debit_card':
-        return <CreditCard className="w-5 h-5" />;
-      case 'bank_account':
-        return <Building2 className="w-5 h-5" />;
-      case 'cash':
-        return <Wallet className="w-5 h-5" />;
-      case 'personal_loan':
-        return <FileText className="w-5 h-5" />;
-    }
-  };
-
 
   // Plaid Link: connect a new bank. The popup is Plaid's own; we get back only
   // the institution name. First data arrives on the next refresh (Plaid needs
@@ -461,8 +448,19 @@ export default function AccountsPage() {
   // includePending argument the shared helper never saw. One definition, one answer.
   const totalBankBalance = calculateCurrentCash(derivedAccounts);
   const totalDebt = derivedAccounts.filter(isDebtAccount).reduce((sum, a) => sum + currentOf(a), 0);
-  const netWorth = netWorthOf(derivedAccounts);
   const creditUtilization = totalCreditLimit > 0 ? Math.round((totalCreditUsed / totalCreditLimit) * 100) : 0;
+  // #200: Cash | Credit | Other. Every account lands in exactly one group.
+  const accountGroups = [
+    { key: 'cash', label: 'Cash', accounts: derivedAccounts.filter(isCashAccount) },
+    { key: 'credit', label: 'Credit', accounts: derivedAccounts.filter((a) => a.type === 'credit_card') },
+    { key: 'other', label: 'Other', accounts: derivedAccounts.filter((a) => !isCashAccount(a) && a.type !== 'credit_card') },
+  ];
+  // A drag inside one group reorders only that group's slots in the full order.
+  const reorderWithinGroup = (groupIds: string[]) => {
+    const inGroup = new Set(groupIds);
+    let next = 0;
+    reorderPaymentAccounts(derivedAccounts.map((a) => (inGroup.has(a.id) ? groupIds[next++] : a.id)));
+  };
 
   // Income & budget: use hand-entered income sources / budget when present, else DERIVE
   // from the last 6 months of transactions (so these never read a bare $0).
@@ -483,47 +481,51 @@ export default function AccountsPage() {
       <div className="bg-pattern" />
       <Navbar />
       
-      <main className="pt-24 pb-24 md:pb-16 px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto relative z-10">
-        {/* Header */}
-        <div className="mb-8 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+      <main className="pt-24 pb-24 md:pb-16 px-4 lg:px-8 max-w-content mx-auto relative z-10">
+        {/* #200: "What do I own and owe?" — connecting is the first thing on the page. */}
+        <div className="mb-6 space-y-3">
           <div>
-            <h1 className="text-3xl font-bold text-[var(--foreground)]">Accounts &amp; Money</h1>
-            <p className="text-[var(--foreground-secondary)] mt-1">
-              Manage your payment accounts, income sources, and budget
-            </p>
+            <h1 className="text-3xl font-[family-name:var(--font-display)] text-[var(--foreground)]">Accounts</h1>
+            <p className="text-[var(--foreground-secondary)] mt-1">What you own and what you owe.</p>
           </div>
-          <div className="sm:text-right">
-            <div className="inline-flex items-center gap-2 flex-wrap">
-              <button
-                onClick={handleConnectBank}
-                disabled={syncing}
-                aria-label="Connect a bank through Plaid"
-                className="btn-secondary inline-flex items-center gap-2 min-h-[44px] disabled:opacity-60"
-              >
-                <Plus className="w-4 h-4" aria-hidden="true" />
-                Connect bank
-              </button>
-              <button
-                onClick={handleRefresh}
-                disabled={syncing}
-                aria-label="Refresh balances and transactions from your banks"
-                className="btn-secondary inline-flex items-center gap-2 min-h-[44px] disabled:opacity-60"
-              >
-                <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} aria-hidden="true" />
-                {syncing ? 'Refreshing…' : 'Refresh from banks'}
-              </button>
-            </div>
-            {syncMsg && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={handleConnectBank}
+              disabled={syncing}
+              aria-label="Connect a bank through Plaid"
+              className="btn-primary inline-flex items-center gap-2 min-h-[44px] disabled:opacity-60"
+            >
+              <Plus className="w-4 h-4" aria-hidden="true" />
+              Connect bank
+            </button>
+            <button
+              onClick={() => setShowImport(true)}
+              className="btn-secondary inline-flex items-center gap-2 min-h-[44px]"
+            >
+              <Upload className="w-4 h-4" aria-hidden="true" />
+              Import CSV
+            </button>
+            <button
+              onClick={handleRefresh}
+              disabled={syncing}
+              aria-label="Refresh balances and transactions from your banks"
+              title={syncing ? 'Refreshing…' : 'Refresh from banks'}
+              className="w-11 h-11 rounded-control flex items-center justify-center text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)] disabled:opacity-60"
+            >
+              <RefreshCw className={`w-5 h-5 ${syncing ? 'animate-spin' : ''}`} aria-hidden="true" />
+            </button>
+          </div>
+          {/* Import, not Connect: Plaid reaches neither (owner brief). */}
+          <p className="text-xs text-[var(--foreground-muted)]">
+            Apple Card and Indian accounts (NRE, NRO, FDs) can&apos;t be connected. Use Import CSV for those.
+          </p>
+          {syncMsg && (
               <p role="status" aria-live="polite"
                  className={`text-xs mt-2 ${syncErr ? 'text-[var(--accent-danger)]' : 'text-[var(--foreground-muted)]'}`}>
                 {syncMsg}
               </p>
             )}
-          </div>
         </div>
-
-        {/* OBS-001: developer-only provenance for the cards below. Renders null in production. */}
-        <AccountsDiagnostics traceId={obs.traceId} provenance={obs.provenance} onOpen={obs.trackDiagnosticOpened} />
 
         {/* R5: the mode must be legible where the money is, not only in Settings —
             otherwise the owner reads an effective balance weeks later as a settled one.
@@ -539,174 +541,71 @@ export default function AccountsPage() {
           </p>
         )}
 
-        {/* Summary Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
-          <div className="stat-card">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[var(--foreground-secondary)] text-sm">Net Worth</span>
-              <Wallet className="w-5 h-5 text-[var(--accent-primary)]" />
-            </div>
-            <p className={`text-2xl font-bold ${netWorth >= 0 ? 'text-[var(--accent-success)]' : 'text-[var(--accent-danger)]'}`}>
-              {netWorth < 0 ? '-' : ''}{formatMoney(Math.abs(netWorth), profile?.currency, 2)}
-            </p>
-            <p className="text-xs text-[var(--foreground-muted)]">cash − all debt</p>
-            {/* Round 4b Fix 2: netWorthOf sums isCashAccount + isDebtAccount, and those
-                two predicates partition every AccountType that exists today — so the
-                full roster IS this figure's own scope, unlike the three cards below it. */}
-            <UnanchoredNote accounts={derivedAccounts} />
-          </div>
-          <div className="stat-card">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[var(--foreground-secondary)] text-sm">Bank Balance</span>
-              <Building2 className="w-5 h-5 text-[var(--accent-secondary)]" />
-            </div>
-            <p className="text-2xl font-bold text-[var(--accent-success)]">
-              {formatMoney(totalBankBalance, profile?.currency, 2)}
-            </p>
-            <p className="text-xs text-[var(--foreground-muted)]">across all cash accounts</p>
-            {/* Round 4b Fix 2: this used to sit under a single note for the whole
-                5-card grid — including this cash-only figure, which an unanchored
-                CREDIT CARD (production's actual shape) has no part in. Same inverse
-                error Fix 1 corrects one screen over. */}
+        {/* #200: two numbers only, each disclosing only the accounts behind it. No net worth
+            headline: a sum that includes unanchored figures is not a balance anyone has. */}
+        <div className="grid grid-cols-2 gap-4 mb-8">
+          <div className="stat-card p-4 lg:p-5 min-w-0">
+            <span className="text-[var(--foreground-secondary)] text-sm">Cash</span>
+            {derivedAccounts.some(isCashAccount) ? (
+              <p className="mt-1 text-2xl font-[family-name:var(--font-display)] tnum truncate text-[var(--foreground)]">
+                {formatMoney(totalBankBalance, profile?.currency, 2)}
+              </p>
+            ) : (
+              <p className="mt-1 text-lg font-semibold text-[var(--foreground-muted)]">None linked</p>
+            )}
+            <p className="text-xs text-[var(--foreground-muted)]">across cash accounts</p>
             <UnanchoredNote accounts={derivedAccounts.filter(isCashAccount)} />
           </div>
-          <div className="stat-card">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[var(--foreground-secondary)] text-sm">Credit Used</span>
-              <CreditCard className="w-5 h-5 text-[var(--accent-primary)]" />
-            </div>
-            <p className="text-2xl font-bold text-[var(--accent-danger)]">
-              {formatMoney(totalCreditUsed, profile?.currency, 2)}
-            </p>
-            <p className="text-xs text-[var(--foreground-muted)]">
-              {creditUtilization}% of {formatMoney(totalCreditLimit, profile?.currency, 2)} limit
-            </p>
-            {/* totalCreditUsed above is credit_card accounts only — accountsBehindFigure's
-                'debt' scope matches that exactly (not isDebtAccount's broader
-                credit_card + personal_loan). This is the one figure production's
-                Amazon Store Card actually lands in on this screen. */}
-            <UnanchoredNote accounts={accountsBehindFigure('all', derivedAccounts, 'debt')} />
-          </div>
-          <div className="stat-card">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[var(--foreground-secondary)] text-sm">Monthly Income</span>
-              <Banknote className="w-5 h-5 text-[var(--money-in)]" />
-            </div>
-            {/* #75: when the declared pay frequency disagrees with the deposits
-                that actually landed, this figure is wrong by the ratio between
-                them — declaring biweekly while being paid monthly inflates it
-                2.17×. It is the largest number on the screen and it feeds the
-                budget's "savings potential", so it is not shown at all until the
-                disagreement is settled. Same contract as the runway hero. */}
-            {incomeConflict ? (
-              <>
-                <p className="text-lg font-bold text-[var(--accent-warning)]">Needs checking</p>
-                <p className="text-xs text-[var(--foreground-secondary)]">
-                  {incomeConflict.sourceName} is set to {incomeConflict.declared}, but deposits
-                  arrive about every {Math.round(incomeConflict.medianGapDays)} days
-                </p>
-              </>
+          <div className="stat-card p-4 lg:p-5 min-w-0">
+            <span className="text-[var(--foreground-secondary)] text-sm">Debt</span>
+            {derivedAccounts.some(isDebtAccount) ? (
+              <p className="mt-1 text-2xl font-[family-name:var(--font-display)] tnum truncate text-[var(--money-out)]">
+                {formatMoney(totalDebt, profile?.currency, 2)}
+              </p>
             ) : (
-              <>
-                <p className="text-2xl font-bold text-[var(--money-in)]">
-                  {formatMoney(monthlyIncome, 'USD', 2)}
-                </p>
-                <p className="text-xs text-[var(--foreground-muted)]">{incomeIsDerived ? 'avg (from transactions)' : 'from income sources'}</p>
-              </>
+              <p className="mt-1 text-lg font-semibold text-[var(--foreground-muted)]">None linked</p>
             )}
-          </div>
-          <div className="stat-card">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[var(--foreground-secondary)] text-sm">Monthly Budget</span>
-              <DollarSign className="w-5 h-5 text-[var(--accent-warning)]" />
-            </div>
-            {budgetDisplay.status === 'unset' ? (
-              <>
-                <p className="text-2xl font-bold text-[var(--foreground-muted)]">Not set</p>
-                <button
-                  onClick={() => setActiveTab('budgets')}
-                  className="text-xs text-[var(--accent-primary)] underline hover:no-underline"
-                >
-                  Set a budget
-                </button>
-              </>
-            ) : (
-              <>
-                <p className="text-2xl font-bold text-[var(--foreground)]">
-                  {formatMoney(budgetDisplay.amount, 'USD', 2)}
-                </p>
-                <p className="text-xs text-[var(--foreground-muted)]">
-                  {budgetDisplay.status === 'derived' ? 'typical monthly spend' : 'your set budget'}
-                </p>
-              </>
-            )}
+            <p className="text-xs text-[var(--foreground-muted)] truncate">
+              {totalCreditLimit > 0 ? `cards use ${creditUtilization}% of ${formatMoney(totalCreditLimit, profile?.currency, 0)}` : 'cards and loans'}
+            </p>
+            <UnanchoredNote accounts={derivedAccounts.filter(isDebtAccount)} />
           </div>
         </div>
-        {/* Tabs */}
-        <div className="flex flex-nowrap sm:flex-wrap whitespace-nowrap sm:whitespace-normal gap-2 mb-6 scroll-x-mobile">
-          {[
-            { key: 'accounts', label: 'Accounts', fullLabel: 'Accounts & Income', icon: CreditCard },
-            { key: 'subscriptions', label: 'Bills & Subs', fullLabel: 'Bills & Subscriptions', icon: Calendar },
-            { key: 'budgets', label: 'Budget', fullLabel: 'Budget', icon: DollarSign },
-            { key: 'debt', label: 'Debt Plan', fullLabel: 'Debt Planner', icon: TrendingUp },
-          ].map((tab) => {
-            const Icon = tab.icon;
-            return (
-              <button
-                key={tab.key}
-                onClick={() => setActiveTab(tab.key as typeof activeTab)}
-                className={`flex items-center gap-2 min-h-[44px] px-3 sm:px-4 py-2 rounded-control font-medium transition-all text-sm sm:text-base ${
-                  activeTab === tab.key
-                    ? 'bg-[var(--accent-primary)] text-[#16181c]'
-                    : 'bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                <span className="sm:hidden">{tab.label}</span>
-                <span className="hidden sm:inline">{tab.fullLabel}</span>
-              </button>
-            );
-          })}
-        </div>
 
-        {/* Tab Content */}
-        <div className="glass-card p-6">
-          {/* Accounts Tab */}
-          {activeTab === 'accounts' && (
-            <div>
-              <div className="flex justify-between items-start gap-4 mt-8 mb-4">
-                <h2 className="text-xl font-semibold text-[var(--foreground)] min-w-0">
-                  Payment Accounts ({profile?.paymentAccounts?.length || 0})
-                </h2>
-                <button
-                  onClick={() => setShowAccountModal(true)}
-                  className="btn-primary flex items-center gap-2 shrink-0 whitespace-nowrap"
-                >
-                  <Plus className="w-4 h-4" />
-                  Add Account
-                </button>
-              </div>
+        {/* #200: the map — Cash | Credit | Other. Drag reorders within a group. */}
+        <section aria-labelledby="accounts-heading" className="mb-10">
+          <div className="flex justify-between items-center gap-4 mb-4">
+            <h2 id="accounts-heading" className="text-lg font-semibold text-[var(--foreground)] min-w-0">
+              Your accounts ({profile?.paymentAccounts?.length || 0})
+            </h2>
+            <button
+              onClick={() => setShowAccountModal(true)}
+              className="btn-secondary inline-flex items-center gap-2 min-h-[44px] px-3 text-sm shrink-0 whitespace-nowrap"
+            >
+              <Plus className="w-4 h-4" aria-hidden="true" />
+              Add Account
+            </button>
+          </div>
 
-              {profile?.paymentAccounts && profile.paymentAccounts.length > 0 ? (
-                <AccountsList
-                  accounts={derivedAccounts}
-                  onReorder={reorderPaymentAccounts}
-                  renderRow={(account) => (
+          {profile?.paymentAccounts && profile.paymentAccounts.length > 0 ? (
+            <div className="space-y-6">
+              {accountGroups.filter((g) => g.accounts.length > 0).map((group) => (
+                <div key={group.key}>
+                  <h3 className="mb-2 text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--accent-primary)]">{group.label}</h3>
+                  <AccountsList
+                    accounts={group.accounts}
+                    onReorder={reorderWithinGroup}
+                    renderRow={(account) => (
                     <div
-                      className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-0 p-4 rounded-card bg-[var(--background-tertiary)] border-l-4 hover:bg-[var(--background-secondary)] transition-colors"
-                      style={{ borderLeftColor: account.color }}
+                      className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-0 p-4 rounded-card bg-[var(--background-tertiary)] hover:bg-[var(--background-secondary)] transition-colors"
                     >
                       {/* UI-106: the whole row used to be an invisible button 2px
                           from a drag handle — the body is inert now; the graph
                           opens from the explicit chart button on the right. */}
                       <div className="flex items-center gap-4 flex-1 min-w-0">
-                        <div
-                          className="w-12 h-12 rounded-card flex items-center justify-center"
-                          style={{ backgroundColor: `${account.color}20`, color: account.color }}
-                        >
-                          {getAccountIcon(account.type)}
-                        </div>
-                        <div>
+                        {/* #200: no per-account brand colour or icon tile — the group heading
+                            already says what kind of account this is. */}
+                        <div className="min-w-0">
                           <p className="font-medium text-[var(--foreground)]">
                             {account.name}
                             {account.lastFourDigits && (
@@ -748,7 +647,7 @@ export default function AccountsPage() {
                             </p>
                           )}
                           {(account.type === 'credit_card' || account.type === 'personal_loan') && !account.paymentFromAccountId && (
-                            <p className="text-xs text-amber-500 flex items-center gap-1 mt-1">
+                            <p className="text-xs text-[var(--accent-warning)] flex items-center gap-1 mt-1">
                               <AlertCircle className="w-3 h-3" />
                               No payment account linked
                             </p>
@@ -758,9 +657,16 @@ export default function AccountsPage() {
                       <div className="flex items-center justify-between sm:justify-end gap-4">
                         <div className="text-left sm:text-right">
                           {/* The balance YOU set is the truth (the CSV has no balance). */}
-                          <p className={`text-lg font-semibold ${account.type === 'credit_card' || account.type === 'personal_loan' ? 'text-[var(--accent-danger)]' : 'text-[var(--accent-success)]'}`}>
-                            {account.type === 'credit_card' || account.type === 'personal_loan' ? '-' : ''}{formatMoney(Math.abs(currentOf(account)), profile?.currency, 2)}
-                          </p>
+                          {/* #200: an unanchored figure is net movement, not a balance — say
+                              "Not anchored" instead of printing it as one. The caption below
+                              still says what the rows add up to since when. */}
+                          {isUnanchored(account) ? (
+                            <p className="text-lg font-semibold text-[var(--foreground-muted)]">Not anchored</p>
+                          ) : (
+                            <p className={`text-lg font-semibold tnum ${isDebtAccount(account) ? 'text-[var(--money-out)]' : 'text-[var(--foreground)]'}`}>
+                              {isDebtAccount(account) ? '−' : ''}{formatMoney(Math.abs(currentOf(account)), profile?.currency, 2)}
+                            </p>
+                          )}
                           {/* #83: no opening anchor means this figure is net movement across the
                               rows we hold, not a bank balance — say so, don't just show it.
                               balanceCaption() is the SAME three-way text AccountDetailModal and
@@ -823,42 +729,112 @@ export default function AccountsPage() {
                         </div>
                       </div>
                     </div>
-                  )}
-                />
-              ) : (
-                <div className="text-center py-12">
-                  <CreditCard className="w-16 h-16 text-[var(--foreground-muted)] mx-auto mb-4" />
-                  <h3 className="text-lg font-medium text-[var(--foreground)] mb-2">No accounts yet</h3>
-                  <p className="text-[var(--foreground-secondary)] mb-4">Add your credit cards and bank accounts to track spending</p>
-                  <button onClick={() => setShowAccountModal(true)} className="btn-primary">
-                    Add Your First Account
-                  </button>
+                    )}
+                  />
                 </div>
-              )}
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-12 rounded-card border border-[var(--border-color)] bg-[var(--background-secondary)]">
+              <CreditCard className="w-12 h-12 text-[var(--foreground-muted)] mx-auto mb-4" aria-hidden="true" />
+              <h3 className="text-lg font-medium text-[var(--foreground)] mb-2">No accounts yet</h3>
+              <p className="text-[var(--foreground-secondary)] mb-4">Connect a bank, or import a CSV for accounts Plaid can&apos;t reach.</p>
+              <button onClick={handleConnectBank} disabled={syncing} className="btn-primary min-h-[44px] px-4">
+                Connect bank
+              </button>
             </div>
           )}
+        </section>
 
-          {/* Spending Tab - Transactions by Account */}
-          {activeTab === 'subscriptions' && (
-            <div>
-              <div className="mb-6">
-                <h2 className="text-xl font-semibold text-[var(--foreground)] min-w-0">Subscriptions & autopay</h2>
-                <p className="text-sm text-[var(--foreground-secondary)] mt-1">
-                  Recurring charges detected across all your accounts and cards — what&apos;s paid this month and what&apos;s coming up.
+        {/* #200: Tools live under the list, never above it. */}
+        <section aria-labelledby="tools-heading">
+          <h2 id="tools-heading" className="text-lg font-semibold text-[var(--foreground)] mb-3">Tools</h2>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+          <div className="stat-card p-4 lg:p-5">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[var(--foreground-secondary)] text-sm">Monthly Income</span>
+              <Banknote className="w-5 h-5 text-[var(--money-in)]" />
+            </div>
+            {/* #75: when the declared pay frequency disagrees with the deposits
+                that actually landed, this figure is wrong by the ratio between
+                them — declaring biweekly while being paid monthly inflates it
+                2.17×. It is the largest number on the screen and it feeds the
+                budget's "savings potential", so it is not shown at all until the
+                disagreement is settled. Same contract as the runway hero. */}
+            {incomeConflict ? (
+              <>
+                <p className="text-lg font-bold text-[var(--accent-warning)]">Needs checking</p>
+                <p className="text-xs text-[var(--foreground-secondary)]">
+                  {incomeConflict.sourceName} is set to {incomeConflict.declared}, but deposits
+                  arrive about every {Math.round(incomeConflict.medianGapDays)} days
                 </p>
-              </div>
-              <SubscriptionsPanel
-                accounts={derivedAccounts}
-                transactions={transactions}
-                currency={profile?.currency}
-              />
+              </>
+            ) : (
+              <>
+                <p className="text-2xl font-bold text-[var(--money-in)]">
+                  {formatMoney(monthlyIncome, 'USD', 2)}
+                </p>
+                <p className="text-xs text-[var(--foreground-muted)]">{incomeIsDerived ? 'avg (from transactions)' : 'from income sources'}</p>
+              </>
+            )}
+          </div>
+          <div className="stat-card p-4 lg:p-5">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[var(--foreground-secondary)] text-sm">Monthly Budget</span>
+              <DollarSign className="w-5 h-5 text-[var(--accent-warning)]" />
             </div>
-          )}
+            {budgetDisplay.status === 'unset' ? (
+              <>
+                <p className="text-2xl font-bold text-[var(--foreground-muted)]">Not set</p>
+                <button
+                  onClick={() => setActiveTab('budgets')}
+                  className="text-xs text-[var(--accent-primary)] underline hover:no-underline"
+                >
+                  Set a budget
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-2xl font-bold text-[var(--foreground)]">
+                  {formatMoney(budgetDisplay.amount, 'USD', 2)}
+                </p>
+                <p className="text-xs text-[var(--foreground-muted)]">
+                  {budgetDisplay.status === 'derived' ? 'typical monthly spend' : 'your set budget'}
+                </p>
+              </>
+            )}
+          </div>
+          </div>
 
-          {/* Transfers Tab — paired internal movements + unmatched review */}
-          {activeTab === 'accounts' && (
+          <div role="tablist" aria-label="Tools" className="flex gap-2 mb-4 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+            {([
+              { key: 'income', label: 'Income sources' },
+              { key: 'subscriptions', label: 'Bills & subscriptions' },
+              { key: 'budgets', label: 'Budget' },
+              { key: 'debt', label: 'Debt plan' },
+            ] as const).map((tab) => (
+              <button
+                key={tab.key}
+                role="tab"
+                aria-selected={activeTab === tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={`min-h-[44px] px-4 rounded-pill text-sm font-medium whitespace-nowrap transition-colors ${
+                  activeTab === tab.key
+                    ? 'bg-[var(--accent-primary)] text-[#16181c]'
+                    : 'bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="glass-card p-4 lg:p-5 mb-6">
+          {/* Income sources (a Tool; Settings will own it in #201) */}
+          {activeTab === 'income' && (
             <div>
-              <div className="flex justify-between items-start gap-4 mt-8 mb-4">
+              <div className="flex justify-between items-start gap-4 mb-4">
                 <h2 className="text-xl font-semibold text-[var(--foreground)] min-w-0">
                   Income Sources ({profile?.incomeSources?.length || 0})
                 </h2>
@@ -924,6 +900,23 @@ export default function AccountsPage() {
                   </button>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Spending Tab - Transactions by Account */}
+          {activeTab === 'subscriptions' && (
+            <div>
+              <div className="mb-6">
+                <h2 className="text-xl font-semibold text-[var(--foreground)] min-w-0">Subscriptions & autopay</h2>
+                <p className="text-sm text-[var(--foreground-secondary)] mt-1">
+                  Recurring charges detected across all your accounts and cards — what&apos;s paid this month and what&apos;s coming up.
+                </p>
+              </div>
+              <SubscriptionsPanel
+                accounts={derivedAccounts}
+                transactions={transactions}
+                currency={profile?.currency}
+              />
             </div>
           )}
 
@@ -1040,8 +1033,14 @@ export default function AccountsPage() {
               />
             </div>
           )}
-        </div>
+          </div>
+
+        {/* OBS-001: developer-only provenance for the summary figures. Renders null in production. */}
+        <AccountsDiagnostics traceId={obs.traceId} provenance={obs.provenance} onOpen={obs.trackDiagnosticOpened} />
+        </section>
       </main>
+
+      <CSVImportModal isOpen={showImport} onClose={() => setShowImport(false)} />
 
       {graphAccount && (
         <AccountDetailModal
