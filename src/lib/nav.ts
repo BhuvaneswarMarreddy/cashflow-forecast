@@ -4,12 +4,15 @@ import {
 } from 'lucide-react';
 
 /**
- * Four primary destinations, organised by the question's tense (UX-IA-001).
+ * Four thumb destinations, organised by the question's tense (UX-IA-001, UI spec B1).
  *
- *   Overview   now     "Am I OK right now?"
+ *   Home       now     "Am I OK right now?"
  *   Forecast   later   "Will I be OK?"
- *   Flow       past    "Where did it actually go?"
+ *   Activity   past    "What posted?"  — Flow is the picture of the same past
  *   Accounts   —       "What do I own and owe?"
+ *
+ * Flow keeps its route and its desktop Navbar link but is not a tab (`tab: false`):
+ * phones reach it from Activity's "View as flow", and the Activity tab stays lit on it.
  *
  * There were seven, and four of them — History, Analytics, Cashflow, Calendar — are
  * float re-derivations of the same `transactions` array that Flow already reads in
@@ -24,7 +27,7 @@ export interface NavItem {
   href: string;
   label: string;
   icon: LucideIcon;
-  /** Show in the mobile bottom tab bar (max 5). */
+  /** Show in the mobile bottom tab bar (four: UI spec B1). */
   tab: boolean;
 }
 
@@ -32,7 +35,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: '/dashboard', label: 'Home', icon: LayoutDashboard, tab: true },
   { href: '/forecast', label: 'Forecast', icon: LineChart, tab: true },
   { href: '/history', label: 'Activity', icon: History, tab: true },
-  { href: '/flow', label: 'Flow', icon: GitBranch, tab: true },
+  { href: '/flow', label: 'Flow', icon: GitBranch, tab: false }, // not a thumb tab; reached from Activity
   { href: '/accounts', label: 'Accounts', icon: CreditCard, tab: true },
 ];
 

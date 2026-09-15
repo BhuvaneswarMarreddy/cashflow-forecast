@@ -42,6 +42,7 @@ import { currentOf, balanceCaption } from '@/lib/accounts';
 import { formatMoney, monthlyIncomeOf } from '@/lib/money';
 import { askAbout, askAboutTransaction } from '@/lib/ask';
 import LoadingScreen from '@/components/LoadingScreen';
+import Link from 'next/link';
 
 type ViewMode = 'history' | 'insights' | 'runway';
 type DateFilter = 'all' | 'thisMonth' | 'lastMonth' | 'last3Months' | 'last6Months';
@@ -365,7 +366,7 @@ export default function HistoryPage() {
       <div className="bg-pattern" />
       <Navbar />
 
-      <main className="pt-24 pb-40 md:pb-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto relative z-10">
+      <main className="pt-24 pb-24 md:pb-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto relative z-10">
         {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
           <div>
@@ -377,6 +378,13 @@ export default function HistoryPage() {
                   ? 'Your spending pace and where it goes'
                   : 'See how long your money will last'}
             </p>
+            {/* Flow is not a tab (UI spec B1); this is how a phone gets there. */}
+            <Link
+              href="/flow"
+              className="tap-target inline-block mt-2 text-sm font-medium text-[var(--accent-primary)] hover:text-[var(--accent-secondary)]"
+            >
+              View as flow →
+            </Link>
           </div>
           <div className="flex items-center gap-3">
             {/* UI-104: three tabs — Transactions | Insights | Runway */}
