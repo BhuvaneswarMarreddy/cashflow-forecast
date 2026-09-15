@@ -26,7 +26,6 @@ const LIVE_ENDPOINTS = /firestore\.googleapis\.com|identitytoolkit\.googleapis\.
 const KNOWN: Record<string, string> = {
   'flow@phone': '#176 reads Firestore directly', 'flow@desktop': '#176 reads Firestore directly',
   'forecast@phone': '#176 reads Firestore directly', 'forecast@desktop': '#176 reads Firestore directly',
-  'activity@phone': '#177 scrolls sideways 4px',
   'accounts@phone': '#178 hydration mismatch', 'accounts@desktop': '#178 hydration mismatch',
 };
 
