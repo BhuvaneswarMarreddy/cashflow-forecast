@@ -8,13 +8,10 @@ import { useAuth } from '@/context/AuthContext';
 import { useTransactions } from '@/context/TransactionContext';
 import { useUserProfile } from '@/context/UserProfileContext';
 import Navbar from '@/components/Navbar';
-import AddTransactionModal from '@/components/AddTransactionModal';
 import { PAYMENT_METHODS, EXPENSE_CATEGORIES } from '@/types';
 import { isPositive } from '@/lib/classify';
 import {
-  Calendar,
   ChevronRight,
-  AlertCircle,
   Settings,
   ArrowRight,
 } from 'lucide-react';
@@ -25,23 +22,16 @@ import { clampedMonthlyDate } from '@/lib/dates';
 import { homeSummary, runwayLabel, RESERVE_TARGET_MONTHS } from '@/lib/home';
 import { sanitizeAssumedSpend } from '@/lib/profile-settings';
 import { displayName } from '@/lib/merchant';
-import { nonNegotiableMonthly, Bill } from '@/lib/bills';
+import { nonNegotiableMonthly, billUpcomingEvents, Bill } from '@/lib/bills';
 import { UnanchoredNote } from '@/components/UnanchoredNote';
 import * as firestoreService from '@/lib/firestore';
 import LoadingScreen from '@/components/LoadingScreen';
 
 export default function DashboardPage({ initialBills }: { initialBills?: Bill[] } = {}) {
   const { isAuthenticated, isLoading: authLoading, user } = useAuth();
-  const {
-    transactions,
-    isLoading: txnLoading,
-    getPastTransactions,
-    getFutureTransactions,
-  } = useTransactions();
+  const { transactions, isLoading: txnLoading } = useTransactions();
   const { profile, isLoading: profileLoading, isOnboarded, incomeContext } = useUserProfile();
   const router = useRouter();
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [filter, setFilter] = useState<'all' | 'past' | 'future'>('all');
   // UI-102: the locked (non-negotiable) bills feed the hero's reserved chip.
   const [bills, setBills] = useState<Bill[]>(initialBills ?? []);
   useEffect(() => {
@@ -74,11 +64,6 @@ export default function DashboardPage({ initialBills }: { initialBills?: Bill[] 
   if (!isAuthenticated) return null;
 
   const today = startOfDay(new Date());
-  
-  const pastTransactions = getPastTransactions();
-  const futureTransactions = getFutureTransactions();
-  
-  
 
   // incomeContext is load-bearing, not decoration: without it interpretTransaction
   // has no approved sources to match and counts NOTHING as income, so this chart
@@ -168,22 +153,35 @@ export default function DashboardPage({ initialBills }: { initialBills?: Bill[] 
 
   const upcomingBills = getUpcomingBills();
 
-  // Prepare chart data
+  // UI spec C3: Home answers "what changed", it does not browse the ledger. Posted rows
+  // only (nothing projected, pending or dated ahead) and no All/Past/Upcoming filter:
+  // Activity owns the list and Forecast owns what is upcoming. `.filter` first, so the
+  // context's array is never sorted in place (the old `.sort` on `transactions` was).
+  const whatChanged = transactions
+    .filter((t) => !t.pending && !t.isProjected && !isAfter(parseISO(t.date), today))
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    .slice(0, 5);
 
-  // Filter transactions for the list
-  const getFilteredTransactions = () => {
-    let filtered = transactions;
-    if (filter === 'past') {
-      filtered = pastTransactions;
-    } else if (filter === 'future') {
-      filtered = futureTransactions;
-    }
-    return filtered.sort((a, b) => 
-      new Date(b.date).getTime() - new Date(a.date).getTime()
-    ).slice(0, 8);
-  };
-
-  const recentTransactions = getFilteredTransactions();
+  // UI spec C4: the soonest three things due. The Bills register's schedule is the same
+  // billUpcomingEvents homeSnapshot sends the phone; card payments due are the list this
+  // screen already built. Each bill appears once, at its next date. A list, never a total.
+  const seenBills = new Set<string>();
+  const nextBills = [
+    ...billUpcomingEvents(bills, format(today, 'yyyy-MM-dd'), 45).map((e) => ({
+      key: `bill-${e.billId}`, name: e.vendor, due: parseISO(e.dueDate), amount: e.amount,
+    })),
+    ...upcomingBills.map((card) => ({
+      key: `card-${card.id}`, name: card.name, due: card.dueDate, amount: card.balanceDue,
+    })),
+  ]
+    .sort((a, b) => a.due.getTime() - b.due.getTime())
+    .filter((b) => {
+      if (seenBills.has(b.key)) return false;
+      seenBills.add(b.key);
+      return true;
+    })
+    .slice(0, 3);
+  const daysUntil = (due: Date) => Math.ceil((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
 
 
@@ -229,8 +227,10 @@ export default function DashboardPage({ initialBills }: { initialBills?: Bill[] 
             old dashboard shouted (5 stat cards, 4 account tiles, 3 charts, income
             panel) either lives here as one quiet chip or on the screen that owns it. */}
         <h1 className="sr-only">Home</h1>
-        {!setupIncomplete && (
-          <section className="mb-4 lg:mb-6 p-4 lg:p-5 rounded-card bg-[var(--background-secondary)] border border-[var(--border-color)]">
+        {/* UI spec C2: always shown. It used to vanish whenever setup was incomplete
+            (including "no budget set"), so a new owner saw no runway at all; an
+            unmeasured one already says "Not measured yet", never 0. */}
+        <section className="mb-6 p-4 lg:p-5 rounded-card bg-[var(--background-secondary)] border border-[var(--border-color)]">
             <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--accent-primary)]">Runway</p>
             {txnLoading ? (
               <div className="animate-pulse mt-2 space-y-3">
@@ -334,150 +334,98 @@ export default function DashboardPage({ initialBills }: { initialBills?: Bill[] 
                 <UnanchoredNote accounts={accountsBehindFigure('all', derivedAccounts)} />
               </>
             )}
-          </section>
-        )}
+        </section>
 
-        {/* Card payments due. UI-112: the per-account colour chips are gone — a
-            card's brand hue carried no meaning here and put four more colours on
-            a screen that is supposed to run on four. */}
-        {upcomingBills.length > 0 && (
-          <div className="mb-4 lg:mb-6 p-4 lg:p-5 rounded-card bg-[var(--background-secondary)] border border-[var(--border-color)]">
-            <div className="flex items-center gap-2 mb-3">
-              <AlertCircle className="w-4 h-4 text-[var(--accent-warning)] flex-shrink-0" />
-              <h2 className="font-semibold text-[var(--foreground)]">Card payments due</h2>
-            </div>
-            <ul>
-              {upcomingBills.slice(0, 3).map((bill) => (
-                <li
-                  key={bill.id}
-                  className="flex items-center justify-between gap-3 py-3 border-b border-[var(--border-color)] last:border-0"
-                >
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-[var(--foreground)] truncate">{bill.name}</p>
-                    <p className="text-xs text-[var(--foreground-muted)] tnum">
-                      {format(bill.dueDate, 'MMM d')} · in {bill.daysUntilDue} day{bill.daysUntilDue === 1 ? '' : 's'}
-                    </p>
-                  </div>
-                  <p className="text-sm font-semibold text-[var(--money-out)] tnum flex-shrink-0">
-                    {formatMoney(bill.balanceDue, profile?.currency, 2)}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {/* Recent Transactions */}
-        <div className="p-4 lg:p-5 rounded-card bg-[var(--background-secondary)] border border-[var(--border-color)]">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-3">
-            <h2 className="font-semibold text-[var(--foreground)]">Recent activity</h2>
-            {/* UI-102: 3 choices = 3 visible segments (a select is two taps and
-                hides the active state; audit wrongControl). Plain words: no
-                'Projected' jargon. */}
-            <div className="flex items-center gap-1 p-1 rounded-control bg-[var(--background-tertiary)]" role="group" aria-label="Filter transactions">
-              {([['all', 'All'], ['past', 'Past'], ['future', 'Upcoming']] as const).map(([value, label]) => (
-                <button
-                  key={value}
-                  onClick={() => setFilter(value)}
-                  aria-pressed={filter === value}
-                  className={`min-h-[44px] px-4 rounded-control text-sm font-semibold transition-all ${
-                    filter === value
-                      ? 'bg-[var(--accent-primary)] text-[var(--background)]'
-                      : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <ul>
-            {recentTransactions.length === 0 ? (
-              // UI-102: the empty copy must tell the truth about WHICH filter is
-              // empty — "No transactions yet" while hundreds exist was a lie.
-              <li className="text-center py-10">
-                <Calendar className="w-10 h-10 text-[var(--foreground-muted)] mx-auto mb-3" aria-hidden="true" />
-                {transactions.length === 0 ? (
-                  <>
-                    <p className="font-medium text-[var(--foreground)] mb-1">No transactions yet</p>
-                    <p className="text-sm text-[var(--foreground-secondary)] mb-4">Start tracking your spending</p>
-                    <button onClick={() => setIsModalOpen(true)} className="btn-primary min-h-[44px] px-4">
-                      Add your first transaction
-                    </button>
-                  </>
-                ) : (
-                  <p className="font-medium text-[var(--foreground)]">
-                    {filter === 'future' ? 'Nothing scheduled ahead' : 'Nothing in this view'}
-                  </p>
-                )}
-              </li>
-            ) : (
-              recentTransactions.map((txn) => {
-                const category = EXPENSE_CATEGORIES.find((c) => c.value === txn.category);
-                const paymentMethod = PAYMENT_METHODS.find((m) => m.value === txn.paymentMethod);
-                // Not `type === 'expense'`: that renders a transfer green with a '+'
-                // regardless of which way the money actually moved.
-                const isExpense = !isPositive(txn, profile?.paymentAccounts);
-                const isFuture = isAfter(parseISO(txn.date), today) || txn.isProjected;
-
-                return (
-                  // UI-112: a divided list, not eight nested cards. The old row wore
-                  // a 48px tile holding the SAME 📋 fallback on every uncategorised
-                  // row — decoration that carried no information and set the row
-                  // height. A real category icon still earns its place.
-                  <li
-                    key={txn.id}
-                    className="flex items-center justify-between gap-3 py-3 border-b border-[var(--border-color)] last:border-0"
-                  >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        {/* Full string kept in `title` — the reference blob is the
-                            only handle on a mystery charge, so it is never lost. */}
-                        <p className="font-medium text-[var(--foreground)] truncate" title={txn.title}>
-                          {displayName(txn.title)}
+        {/* UI spec C3/C4: what changed | next bills — one column on a phone, side by side
+            from lg. Empty sections are omitted, never filled with placeholder rows.
+            `grid-cols-1` is minmax(0,1fr): without it the implicit column sized itself to
+            the longest bank description and the page scrolled sideways by 137px. */}
+        {(whatChanged.length > 0 || nextBills.length > 0) && (
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 items-start">
+            {whatChanged.length > 0 && (
+              <section className="p-4 lg:p-5 rounded-card bg-[var(--background-secondary)] border border-[var(--border-color)]">
+                <div className="flex items-baseline justify-between gap-3 mb-1">
+                  <h2 className="font-semibold text-[var(--foreground)]">What changed</h2>
+                  <span className="text-xs text-[var(--foreground-muted)]">Latest posted</span>
+                </div>
+                <ul>
+                  {whatChanged.map((txn) => {
+                    const category = EXPENSE_CATEGORIES.find((c) => c.value === txn.category);
+                    const paymentMethod = PAYMENT_METHODS.find((m) => m.value === txn.paymentMethod);
+                    // Not `type === 'expense'`: that renders a transfer as money in
+                    // regardless of which way the money actually moved.
+                    const isExpense = !isPositive(txn, profile?.paymentAccounts);
+                    return (
+                      <li
+                        key={txn.id}
+                        className="flex items-center justify-between gap-3 py-3 border-b border-[var(--border-color)] last:border-0"
+                      >
+                        <div className="min-w-0">
+                          {/* Full string kept in `title` — the reference blob is the
+                              only handle on a mystery charge, so it is never lost. */}
+                          <p className="font-medium text-[var(--foreground)] truncate" title={txn.title}>
+                            {displayName(txn.title)}
+                          </p>
+                          <p className="text-xs text-[var(--foreground-muted)] truncate">
+                            {format(parseISO(txn.date), 'MMM d')}
+                            {category && txn.category !== 'other'
+                              ? ` · ${category.label}`
+                              : paymentMethod?.label
+                                ? ` · ${paymentMethod.label}`
+                                : ''}
+                          </p>
+                        </div>
+                        <p className={`font-semibold tnum flex-shrink-0 ${isExpense ? 'text-[var(--money-out)]' : 'text-[var(--money-in)]'}`}>
+                          {isExpense ? '−' : '+'}{formatMoney(txn.amount, profile?.currency, 2)}
                         </p>
-                        {isFuture && <span className="badge badge-projected flex-shrink-0">Upcoming</span>}
-                        {/* Same reason as Upcoming: money the totals above do not count yet. */}
-                        {txn.pending && <span className="badge badge-projected flex-shrink-0">Pending</span>}
-                      </div>
-                      {/* ONE qualifier, never two. "Aug 6 · Other · Bank Account"
-                          was three fields where two said nothing: `other` is the
-                          absence of a category, and the account is identical on
-                          every row for most people. Activity owns the full detail. */}
-                      <p className="text-xs text-[var(--foreground-muted)] truncate">
-                        {format(parseISO(txn.date), 'MMM d')}
-                        {category && txn.category !== 'other'
-                          ? ` · ${category.label}`
-                          : paymentMethod?.label
-                            ? ` · ${paymentMethod.label}`
-                            : ''}
-                      </p>
-                    </div>
-                    <p className={`font-semibold tnum flex-shrink-0 ${txn.pending ? 'text-[var(--foreground-muted)]' : isExpense ? 'text-[var(--money-out)]' : 'text-[var(--money-in)]'}`}>
-                      {isExpense ? '−' : '+'}{formatMoney(txn.amount, profile?.currency, 2)}
-                    </p>
-                  </li>
-                );
-              })
+                      </li>
+                    );
+                  })}
+                </ul>
+                <Link
+                  href="/history"
+                  className="w-full mt-3 min-h-[44px] rounded-control bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)] transition-all flex items-center justify-center gap-1 text-sm font-medium"
+                >
+                  See all activity
+                  <ChevronRight className="w-4 h-4" aria-hidden="true" />
+                </Link>
+              </section>
             )}
-          </ul>
 
-          {transactions.length > 8 && (
-            // #30: the label promises the transactions list — send it there (and as a
-            // real link, not a button pretending to be one).
-            <Link
-              href="/history"
-              className="w-full mt-3 min-h-[44px] rounded-control bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)] transition-all flex items-center justify-center gap-1 text-sm font-medium"
-            >
-              See all activity
-              <ChevronRight className="w-4 h-4" />
-            </Link>
-          )}
-        </div>
+            {nextBills.length > 0 && (
+              <section className="p-4 lg:p-5 rounded-card bg-[var(--background-secondary)] border border-[var(--border-color)]">
+                <div className="flex items-baseline justify-between gap-3 mb-1">
+                  <h2 className="font-semibold text-[var(--foreground)]">Next bills</h2>
+                  <Link href="/forecast?tab=bills" className="tap-target text-sm font-medium text-[var(--accent-primary)]">
+                    All bills
+                  </Link>
+                </div>
+                <ul>
+                  {nextBills.map((bill) => {
+                    const days = daysUntil(bill.due);
+                    return (
+                      <li
+                        key={bill.key}
+                        className="flex items-center justify-between gap-3 py-3 border-b border-[var(--border-color)] last:border-0"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-[var(--foreground)] truncate">{bill.name}</p>
+                          <p className="text-xs text-[var(--foreground-muted)] tnum">
+                            {format(bill.due, 'MMM d')} · {days <= 0 ? 'today' : `in ${days} day${days === 1 ? '' : 's'}`}
+                          </p>
+                        </div>
+                        <p className="text-sm font-semibold text-[var(--money-out)] tnum flex-shrink-0">
+                          {formatMoney(bill.amount, profile?.currency, 2)}
+                        </p>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            )}
+          </div>
+        )}
       </main>
-
-      <AddTransactionModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
     </div>
   );
 }

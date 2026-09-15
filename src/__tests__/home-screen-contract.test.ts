@@ -107,3 +107,38 @@ describe('UI-112 Home — the hero tells the truth', () => {
     expect(code).toContain('home.amountToNextMonth');
   });
 });
+
+describe('UI spec Phase C — Home is runway first', () => {
+  test('the runway hero is never hidden behind "finish setting up"', () => {
+    // It vanished whenever setup was incomplete — including "no budget set" — so a
+    // new owner opened Home and saw no runway at all.
+    expect(code).not.toMatch(/!setupIncomplete\s*&&\s*\(\s*<section/);
+    expect(code).toContain('hero-number');
+  });
+
+  test('no All / Past / Upcoming filter pile on Home', () => {
+    expect(code).not.toContain('Filter transactions');
+    expect(code).not.toMatch(/'future'/);
+  });
+
+  test('"What changed" is posted rows only, at most five', () => {
+    expect(code).toContain('What changed');
+    expect(code).toMatch(/!t\.pending && !t\.isProjected/);
+    expect(code).toMatch(/whatChanged[\s\S]{0,300}\.slice\(0, 5\)/);
+  });
+
+  test('"Next bills" is at most three, from the same schedule the phone gets, with a way to all of them', () => {
+    expect(code).toContain('Next bills');
+    expect(code).toContain('billUpcomingEvents(');
+    expect(code).toMatch(/nextBills[\s\S]{0,900}\.slice\(0, 3\)/);
+    expect(code).toContain('href="/forecast?tab=bills"');
+  });
+
+  test('Home carries no Add of its own — the header Add is the one', () => {
+    expect(code).not.toContain('AddTransactionModal');
+  });
+
+  test('no charts on Home', () => {
+    expect(code).not.toMatch(/recharts|PieChart|LineChart|BarChart/);
+  });
+});
