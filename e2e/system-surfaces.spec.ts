@@ -55,6 +55,14 @@ for (const size of WIDTHS) {
     await page.getByLabel('Password', { exact: true }).fill('Abcdefg1!');
     await page.getByLabel(/confirm password/i).fill('Abcdefg1!');
     await page.evaluate(() => window.scrollTo(0, 0));
+    // The card enters with fadeInUp (translateY 20px -> 0). boundingBox includes that
+    // transform, so measuring mid-animation read 806px on CI for a button that rests at
+    // 786px. Wait for every finite animation; the logo's float is infinite and never ends.
+    await page.evaluate(() => Promise.all(
+      document.getAnimations()
+        .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+        .map((a) => a.finished),
+    ));
 
     const box = await submit.boundingBox();
     expect(box, 'submit button box').toBeTruthy();
