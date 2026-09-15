@@ -22,7 +22,6 @@ import { executePairedDelete, PairedDeleteChoice } from '@/lib/paired-delete';
 import Sheet from '@/components/Sheet';
 import { EXPENSE_CATEGORIES, Transaction, TransactionType, getMerchantColor, displayCategory } from '@/types';
 import {
-  TrendingUp,
   Plus,
   Upload,
   Calendar,
@@ -42,6 +41,7 @@ import { format, parseISO, startOfMonth, subMonths, isWithinInterval } from 'dat
 import { currentOf, balanceCaption } from '@/lib/accounts';
 import { formatMoney, monthlyIncomeOf } from '@/lib/money';
 import { askAbout, askAboutTransaction } from '@/lib/ask';
+import LoadingScreen from '@/components/LoadingScreen';
 
 type ViewMode = 'history' | 'insights' | 'runway';
 type DateFilter = 'all' | 'thisMonth' | 'lastMonth' | 'last3Months' | 'last6Months';
@@ -341,12 +341,7 @@ export default function HistoryPage() {
 
   if (authLoading || profileLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="bg-pattern" />
-        <div className="animate-pulse-glow w-16 h-16 rounded-card bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] flex items-center justify-center">
-          <TrendingUp className="w-8 h-8 text-white" />
-        </div>
-      </div>
+      <LoadingScreen />
     );
   }
 

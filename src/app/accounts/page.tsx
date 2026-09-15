@@ -41,6 +41,7 @@ import {
   BarChart3,
   RefreshCw,
 } from 'lucide-react';
+import LoadingScreen from '@/components/LoadingScreen';
 
 /**
  * #68 (UX-002): distinguishes "the owner typed a budget in", "no budget typed
@@ -164,11 +165,7 @@ export default function AccountsPage() {
 
   if (authLoading || profileLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-pulse-glow w-16 h-16 rounded-card bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] flex items-center justify-center">
-          <TrendingUp className="w-8 h-8 text-white" />
-        </div>
-      </div>
+      <LoadingScreen />
     );
   }
 

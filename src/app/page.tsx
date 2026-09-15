@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useUserProfile } from '@/context/UserProfileContext';
-import { TrendingUp } from 'lucide-react';
+import LoadingScreen from '@/components/LoadingScreen';
 
 export default function Home() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
@@ -49,11 +49,6 @@ export default function Home() {
   }, [isAuthenticated, isOnboarded, authLoading, profileLoading, router]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center">
-      <div className="bg-pattern" />
-      <div className="animate-pulse-glow w-20 h-20 rounded-card bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] flex items-center justify-center">
-        <TrendingUp className="w-10 h-10 text-white" />
-      </div>
-    </div>
+    <LoadingScreen />
   );
 }

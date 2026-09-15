@@ -29,6 +29,7 @@ import {
   FileText,
   SkipForward,
 } from 'lucide-react';
+import LoadingScreen from '@/components/LoadingScreen';
 
 type Step = 'welcome' | 'bank-accounts' | 'credit-cards' | 'loans' | 'income' | 'budget' | 'complete';
 
@@ -212,12 +213,7 @@ function OnboardingContent() {
 
   if (authLoading || profileLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="bg-pattern" />
-        <div className="animate-pulse-glow w-16 h-16 rounded-card bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] flex items-center justify-center">
-          <TrendingUp className="w-8 h-8 text-white" />
-        </div>
-      </div>
+      <LoadingScreen />
     );
   }
 

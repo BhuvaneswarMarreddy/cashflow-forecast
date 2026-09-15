@@ -12,7 +12,6 @@ import AddTransactionModal from '@/components/AddTransactionModal';
 import { PAYMENT_METHODS, EXPENSE_CATEGORIES } from '@/types';
 import { isPositive } from '@/lib/classify';
 import {
-  TrendingUp,
   Calendar,
   ChevronRight,
   AlertCircle,
@@ -29,6 +28,7 @@ import { displayName } from '@/lib/merchant';
 import { nonNegotiableMonthly, Bill } from '@/lib/bills';
 import { UnanchoredNote } from '@/components/UnanchoredNote';
 import * as firestoreService from '@/lib/firestore';
+import LoadingScreen from '@/components/LoadingScreen';
 
 export default function DashboardPage({ initialBills }: { initialBills?: Bill[] } = {}) {
   const { isAuthenticated, isLoading: authLoading, user } = useAuth();
@@ -67,13 +67,7 @@ export default function DashboardPage({ initialBills }: { initialBills?: Bill[] 
   // For profile/transactions, we show the UI immediately with localStorage data
   if (authLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="bg-pattern" />
-        <div className="animate-pulse-glow w-16 h-16 rounded-card bg-[var(--accent-primary)] flex items-center justify-center">
-          <TrendingUp className="w-8 h-8 text-[var(--background)]" aria-hidden="true" />
-        </div>
-        <span className="sr-only">Loading</span>
-      </div>
+      <LoadingScreen />
     );
   }
 

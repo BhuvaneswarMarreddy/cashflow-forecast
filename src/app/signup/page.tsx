@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { Mail, Lock, User, TrendingUp, ArrowRight, Eye, EyeOff, CheckCircle } from 'lucide-react';
+import LoadingScreen from '@/components/LoadingScreen';
 
 // Google Icon Component
 const GoogleIcon = () => (
@@ -103,36 +104,32 @@ export default function SignupPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-pulse-glow w-16 h-16 rounded-card bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] flex items-center justify-center">
-          <TrendingUp className="w-8 h-8 text-white" />
-        </div>
-      </div>
+      <LoadingScreen />
     );
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center p-4 relative">
+    <main className="min-h-screen flex items-start sm:items-center justify-center px-4 py-4 sm:py-8 relative">
       {/* Background pattern */}
       <div className="bg-pattern" />
 
       <div className="w-full max-w-md relative z-10">
         {/* Logo */}
-        <div className="text-center mb-8 animate-fade-in-up">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-card bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] mb-4 animate-float">
-            <TrendingUp className="w-8 h-8 text-white" />
+        <div className="text-center mb-4 animate-fade-in-up">
+          <div className="inline-flex items-center justify-center w-10 h-10 rounded-card bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] mb-2 animate-float">
+            <TrendingUp className="w-5 h-5 text-[#16181c]" aria-hidden="true" />
           </div>
-          <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-[var(--accent-primary)] to-[var(--accent-secondary)]">
+          <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-[var(--accent-primary)] to-[var(--accent-secondary)]">
             CashFlow
           </h1>
-          <p className="text-[var(--foreground-secondary)] mt-2">
+          <p className="text-sm text-[var(--foreground-secondary)] mt-1">
             Start tracking your finances today
           </p>
         </div>
 
         {/* Signup Card */}
-        <div className="glass-card p-8 animate-fade-in-up delay-100">
-          <h2 className="text-2xl font-bold text-[var(--foreground)] mb-6">
+        <div className="glass-card p-4 lg:p-5 animate-fade-in-up delay-100">
+          <h2 className="text-xl sm:text-2xl font-bold text-[var(--foreground)] mb-4">
             Create Account
           </h2>
 
@@ -164,7 +161,7 @@ export default function SignupPage() {
             type="button"
             onClick={handleGoogleSignIn}
             disabled={isGoogleLoading || isSubmitting}
-            className="w-full flex items-center justify-center gap-3 py-4 px-4 rounded-card bg-white text-gray-800 font-medium hover:bg-gray-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed mb-6 border border-gray-200 shadow-sm"
+            className="w-full flex items-center justify-center gap-3 min-h-[44px] py-3 px-4 rounded-card bg-white text-gray-800 font-medium hover:bg-gray-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed mb-4 border border-gray-200 shadow-sm"
           >
             {isGoogleLoading ? (
               <div className="w-5 h-5 border-2 border-gray-300 border-t-gray-800 rounded-pill animate-spin" />
@@ -175,7 +172,7 @@ export default function SignupPage() {
           </button>
 
           {/* Divider */}
-          <div className="relative mb-6">
+          <div className="relative mb-4">
             <div className="absolute inset-0 flex items-center">
               <div className="w-full border-t border-[var(--border-color)]" />
             </div>
@@ -186,9 +183,9 @@ export default function SignupPage() {
             </div>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-5">
+          <form onSubmit={handleSubmit} className="space-y-3">
             <div>
-              <label htmlFor="signup-name" className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">
+              <label htmlFor="signup-name" className="block text-sm font-medium text-[var(--foreground-secondary)] mb-1">
                 Full Name
               </label>
               <div className="relative">
@@ -208,7 +205,7 @@ export default function SignupPage() {
             </div>
 
             <div>
-              <label htmlFor="signup-email" className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">
+              <label htmlFor="signup-email" className="block text-sm font-medium text-[var(--foreground-secondary)] mb-1">
                 Email Address
               </label>
               <div className="relative">
@@ -228,7 +225,7 @@ export default function SignupPage() {
             </div>
 
             <div>
-              <label htmlFor="signup-password" className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">
+              <label htmlFor="signup-password" className="block text-sm font-medium text-[var(--foreground-secondary)] mb-1">
                 Password
               </label>
               <div className="relative">
@@ -257,7 +254,7 @@ export default function SignupPage() {
               
               {/* Password requirements */}
               {password && (
-                <div className="mt-3 space-y-2">
+                <div className="mt-2 space-y-1">
                   {passwordRequirements.map((req, index) => (
                     <div key={index} className="flex items-center gap-2 text-sm">
                       <CheckCircle
@@ -279,7 +276,7 @@ export default function SignupPage() {
             </div>
 
             <div>
-              <label htmlFor="signup-confirm-password" className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">
+              <label htmlFor="signup-confirm-password" className="block text-sm font-medium text-[var(--foreground-secondary)] mb-1">
                 Confirm Password
               </label>
               <div className="relative">
@@ -320,7 +317,7 @@ export default function SignupPage() {
             </button>
           </form>
 
-          <p className="mt-6 text-center text-[var(--foreground-secondary)]">
+          <p className="mt-4 text-center text-[var(--foreground-secondary)]">
             Already have an account?{' '}
             <Link
               href="/login"

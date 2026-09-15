@@ -45,6 +45,7 @@ import {
   QueueContext, RecoveryDecision, REVIEW_SECTIONS, ReviewQueueItem, SectionId,
   buildReviewQueue, queueBadgeLabel, queueCounts, relationBadges, rowLabel, supersededLinks,
 } from '@/lib/review-queue';
+import LoadingScreen from '@/components/LoadingScreen';
 
 const money = (cents: number) => formatMoneyCents(cents);
 
@@ -1456,7 +1457,8 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
 
   // AFTER all hooks — an early return above any hook crashes React with
   // "rendered more hooks than during the previous render" (shipped once; never again).
-  if (authLoading || !isAuthenticated) return null;
+  if (authLoading) return <LoadingScreen />;
+  if (!isAuthenticated) return null;
 
   return (
     <div className="min-h-screen relative">

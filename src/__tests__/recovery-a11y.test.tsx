@@ -110,9 +110,10 @@ describe('FIN-RECOVERY-UI-001 · accessibility and page integrity (R1-R6)', () =
     const errors: unknown[][] = [];
     const spy = jest.spyOn(console, 'error').mockImplementation((...args) => { errors.push(args); });
 
+    // UI spec A2: the wait is the shared LoadingScreen, not a blank page.
     AUTH = { isAuthenticated: false, isLoading: true, user: null };
     const loading = render(<FlowPage />);
-    expect(loading.container).toBeEmptyDOMElement();
+    expect(loading.getByRole('status')).toHaveTextContent('Loading');
     loading.unmount();
 
     AUTH = { isAuthenticated: false, isLoading: false, user: null };
@@ -128,9 +129,10 @@ describe('FIN-RECOVERY-UI-001 · accessibility and page integrity (R1-R6)', () =
     expect(text).not.toMatch(/Rendered more hooks|Rendered fewer hooks|#310|change in the order of Hooks/);
     spy.mockRestore();
 
-    // Structural: EVERY hook is above the early return that made #310 possible.
+    // Structural: EVERY hook is above the early returns that made #310 possible.
     const source = pageSource();
-    const guard = source.indexOf('if (authLoading || !isAuthenticated) return null;');
+    const guard = source.indexOf('if (authLoading) return <LoadingScreen />;');
+    expect(source.indexOf('if (!isAuthenticated) return null;')).toBeGreaterThan(guard);
     expect(guard).toBeGreaterThan(0);
     expect(source.slice(guard)).not.toMatch(/\buse(State|Effect|Memo|Callback|Ref|Context)\s*\(/);
   });

@@ -29,8 +29,9 @@ import { sanitizeAssumedSpend } from '@/lib/profile-settings';
 import { loadOverrides, saveOverrides } from '@/lib/assumption-overrides';
 import * as firestoreService from '@/lib/firestore';
 import { format } from 'date-fns';
-import { TrendingUp, Shield, CreditCard, Wallet } from 'lucide-react';
+import { Shield, CreditCard, Wallet } from 'lucide-react';
 import { SavingsGoal } from '@/types';
+import LoadingScreen from '@/components/LoadingScreen';
 
 // Time period options
 const TIME_PERIODS = [
@@ -198,12 +199,7 @@ export default function ForecastPage() {
 
   if (authLoading || profileLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="bg-pattern" />
-        <div className="animate-pulse-glow w-16 h-16 rounded-card bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] flex items-center justify-center">
-          <TrendingUp className="w-8 h-8 text-white" />
-        </div>
-      </div>
+      <LoadingScreen />
     );
   }
 
