@@ -109,6 +109,28 @@ class Transfers(unittest.TestCase):
             self.pfc("TRANSFER_OUT", "TRANSFER_OUT_OTHER_TRANSFER_OUT"), "a", "chase")
         self.assertEqual(row["type"], "expense")
 
+    def test_schwab_checking_to_brokerage_is_a_transfer_on_both_legs(self):
+        # #184 "Schwab checking->brokerage counted as spend". SYNTHETIC shape: the
+        # whitelisted category Plaid documents for moves into investment accounts.
+        # Real Schwab rows are captured after the first link; the whitelist widens
+        # only on that evidence.
+        out = self.pfc("TRANSFER_OUT", "TRANSFER_OUT_INVESTMENT_AND_RETIREMENT_FUNDS")
+        out["amount"] = 2000.0   # leaves checking
+        inbound = self.pfc("TRANSFER_IN", "TRANSFER_IN_INVESTMENT_AND_RETIREMENT_FUNDS")
+        inbound["amount"] = -2000.0  # arrives in the brokerage
+        chk = plaid_ingest.map_pl_txn(out, "schwab-chk", "bank-transfer")
+        brk = plaid_ingest.map_pl_txn(inbound, "schwab-brk", "other")
+        self.assertEqual((chk["type"], chk["transferDirection"]), ("transfer", "out"))
+        self.assertEqual((brk["type"], brk["transferDirection"]), ("transfer", "in"))
+        self.assertEqual(chk["amount"], brk["amount"])  # the pairer matches on this
+
+    def test_card_payment_is_a_transfer_on_the_card_side_too(self):
+        # #184 "card payment charged twice": the card's credit is the other leg.
+        t = self.pfc("LOAN_PAYMENTS", "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT")
+        t["amount"] = -400.0
+        row = plaid_ingest.map_pl_txn(t, "card", "amex")
+        self.assertEqual((row["type"], row["transferDirection"]), ("transfer", "in"))
+
     def test_atm_cash_is_spending_not_a_transfer(self):
         row = plaid_ingest.map_pl_txn(
             self.pfc("TRANSFER_OUT", "TRANSFER_OUT_WITHDRAWAL"), "a", "chase")
