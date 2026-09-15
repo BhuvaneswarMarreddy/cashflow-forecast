@@ -23,7 +23,7 @@ jest.mock('firebase/functions', () => ({
   },
 }));
 
-import { connectBankWithPlaid, describeConnect, findLinkedInstitution, type LinkedInstitution } from '@/lib/sync-client';
+import { connectBankWithPlaid, describeConnect, describeSync, findLinkedInstitution, repairActions, type LinkedInstitution } from '@/lib/sync-client';
 
 type CreateOpts = Parameters<NonNullable<Window['Plaid']>['create']>[0];
 let link: CreateOpts;
@@ -118,7 +118,7 @@ describe('what the owner is told (#183)', () => {
   it('the Schwab line is on Accounts before Link opens, and Repair is wired to update mode', () => {
     const accounts = readFileSync(join(process.cwd(), 'src/app/accounts/page.tsx'), 'utf8');
     expect(accounts).toContain('At Schwab, tick each account you want. They start unchecked.');
-    expect(accounts).toContain('onClick={() => handleConnectBank(repairItemId)}');
+    expect(accounts).toContain('onClick={() => handleConnectBank(r.itemId)}');
     expect(accounts).toContain('const outcome = describeConnect(result);');
   });
 });
@@ -130,5 +130,27 @@ describe('findLinkedInstitution mirrors the server rule (plaid_ingest.existing_i
     expect(findLinkedInstitution([SCHWAB, legacy], 'ins_56', 'chase')).toBe(legacy);
     expect(findLinkedInstitution([SCHWAB, legacy], 'ins_99', 'Charles Schwab')).toBeNull();
     expect(findLinkedInstitution([SCHWAB, legacy], null, null)).toBeNull();
+  });
+});
+
+describe('a bank whose login expired says so and offers Reconnect (2026-09-15)', () => {
+  const expired = { itemId: 'item-chase-old', institution: 'Chase', linkedAt: '2026-08-06T16:00:08-05:00' };
+
+  it('the refresh summary names it — never "Already up to date" over a dead login', () => {
+    expect(describeSync({ itemsNeedingRepair: [expired] })).toBe('Chase needs you to sign in again');
+    expect(describeSync({ added: 2, itemsNeedingRepair: [expired] })).toBe('2 new transactions · Chase needs you to sign in again');
+  });
+
+  it('one Reconnect per broken connection, keeping what the connect flow offered, no duplicates', () => {
+    const keep = [{ itemId: 'item-schwab', label: 'Repair connection' }];
+    expect(repairActions(keep, { itemsNeedingRepair: [expired, { ...expired }] })).toEqual([
+      { itemId: 'item-schwab', label: 'Repair connection' },
+      { itemId: 'item-chase-old', label: 'Reconnect Chase (linked 2026-08-06)' },
+    ]);
+  });
+
+  it('the link date appears only when two connections at the same bank need telling apart', () => {
+    expect(repairActions([], { itemsNeedingRepair: [expired] })).toEqual([{ itemId: 'item-chase-old', label: 'Reconnect Chase' }]);
+    expect(repairActions([], {})).toEqual([]);
   });
 });

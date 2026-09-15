@@ -123,6 +123,22 @@ def exchange_public_token(client_id: str, secret: str, public_token: str,
     return out["access_token"], out["item_id"]
 
 
+# Plaid error codes that only the owner can fix, by signing in again through Link's
+# update mode. Everything else (rate limits, institution outages) heals on its own.
+REPAIR_CODES = ("ITEM_LOGIN_REQUIRED",)
+
+
+def repair_entry(item_id: str, item: dict, err: Exception) -> dict | None:
+    """The Item to offer "Reconnect" for, or None. _post raises
+    'plaid <path>: <error_code> <message>', so the code is matched in that text.
+    Ids, names and the link date only — never a token (two Chase Items must be told
+    apart, and linkedAt is what does it)."""
+    if not any(code in str(err) for code in REPAIR_CODES):
+        return None
+    return {"itemId": item_id, "institution": item.get("institution") or "",
+            "linkedAt": item.get("linkedAt") or ""}
+
+
 def existing_item_for(items: dict, institution_id: str, institution: str) -> str | None:
     """#183: the Item already linked for this institution, or None.
 
@@ -467,6 +483,7 @@ async def run_plaid_sync(db, uid: str, client_id: str, secret: str,
     # them, because existing_ids/pending_seen are global, not per-item.
     walked_whole_history: list[bool] = []
     item_errors: list[str] = []
+    needs_repair: list[dict] = []
     raw_by_id: dict[str, dict] = {}
     institution_by_account: dict[str, str] = {}
     for item_id, item in items.items():
@@ -490,6 +507,9 @@ async def run_plaid_sync(db, uid: str, client_id: str, secret: str,
         except Exception as e:  # one dead bank must not kill the others
             item_errors.append(f"{label}: {e}")
             log(f"item {label} failed: {e}")
+            repair = repair_entry(item_id, item, e)
+            if repair:
+                needs_repair.append(repair)
 
     matched, unmatched, ambiguous = sync_core.resolve_matches(adapted_accounts, app_accounts)
     if ambiguous:
@@ -690,6 +710,9 @@ async def run_plaid_sync(db, uid: str, client_id: str, secret: str,
         "untrustedBalances": balance_skips,
         "reanchored": reanchored,
         "itemErrors": item_errors,
+        # A connection the owner must sign in to again. Without this the only trace of
+        # an expired bank login was a log line: its accounts silently stop updating.
+        "itemsNeedingRepair": needs_repair,
         "error": "" if not item_errors or len(item_errors) < len(items) else
                  "; ".join(item_errors),
     }
