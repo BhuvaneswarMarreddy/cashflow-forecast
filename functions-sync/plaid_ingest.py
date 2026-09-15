@@ -100,6 +100,9 @@ def link_token_payload(client_id: str, secret: str, uid: str,
     }
     if access_token:
         body["access_token"] = access_token  # update mode: no products key
+        # #183: Repair is also how the owner changes WHICH accounts are shared (Schwab
+        # starts every account unchecked). Without this, update mode only re-auths.
+        body["update"] = {"account_selection_enabled": True}
     else:
         body["products"] = ["transactions"]
         body["transactions"] = {"days_requested": DAYS_REQUESTED}
@@ -118,6 +121,49 @@ def exchange_public_token(client_id: str, secret: str, public_token: str,
     out = post("/item/public_token/exchange",
                {"client_id": client_id, "secret": secret, "public_token": public_token})
     return out["access_token"], out["item_id"]
+
+
+def existing_item_for(items: dict, institution_id: str, institution: str) -> str | None:
+    """#183: the Item already linked for this institution, or None.
+
+    One Item per institution: a second Link for the same bank is a second login to
+    the same accounts, burns one of the 10 lifetime Trial slots, and (Schwab) risks
+    duplicate accounts. Matched by Plaid's institution_id; an Item linked before ids
+    were stored matches by name instead, case-insensitively."""
+    name = (institution or "").strip().lower()
+    for item_id, item in (items or {}).items():
+        stored_id = item.get("institutionId")
+        if stored_id:
+            if institution_id and stored_id == institution_id:
+                return item_id
+        elif name and (item.get("institution") or "").strip().lower() == name:
+            return item_id
+    return None
+
+
+def linked_institutions(items: dict) -> list[dict]:
+    """What the client may know about linked Items: ids and names, never a token."""
+    return [{"itemId": item_id, "institution": item.get("institution") or "",
+             "institutionId": item.get("institutionId") or ""}
+            for item_id, item in (items or {}).items()]
+
+
+def exchange_new_item(client_id: str, secret: str, items: dict, public_token: str,
+                      institution: str, institution_id: str, post=_post):
+    """("exists", item_id) when this institution is already linked — checked BEFORE
+    the exchange, so no access token is ever minted for a duplicate — else
+    ("linked", item_id, entry) with the entry to store in meta/plaid."""
+    existing = existing_item_for(items, institution_id, institution)
+    if existing:
+        return ("exists", existing)
+    access_token, item_id = exchange_public_token(client_id, secret, public_token, post)
+    return ("linked", item_id, {
+        "accessToken": access_token,
+        "institution": institution,
+        "institutionId": institution_id,
+        "cursor": "",
+        "linkedAt": sync_core.now_iso(),
+    })
 
 
 def remove_item(client_id: str, secret: str, access_token: str, post=_post) -> None:
@@ -242,8 +288,12 @@ def map_pl_txn(t: dict, account_id: str, provider: str):
 def adapt_pl_account(acct: dict, institution: str) -> dict:
     """Plaid account -> the shape sync_core's matcher and balance guards read.
     Balance sign converted to Monarch's liabilities-negative convention so
-    opening_balance_for() keeps its one definition. balance/get is a live pull,
-    so the balance's own date is NOW."""
+    opening_balance_for() keeps its one definition.
+
+    #183 / invariant 8: the balance is dated by the BANK. Institutions whose balance
+    is not real-time send balances.last_updated_datetime; anchoring such a figure at
+    "now" goes blind to every row between the bank's stamp and today. Absent -> now,
+    which is correct for a live pull."""
     balances = acct.get("balances") or {}
     current = balances.get("current")
     if current is not None and str(acct.get("type")) in DEBT_PLAID_TYPES:
@@ -254,7 +304,7 @@ def adapt_pl_account(acct: dict, institution: str) -> dict:
         "displayName": name,
         "mask": acct.get("mask"),
         "currentBalance": current,
-        "displayLastUpdatedAt": sync_core.now_iso(),
+        "displayLastUpdatedAt": balances.get("last_updated_datetime") or sync_core.now_iso(),
     }
 
 

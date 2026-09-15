@@ -141,6 +141,78 @@ class AdaptAccount(unittest.TestCase):
         self.assertIn("Chase", a["displayName"])
 
 
+class BankDatedBalance(unittest.TestCase):
+    """#183 / invariant 8: a balance is dated by the bank, not by our sync clock."""
+
+    def test_last_updated_datetime_dates_the_anchor(self):
+        raw = {"account_id": "b1", "name": "Schwab Checking", "type": "depository",
+               "balances": {"current": 5000.0, "last_updated_datetime": "2026-09-10T15:00:00Z"}}
+        adapted = plaid_ingest.adapt_pl_account(raw, "Charles Schwab")
+        self.assertEqual(adapted["displayLastUpdatedAt"], "2026-09-10T15:00:00Z")
+        # the day after the bank's own stamp — not tomorrow relative to the sync
+        self.assertEqual(sync_core.anchor_when(adapted, "2026-09-15"), "2026-09-11")
+        fields = plaid_ingest.new_account_fields(adapted, raw, "Charles Schwab", "2026-09-15")
+        self.assertEqual(fields["openingDate"], "2026-09-11")
+
+    def test_absent_stamp_means_a_live_balance_dated_now(self):
+        raw = {"account_id": "b2", "name": "Checking", "type": "depository",
+               "balances": {"current": 10.0, "last_updated_datetime": None}}
+        stamp = plaid_ingest.adapt_pl_account(raw, "Chase")["displayLastUpdatedAt"]
+        self.assertTrue(stamp.startswith(sync_core.now_iso()[:10]))
+
+
+class OneItemPerInstitution(unittest.TestCase):
+    """#183: a second Link for a connected bank is refused before any token exists."""
+
+    ITEMS = {
+        "item-schwab": {"accessToken": "tok-1", "institution": "Charles Schwab",
+                        "institutionId": "ins_11"},
+        "item-legacy": {"accessToken": "tok-2", "institution": "Chase"},  # linked before ids
+    }
+
+    def test_same_institution_id_is_the_existing_item(self):
+        self.assertEqual(plaid_ingest.existing_item_for(self.ITEMS, "ins_11", "Schwab (renamed)"), "item-schwab")
+
+    def test_legacy_item_without_an_id_matches_by_name(self):
+        self.assertEqual(plaid_ingest.existing_item_for(self.ITEMS, "ins_56", "chase"), "item-legacy")
+
+    def test_an_item_with_an_id_is_never_matched_by_name_alone(self):
+        # Two different institutions can share a display name; the id is the truth.
+        self.assertIsNone(plaid_ingest.existing_item_for(self.ITEMS, "ins_99", "Charles Schwab"))
+
+    def test_a_new_institution_is_not_matched(self):
+        self.assertIsNone(plaid_ingest.existing_item_for(self.ITEMS, "ins_3", "Bank of America"))
+
+    def test_second_exchange_is_refused_and_no_token_is_exchanged(self):
+        calls = []
+        outcome = plaid_ingest.exchange_new_item(
+            "cid", "sec", self.ITEMS, "public-sandbox-x", "Charles Schwab", "ins_11",
+            post=lambda path, body: calls.append(path) or {})
+        self.assertEqual(outcome, ("exists", "item-schwab"))
+        self.assertEqual(calls, [])
+
+    def test_first_exchange_stores_the_institution_id_on_the_item(self):
+        calls = []
+
+        def post(path, body):
+            calls.append(path)
+            return {"access_token": "access-new", "item_id": "item-boa"}
+
+        status, item_id, entry = plaid_ingest.exchange_new_item(
+            "cid", "sec", self.ITEMS, "public-sandbox-y", "Bank of America", "ins_3", post=post)
+        self.assertEqual((status, item_id), ("linked", "item-boa"))
+        self.assertEqual(calls, ["/item/public_token/exchange"])
+        self.assertEqual(entry["institutionId"], "ins_3")
+        self.assertEqual(entry["institution"], "Bank of America")
+        self.assertEqual(entry["cursor"], "")
+
+    def test_the_client_list_never_carries_a_token(self):
+        listed = plaid_ingest.linked_institutions(self.ITEMS)
+        self.assertEqual({x["itemId"] for x in listed}, {"item-schwab", "item-legacy"})
+        self.assertNotIn("tok-1", repr(listed))
+        self.assertNotIn("accessToken", repr(listed))
+
+
 class LinkToken(unittest.TestCase):
     def test_new_link_requests_730_days_of_transactions(self):
         body = plaid_ingest.link_token_payload("cid", "sec", "uid1")
@@ -153,6 +225,11 @@ class LinkToken(unittest.TestCase):
         body = plaid_ingest.link_token_payload("cid", "sec", "uid1", access_token="tok")
         self.assertEqual(body["access_token"], "tok")
         self.assertNotIn("products", body)
+        # #183: Repair is how the owner ticks more accounts (Schwab starts them unchecked).
+        self.assertEqual(body["update"], {"account_selection_enabled": True})
+
+    def test_new_link_does_not_send_update_options(self):
+        self.assertNotIn("update", plaid_ingest.link_token_payload("cid", "sec", "uid1"))
 
 
 class AutoCreateAccounts(unittest.TestCase):
