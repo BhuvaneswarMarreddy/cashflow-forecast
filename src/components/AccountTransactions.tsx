@@ -87,6 +87,8 @@ export default function AccountTransactions({ account, transactions }: AccountTr
         return <Wallet className="w-5 h-5" />;
       case 'personal_loan':
         return <FileText className="w-5 h-5" />;
+      case 'investment':
+        return <TrendingUp className="w-5 h-5" />;
     }
   };
 

@@ -35,7 +35,10 @@ export type TransactionType = 'expense' | 'income' | 'transfer';
 // identically and the receiving side looks like money leaving.
 export type TransferDirection = 'in' | 'out';
 
-export type AccountType = 'credit_card' | 'debit_card' | 'bank_account' | 'cash' | 'personal_loan';
+// `investment` (#182): a brokerage account. Net worth only — never cash, runway or
+// "can I afford this". isCashAccount / calculateCurrentCash are allowlists, so it is
+// excluded by construction; isInvestmentAccount is its one predicate.
+export type AccountType = 'credit_card' | 'debit_card' | 'bank_account' | 'cash' | 'personal_loan' | 'investment';
 
 // ============================================
 // Planned Transaction Types (Financial Todo)
@@ -625,6 +628,7 @@ export const ACCOUNT_TYPES: { value: AccountType; label: string }[] = [
   { value: 'bank_account', label: 'Bank Account' },
   { value: 'cash', label: 'Cash' },
   { value: 'personal_loan', label: 'Personal Loan' },
+  { value: 'investment', label: 'Investment' },
 ];
 
 export const EXPENSE_CATEGORIES: { value: ExpenseCategory; label: string; icon: string }[] = [

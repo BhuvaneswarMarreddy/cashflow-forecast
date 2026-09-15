@@ -174,8 +174,10 @@ users/
     - metadata: { isOnboarded, lastLoginAt }
 
     accounts/            (subcollection)
-      {accountId}/       name, type: 'bank_account'|'credit_card'|'personal_loan',
-                         balance, creditLimit?, apr?, dueDate?, paymentFromAccountId?
+      {accountId}/       name, type: 'bank_account'|'debit_card'|'cash'|'credit_card'|
+                               'personal_loan'|'investment',
+                         openingBalance, openingDate?, creditLimit?, apr?, dueDate?, paymentFromAccountId?
+                         ('investment' = brokerage, #182: net worth only, never cash/runway)
 
     income/              (subcollection)
       {incomeId}/        name, amount, frequency, payDate, endDate?, remainingPayments?

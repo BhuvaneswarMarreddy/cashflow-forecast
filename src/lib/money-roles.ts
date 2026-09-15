@@ -123,9 +123,9 @@ export function meaningsInRole(role: MoneyRole): FinancialMeaning[] {
  *
  * `saved` and `invested` are in the vocabulary because they are real things
  * people do with money, but the data model cannot yet see either: there is no
- * savings or investment account type (`AccountType` is credit_card | debit_card
- * | bank_account | cash | personal_loan), so a transfer into savings is
- * indistinguishable from any other move between your own accounts.
+ * savings account type, and although `investment` exists (#182, a brokerage held
+ * for net worth), no meaning maps a move into it, so a transfer into savings or a
+ * brokerage is still indistinguishable from any other move between your own accounts.
  *
  * Naming that here, and testing it, is the honest alternative to inventing a
  * detector — the same choice `chit_fund_payout` documents for itself.

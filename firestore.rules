@@ -115,11 +115,12 @@ service cloud.firestore {
         // Python sync functions use the Admin SDK and bypass rules entirely.
         //
         // `personal_loan` is the fifth AccountType (onboarding creates one). Omitting
-        // it denied every loan account for the same silent reason.
+        // it denied every loan account for the same silent reason. `investment` (#182) is
+        // the sixth: a brokerage, net worth only.
         allow create: if isOwner(userId) &&
           request.resource.data.keys().hasAll(['name', 'type', 'provider', 'openingBalance', 'isActive']) &&
           isValidString(request.resource.data.name, 1, 100) &&
-          request.resource.data.type in ['credit_card', 'debit_card', 'bank_account', 'cash', 'personal_loan'] &&
+          request.resource.data.type in ['credit_card', 'debit_card', 'bank_account', 'cash', 'personal_loan', 'investment'] &&
           request.resource.data.openingBalance is number;
         
         // Users can update their accounts

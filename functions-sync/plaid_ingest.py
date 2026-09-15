@@ -301,8 +301,10 @@ PLAID_TYPE_TO_APP = {
     "credit": "credit_card",
     "loan": "personal_loan",
     "depository": "bank_account",
-    "investment": "bank_account",   # app has no brokerage type yet
-    "brokerage": "bank_account",
+    # #182: a brokerage is `investment` — net worth only. As bank_account its whole
+    # portfolio value was summed into cash and runway (calculateCurrentCash).
+    "investment": "investment",
+    "brokerage": "investment",
 }
 
 # institution keyword -> (provider, colour) from PAYMENT_METHODS in src/types.
@@ -338,6 +340,11 @@ def new_account_fields(adapted: dict, raw: dict, institution: str, today: str) -
     name = (raw.get("official_name") or raw.get("name") or "Account").strip()
     balance = adapted.get("currentBalance")
     opening = sync_core.opening_balance_for(app_type, float(balance)) if balance is not None else 0.0
+    # #182: a brokerage with no balance from Plaid stays UNANCHORED (no openingDate), so
+    # every screen says "Not anchored" instead of quoting $0.00 as a measured value.
+    # ponytail: investment only, per #210 (cash rules unchanged); depository always
+    # carries balances.current, so widen this if a cash account ever arrives without one.
+    unmeasured = balance is None and app_type == "investment"
     return {
         "name": f"{institution} {name}".strip() if institution.lower() not in name.lower() else name,
         "type": app_type,
@@ -345,7 +352,7 @@ def new_account_fields(adapted: dict, raw: dict, institution: str, today: str) -
         "color": color,
         "lastFourDigits": str(raw.get("mask") or "") or None,
         "openingBalance": opening,
-        "openingDate": sync_core.anchor_when(adapted, today),
+        "openingDate": None if unmeasured else sync_core.anchor_when(adapted, today),
         "isActive": True,
         "createdBy": SOURCE,
     }

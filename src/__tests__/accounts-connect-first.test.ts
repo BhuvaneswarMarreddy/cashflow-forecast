@@ -31,10 +31,12 @@ describe('Accounts — connect first (#200)', () => {
     expect(code).toContain('None linked');
   });
 
-  it('groups the list Cash | Credit | Other, and every account lands in exactly one group', () => {
+  it('groups the list Cash | Credit | Investments | Other, and every account lands in exactly one group', () => {
     expect(code).toContain("{ key: 'cash', label: 'Cash', accounts: derivedAccounts.filter(isCashAccount) }");
     expect(code).toContain("{ key: 'credit', label: 'Credit', accounts: derivedAccounts.filter((a) => a.type === 'credit_card') }");
-    expect(code).toContain("{ key: 'other', label: 'Other', accounts: derivedAccounts.filter((a) => !isCashAccount(a) && a.type !== 'credit_card') }");
+    // #182: a brokerage is its own group, never Cash and never lumped into Other.
+    expect(code).toContain("{ key: 'investments', label: 'Investments', accounts: derivedAccounts.filter(isInvestmentAccount) }");
+    expect(code).toContain("{ key: 'other', label: 'Other', accounts: derivedAccounts.filter((a) => !isCashAccount(a) && !isInvestmentAccount(a) && a.type !== 'credit_card') }");
   });
 
   it('an unanchored row says "Not anchored" instead of printing net movement as a balance', () => {

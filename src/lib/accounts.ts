@@ -225,6 +225,12 @@ export function unanchoredPhrase(accounts: readonly PaymentAccount[]): string | 
 export const isCashAccount = (a: PaymentAccount) =>
   a.type === 'bank_account' || a.type === 'debit_card' || a.type === 'cash';
 
+/**
+ * #182: a brokerage account. Its balance is net worth only. It is NOT cash: a portfolio
+ * counted as cash made runway and "can I afford this" overstate by its whole value.
+ */
+export const isInvestmentAccount = (a: PaymentAccount) => a.type === 'investment';
+
 /** Every account whose balance is money the owner OWES. */
 export const isDebtAccount = (a: PaymentAccount) =>
   a.type === 'credit_card' || a.type === 'personal_loan';
@@ -238,7 +244,7 @@ export const isDebtAccount = (a: PaymentAccount) =>
  * decided upstream by the owner's policy and is not re-litigated here.
  */
 export function netWorthOf(accounts: readonly PaymentAccount[]): number {
-  const cash = accounts.filter(isCashAccount).reduce((s, a) => s + currentOf(a), 0);
+  const held = accounts.filter((a) => isCashAccount(a) || isInvestmentAccount(a)).reduce((s, a) => s + currentOf(a), 0);
   const debt = accounts.filter(isDebtAccount).reduce((s, a) => s + currentOf(a), 0);
-  return cash - debt;
+  return held - debt;
 }

@@ -55,6 +55,8 @@ export interface AccountsProvenance {
 const CASH_TYPES: AccountType[] = ['bank_account', 'debit_card', 'cash'];
 const CARD_TYPES: AccountType[] = ['credit_card'];
 const DEBT_TYPES: AccountType[] = ['credit_card', 'personal_loan'];
+/** #182: net worth only — never in BankBalance. */
+const INVESTMENT_TYPES: AccountType[] = ['investment'];
 
 const STALE_AFTER_HOURS = 36;
 
@@ -174,6 +176,7 @@ export function accountsSummaryProvenance(
   const cash = by(CASH_TYPES);
   const cards = by(CARD_TYPES);
   const debts = by(DEBT_TYPES);
+  const investments = by(INVESTMENT_TYPES);
 
   const bankBalance = sum(cash);
   const creditUsed = sum(cards);
@@ -184,7 +187,7 @@ export function accountsSummaryProvenance(
     metric('BankBalance', bankBalance, cash, not(CASH_TYPES), shared),
     metric('CreditUsed', creditUsed, cards, not(CARD_TYPES), shared),
     metric('TotalDebt', totalDebt, debts, not(DEBT_TYPES), shared),
-    metric('NetWorth', bankBalance - totalDebt, [...cash, ...debts], accounts.filter((a) => ![...CASH_TYPES, ...DEBT_TYPES].includes(a.type)), shared),
+    metric('NetWorth', bankBalance + sum(investments) - totalDebt, [...cash, ...investments, ...debts], accounts.filter((a) => ![...CASH_TYPES, ...INVESTMENT_TYPES, ...DEBT_TYPES].includes(a.type)), shared),
     metric('AvailableCredit', creditLimit - creditUsed, cards.filter((a) => a.creditLimit != null), cards.filter((a) => a.creditLimit == null), shared),
     metric('AccountCount', accounts.length, accounts, [], shared),
   ];
