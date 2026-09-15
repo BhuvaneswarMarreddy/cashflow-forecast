@@ -10,7 +10,7 @@
 
 import { test, expect } from '@playwright/test';
 
-const ROUTES = ['home', 'accounts', 'activity', 'bills', 'flow', 'forecast'];
+const ROUTES = ['home', 'accounts', 'activity', 'bills', 'flow', 'forecast', 'settings'];
 const WIDTHS = [
   { name: 'phone', width: 390, height: 844 },
   { name: 'desktop', width: 1280, height: 800 },
