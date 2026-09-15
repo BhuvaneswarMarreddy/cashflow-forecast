@@ -22,7 +22,7 @@ import { PAYMENT_METHODS, ACCOUNT_TYPES, PaymentAccount, AccountType, PaymentMet
 import { withDerivedBalances, monthlyAverages, calculateCurrentCash } from '@/lib/forecast';
 import { currentOf, isCashAccount, isDebtAccount, isInvestmentAccount, isUnanchored, openingAnchor, balanceCaption } from '@/lib/accounts';
 import ReconcileSheet from '@/components/ReconcileSheet';
-import { syncNow, describeSync, connectBankWithPlaid, describeConnect } from '@/lib/sync-client';
+import { syncNow, describeSync, connectBankWithPlaid, describeConnect, repairActions, type RepairAction } from '@/lib/sync-client';
 import { useAccountsObservability } from '@/lib/obs/useAccountsObservability';
 import { safeSyncResult } from '@/lib/obs/sync-metadata';
 import {
@@ -113,8 +113,9 @@ export default function AccountsPage() {
   const [reconcileForAccount, setReconcileForAccount] = useState<PaymentAccount | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
-  // #183: the connection to reopen in update mode — a duplicate bank or zero shared accounts.
-  const [repairItemId, setRepairItemId] = useState<string | null>(null);
+  // Connections to reopen in update mode: a duplicate bank, zero shared accounts (#183),
+  // or a bank whose login expired (the sync reports those).
+  const [repairs, setRepairs] = useState<RepairAction[]>([]);
   const [syncErr, setSyncErr] = useState(false);
   
   const [accountForm, setAccountForm] = useState({
@@ -163,14 +164,15 @@ export default function AccountsPage() {
   // First data arrives on the next refresh (Plaid needs a moment to prepare history
   // after linking), so one is kicked off after.
   const handleConnectBank = async (itemId?: string) => {
-    setSyncErr(false); setSyncMsg(null); setRepairItemId(null);
+    setSyncErr(false); setSyncMsg(null); setRepairs([]);
     try {
       const result = await connectBankWithPlaid(itemId);
       if (result === null) return; // user closed the popup — say nothing
       const outcome = describeConnect(result);
+      const offered = outcome.repairItemId ? [{ itemId: outcome.repairItemId, label: 'Repair connection' }] : [];
       setSyncMsg(outcome.message);
-      setRepairItemId(outcome.repairItemId);
-      if (outcome.refresh) await handleRefresh();
+      setRepairs(offered);
+      if (outcome.refresh) await handleRefresh(offered);
     } catch (e) {
       setSyncErr(true);
       setSyncMsg(e instanceof Error ? e.message : 'Could not connect the bank.');
@@ -179,13 +181,14 @@ export default function AccountsPage() {
 
   // Pulls straight from the banks (10-20s), then reloads so every derived number
   // on the page reflects the new rows and re-anchored balances.
-  const handleRefresh = async () => {
+  const handleRefresh = async (keep: RepairAction[] = []) => {
     setSyncing(true); setSyncErr(false); setSyncMsg('Contacting your banks…');
     obs.trackRefreshClicked();
     try {
       const r = await syncNow();
       setSyncErr(Boolean(r.error));
       setSyncMsg(describeSync(r));
+      setRepairs(repairActions(keep, r));
       // Counters only — safeSyncResult() strips everything the callable did not
       // already whitelist, and would strip an access URL if one ever appeared.
       obs.trackRefreshResult({ ok: !r.error, counts: safeSyncResult(r as Record<string, unknown>).counters });
@@ -442,7 +445,7 @@ export default function AccountsPage() {
               Import CSV
             </button>
             <button
-              onClick={handleRefresh}
+              onClick={() => handleRefresh()}
               disabled={syncing}
               aria-label="Refresh balances and transactions from your banks"
               title={syncing ? 'Refreshing…' : 'Refresh from banks'}
@@ -463,14 +466,19 @@ export default function AccountsPage() {
                 {syncMsg}
               </p>
             )}
-          {repairItemId && (
-            <button
-              onClick={() => handleConnectBank(repairItemId)}
-              disabled={syncing}
-              className="btn-secondary min-h-[44px] px-4 text-sm disabled:opacity-60"
-            >
-              Repair connection
-            </button>
+          {repairs.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {repairs.map((r) => (
+                <button
+                  key={r.itemId}
+                  onClick={() => handleConnectBank(r.itemId)}
+                  disabled={syncing}
+                  className="btn-secondary min-h-[44px] px-4 text-sm disabled:opacity-60"
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
           )}
         </div>
 

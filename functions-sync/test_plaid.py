@@ -235,6 +235,33 @@ class OneItemPerInstitution(unittest.TestCase):
         self.assertNotIn("accessToken", repr(listed))
 
 
+class ExpiredLogins(unittest.TestCase):
+    """2026-09-15: a Chase Item failed every sync with ITEM_LOGIN_REQUIRED and the
+    only trace was a log line — its accounts silently stopped updating."""
+
+    ITEM = {"accessToken": "access-secret-token", "institution": "Chase", "linkedAt": "2026-08-06T16:00:08-05:00"}
+
+    def test_an_expired_login_is_offered_for_repair_without_the_token(self):
+        err = RuntimeError("plaid /accounts/balance/get: ITEM_LOGIN_REQUIRED the login details of this item have changed")
+        entry = plaid_ingest.repair_entry("item-chase-old", self.ITEM, err)
+        self.assertEqual(entry, {"itemId": "item-chase-old", "institution": "Chase", "linkedAt": "2026-08-06T16:00:08-05:00"})
+        self.assertNotIn("access-secret-token", repr(entry))
+
+    def test_errors_that_heal_on_their_own_are_not_repairs(self):
+        for text in ("plaid /transactions/sync: RATE_LIMIT_EXCEEDED slow down",
+                     "plaid /accounts/balance/get: INSTITUTION_DOWN try later",
+                     "plaid /accounts/balance/get: HTTP 500"):
+            self.assertIsNone(plaid_ingest.repair_entry("i", self.ITEM, RuntimeError(text)))
+
+    def test_the_sync_records_repairs_and_sync_now_returns_them(self):
+        import pathlib
+        here = pathlib.Path(__file__).parent
+        ingest = (here / "plaid_ingest.py").read_text()
+        self.assertIn("repair = repair_entry(item_id, item, e)", ingest)
+        self.assertIn('"itemsNeedingRepair": needs_repair,', ingest)
+        self.assertIn('"itemsNeedingRepair"', (here / "main.py").read_text())
+
+
 class LinkToken(unittest.TestCase):
     def test_new_link_requests_730_days_of_transactions(self):
         body = plaid_ingest.link_token_payload("cid", "sec", "uid1")

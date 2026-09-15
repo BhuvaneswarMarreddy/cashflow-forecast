@@ -8,6 +8,8 @@ export interface SyncResult {
   pendingCleared?: number;
   reanchored?: string[];
   unmatchedAccounts?: string[];
+  /** Connections whose bank login expired: only the owner can fix these, in Link's update mode. */
+  itemsNeedingRepair?: { itemId: string; institution: string; linkedAt?: string }[];
   lastSuccess?: string;
   error?: string;
 }
@@ -222,6 +224,26 @@ export async function unlinkAllBanks(): Promise<number> {
   return ((res.data ?? {}) as { removed?: number }).removed ?? 0;
 }
 
+/** One Reconnect button per connection that needs it. */
+export interface RepairAction { itemId: string; label: string }
+
+/**
+ * The Reconnect buttons after a refresh: whatever the connect flow already offered,
+ * plus every connection the sync found with an expired login, once each. Two Items at
+ * the same bank are labelled by link date, so the owner reconnects the broken one.
+ */
+export function repairActions(keep: readonly RepairAction[], r: SyncResult): RepairAction[] {
+  const byId = new Map(keep.map((a) => [a.itemId, a]));
+  const sameBank = (name: string) => (r.itemsNeedingRepair ?? []).filter((i) => i.institution === name).length > 1;
+  for (const i of r.itemsNeedingRepair ?? []) {
+    if (byId.has(i.itemId)) continue;
+    const name = i.institution || 'bank';
+    const when = sameBank(i.institution) && i.linkedAt ? ` (linked ${i.linkedAt.slice(0, 10)})` : '';
+    byId.set(i.itemId, { itemId: i.itemId, label: `Reconnect ${name}${when}` });
+  }
+  return [...byId.values()];
+}
+
 /** Plain-English summary of what a refresh actually did. */
 export function describeSync(r: SyncResult): string {
   if (r.error) return r.error;
@@ -230,6 +252,8 @@ export function describeSync(r: SyncResult): string {
   if (r.enriched) bits.push(`${r.enriched} updated`);
   if (r.pendingLive) bits.push(`${r.pendingLive} pending`);
   if (r.reanchored?.length) bits.push(`${r.reanchored.length} balance${r.reanchored.length === 1 ? '' : 's'} refreshed`);
+  // Said even when nothing else happened: "Already up to date" over a dead login is a lie.
+  for (const i of r.itemsNeedingRepair ?? []) bits.push(`${i.institution || 'A bank'} needs you to sign in again`);
   if (!bits.length) return 'Already up to date';
   return bits.join(' · ');
 }

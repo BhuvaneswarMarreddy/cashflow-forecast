@@ -311,6 +311,6 @@ def sync_now(req: https_fn.CallableRequest) -> dict:
     # Only what the button needs to render; never echo credentials.
     return {k: status.get(k) for k in
             ("added", "enriched", "pendingLive", "pendingCleared", "reanchored",
-             "unmatchedAccounts", "createdAccounts", "lastSuccess", "error")}
+             "unmatchedAccounts", "createdAccounts", "itemsNeedingRepair", "lastSuccess", "error")}
 
 
