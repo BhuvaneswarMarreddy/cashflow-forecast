@@ -300,3 +300,31 @@ describe('buildSnapshot — sets process.env.TZ from the owner\'s setting before
     expect(tzSeenByFirstDate(ledgerAt('Asia/Kolkata'))).toBe('Asia/Kolkata');
   });
 });
+
+describe('#182 — a brokerage balance never reaches the phone as cash', () => {
+  const account = (over: Partial<PaymentAccount> & { id: string }): PaymentAccount => ({
+    name: over.id, type: 'bank_account', provider: 'bank-transfer', color: '#000000',
+    isActive: true, openingBalance: 0, openingDate: '2026-01-01', ...over,
+  });
+  const checking = account({ id: 'chk', openingBalance: 5000 });
+  const brokerage = account({ id: 'brk', name: 'Schwab Brokerage', type: 'investment', provider: 'other', openingBalance: 80000 });
+  const ledger = (accounts: PaymentAccount[]): Ledger => ({
+    accounts, transactions: [], incomeSources: [], reviews: {}, bills: [], goals: [],
+    safetyThreshold: 500, includePending: false, assumedMonthlySpend: 2500,
+    lastBankSyncAt: null, rules: [], timezone: 'America/Chicago',
+  });
+  const realTZ = process.env.TZ;
+  afterEach(() => { process.env.TZ = realTZ; });
+
+  it('$5,000 checking + $80,000 investment → cashCents 500000 and the same runway as checking alone', () => {
+    const alone = buildSnapshot(ledger([checking])).snapshot;
+    const both = buildSnapshot(ledger([checking, brokerage])).snapshot;
+    expect(both.cashCents).toBe(500_000);
+    expect(both.runway).toEqual(alone.runway);
+  });
+
+  it('maps to the phone kind "investment", which its totalCash excludes, never the "checking" fallback', () => {
+    expect(mapAccount(brokerage).kind).toBe('investment');
+    expect(mapAccount(brokerage).balanceCents).toBe(8_000_000);
+  });
+});

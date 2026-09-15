@@ -135,7 +135,7 @@ export interface FirestorePlannedTransaction {
 export interface FirestoreAccount {
   id?: string;
   name: string;
-  type: 'credit_card' | 'debit_card' | 'bank_account' | 'cash' | 'personal_loan';
+  type: 'credit_card' | 'debit_card' | 'bank_account' | 'cash' | 'personal_loan' | 'investment';
   provider: string;
   openingBalance: number;
   creditLimit?: number;

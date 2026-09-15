@@ -20,7 +20,7 @@ import DebtPlannerPanel from '@/components/DebtPlannerPanel';
 import { UnanchoredNote } from '@/components/UnanchoredNote';
 import { PAYMENT_METHODS, ACCOUNT_TYPES, PaymentAccount, AccountType, PaymentMethod, CategoryBudget } from '@/types';
 import { withDerivedBalances, monthlyAverages, calculateCurrentCash } from '@/lib/forecast';
-import { currentOf, isCashAccount, isDebtAccount, isUnanchored, openingAnchor, balanceCaption } from '@/lib/accounts';
+import { currentOf, isCashAccount, isDebtAccount, isInvestmentAccount, isUnanchored, openingAnchor, balanceCaption } from '@/lib/accounts';
 import ReconcileSheet from '@/components/ReconcileSheet';
 import { syncNow, describeSync, connectBankWithPlaid } from '@/lib/sync-client';
 import { useAccountsObservability } from '@/lib/obs/useAccountsObservability';
@@ -378,11 +378,13 @@ export default function AccountsPage() {
   const totalBankBalance = calculateCurrentCash(derivedAccounts);
   const totalDebt = derivedAccounts.filter(isDebtAccount).reduce((sum, a) => sum + currentOf(a), 0);
   const creditUtilization = totalCreditLimit > 0 ? Math.round((totalCreditUsed / totalCreditLimit) * 100) : 0;
-  // #200: Cash | Credit | Other. Every account lands in exactly one group.
+  // #200: Cash | Credit | Investments | Other. Every account lands in exactly one group.
+  // #182: Investments are net worth only — never in the Cash card above or in runway.
   const accountGroups = [
     { key: 'cash', label: 'Cash', accounts: derivedAccounts.filter(isCashAccount) },
     { key: 'credit', label: 'Credit', accounts: derivedAccounts.filter((a) => a.type === 'credit_card') },
-    { key: 'other', label: 'Other', accounts: derivedAccounts.filter((a) => !isCashAccount(a) && a.type !== 'credit_card') },
+    { key: 'investments', label: 'Investments', accounts: derivedAccounts.filter(isInvestmentAccount) },
+    { key: 'other', label: 'Other', accounts: derivedAccounts.filter((a) => !isCashAccount(a) && !isInvestmentAccount(a) && a.type !== 'credit_card') },
   ];
   // A drag inside one group reorders only that group's slots in the full order.
   const reorderWithinGroup = (groupIds: string[]) => {

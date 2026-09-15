@@ -9,7 +9,7 @@
 import * as XLSX from 'xlsx';
 import { withDerivedBalances } from '@/lib/forecast';
 import { PaymentAccount, Transaction, IncomeSource, InflowReview, SavingsGoal, DebtPayoffPlan, UserProfile } from '@/types';
-import { currentOf, balanceCaption, unanchoredPhrase } from '@/lib/accounts';
+import { currentOf, balanceCaption, unanchoredPhrase, isCashAccount, isInvestmentAccount } from '@/lib/accounts';
 import { interpretTransaction, isPositive, sumIncomeCents, sumExpenseCents, IncomeContext } from '@/lib/classify';
 
 export interface ExportData {
@@ -36,7 +36,9 @@ export function buildExportWorkbook(data: ExportData): XLSX.WorkBook {
   // #83 Fix 4: the totals below are grouped once, by the same type filters they always
   // used, so unanchoredNote() can be asked "does THIS group (the one behind THIS total)
   // contain an unanchored account" — never the whole roster, which is Fix 1's bug.
-  const bankAccounts = accounts.filter(a => a.type === 'bank_account' || a.type === 'debit_card');
+  // #182: the same allowlist as calculateCurrentCash, so this total is Home's cash figure.
+  const bankAccounts = accounts.filter(isCashAccount);
+  const investmentAccounts = accounts.filter(isInvestmentAccount);
   const creditAccounts = accounts.filter(a => a.type === 'credit_card');
   const loanAccounts = accounts.filter(a => a.type === 'personal_loan');
 
@@ -61,6 +63,10 @@ export function buildExportWorkbook(data: ExportData): XLSX.WorkBook {
     ...(unanchoredNote(creditAccounts) ? [[unanchoredNote(creditAccounts)!]] : []),
     ['Total Loan Balance', loanAccounts.reduce((sum, a) => sum + currentOf(a), 0)],
     ...(unanchoredNote(loanAccounts) ? [[unanchoredNote(loanAccounts)!]] : []),
+    ...(investmentAccounts.length ? [
+      ['Total Investments (net worth only, not cash)', investmentAccounts.reduce((sum, a) => sum + currentOf(a), 0)],
+      ...(unanchoredNote(investmentAccounts) ? [[unanchoredNote(investmentAccounts)!]] : []),
+    ] : []),
     [''],
     ['Income Summary'],
     ['Total Income Sources', data.incomeSources.filter(i => i.isActive).length],

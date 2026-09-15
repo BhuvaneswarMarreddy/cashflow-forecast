@@ -503,6 +503,12 @@ describe('4. legitimate owner operations', () => {
     );
   });
 
+  it('#182: an investment account is ACCEPTED (a brokerage, net worth only)', async () => {
+    await assertSucceeds(
+      setDoc(doc(asAlice(), 'users', ALICE, 'accounts', 'accBrokerage'), accountPerApp({ type: 'investment' }))
+    );
+  });
+
   it('BUG B fixed: an invented account type is still rejected', async () => {
     await assertFails(
       setDoc(doc(asAlice(), 'users', ALICE, 'accounts', 'accJunk'), accountPerApp({ type: 'not_a_type' }))

@@ -187,6 +187,35 @@ class AutoCreateAccounts(unittest.TestCase):
         self.assertEqual(fields["provider"], "chase")
         self.assertEqual(fields["openingBalance"], 790.19)
 
+    def test_brokerage_is_an_investment_account_never_a_bank_account(self):
+        # #182: as bank_account, calculateCurrentCash summed the whole portfolio into
+        # cash and runway. Both Plaid spellings land on the net-worth-only type.
+        for plaid_type in ("investment", "brokerage"):
+            raw = {"account_id": "s1", "name": "Schwab One Brokerage", "mask": "4321",
+                   "type": plaid_type, "subtype": "brokerage", "balances": {"current": 80000.0}}
+            adapted = plaid_ingest.adapt_pl_account(raw, "Charles Schwab")
+            adapted["displayLastUpdatedAt"] = "2026-09-15T12:00:00-05:00"
+            fields = plaid_ingest.new_account_fields(adapted, raw, "Charles Schwab", "2026-09-15")
+            self.assertEqual(fields["type"], "investment")
+            self.assertEqual(fields["openingBalance"], 80000.0)   # an asset: sign kept
+            self.assertEqual(fields["openingDate"], "2026-09-16")
+
+    def test_brokerage_without_a_balance_stays_unanchored_not_zero(self):
+        # #182: no $0 stand-in. openingDate None -> isUnanchored -> "Not anchored".
+        raw = {"account_id": "s2", "name": "Schwab Brokerage", "type": "investment",
+               "balances": {"current": None}}
+        adapted = plaid_ingest.adapt_pl_account(raw, "Charles Schwab")
+        fields = plaid_ingest.new_account_fields(adapted, raw, "Charles Schwab", "2026-09-15")
+        self.assertEqual(fields["type"], "investment")
+        self.assertIsNone(fields["openingDate"])
+
+    def test_schwab_checking_is_still_operating_cash(self):
+        raw = {"account_id": "s3", "name": "Schwab Checking", "type": "depository",
+               "subtype": "checking", "balances": {"current": 5000.0}}
+        adapted = plaid_ingest.adapt_pl_account(raw, "Charles Schwab")
+        self.assertEqual(plaid_ingest.new_account_fields(adapted, raw, "Charles Schwab", "2026-09-15")["type"],
+                         "bank_account")
+
     def test_unknown_issuer_falls_back_rather_than_inventing_a_brand(self):
         self.assertEqual(plaid_ingest.provider_for("Synchrony Bank", "credit_card")[0], "other")
         self.assertEqual(plaid_ingest.provider_for("Bank of America", "bank_account")[0], "bank-transfer")

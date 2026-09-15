@@ -201,6 +201,8 @@ const ACCOUNT_KIND = {
   bank_account: 'checking',
   cash: 'cash',
   personal_loan: 'loan',
+  // #182: the phone's AccountKind already has 'investment' and keeps it out of totalCash.
+  investment: 'investment',
 } as const;
 
 const INSTITUTION: Record<string, string> = {

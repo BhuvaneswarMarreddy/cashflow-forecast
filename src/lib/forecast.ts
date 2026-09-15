@@ -17,7 +17,7 @@ import {
 } from '@/types';
 import { addDays, format, parseISO, startOfDay, isBefore, isAfter, isSameDay } from 'date-fns';
 import { isPositive, classifyTransaction, interpretTransaction, isPosted, IncomeContext, feedlessCardTargetOf } from '@/lib/classify';
-import { currentOf } from '@/lib/accounts';
+import { currentOf, isCashAccount } from '@/lib/accounts';
 import { buildAssumptions, behaviorEvents, AssumptionOverrides } from '@/lib/behavior';
 import { normalizeMerchant } from '@/lib/flows';
 
@@ -152,8 +152,10 @@ function feedCoveredPeriods(accountId: string, transactions: readonly Transactio
 }
 
 export function calculateCurrentCash(accounts: PaymentAccount[]): number {
+  // An allowlist on purpose (#182): a new type — `investment` — is excluded until someone
+  // decides it is cash. A portfolio in this sum overstated runway by its whole value.
   return accounts
-    .filter(a => a.type === 'bank_account' || a.type === 'debit_card' || a.type === 'cash')
+    .filter(isCashAccount)
     .reduce((sum, a) => sum + currentOf(a), 0);
 }
 
@@ -520,9 +522,10 @@ function transactionsToEvents(
     const isCountableTransfer =
       i.type === 'transfer' &&
       isPosted(t) &&
+      // #182: the cash pool's own allowlist — identical to "not a card or loan" for every
+      // older type, and it keeps a brokerage (`investment`) leg out of the cash forecast.
       !!transferAccount &&
-      transferAccount.type !== 'credit_card' &&
-      transferAccount.type !== 'personal_loan';
+      isCashAccount(transferAccount);
 
     const shouldInclude = i.expense === 'counted' || isActualIncome || isCountableTransfer;
 
