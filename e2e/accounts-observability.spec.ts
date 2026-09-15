@@ -55,9 +55,9 @@ test.describe('Accounts observability', () => {
     expect(headerTraceId, 'X-Trace-Id response header').toMatch(/^[0-9a-f]{32}$/);
     expect(response!.headers()['traceparent']).toContain(headerTraceId);
 
-    // 3. The Accounts UI actually rendered its headline numbers.
-    await expect(page.getByText('Net Worth')).toBeVisible();
-    await expect(page.getByText('Bank Balance')).toBeVisible();
+    // 3. The Accounts UI actually rendered its headline numbers (#200: Cash and Debt).
+    await expect(page.locator('.stat-card').getByText('Cash', { exact: true })).toBeVisible();
+    await expect(page.locator('.stat-card').getByText('Debt', { exact: true })).toBeVisible();
 
     // 4. The page publishes the trace id it used for this operation.
     const traceLocator = page.getByTestId('accounts-trace-id');
