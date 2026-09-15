@@ -780,6 +780,15 @@ type Queueable = Summable & Pick<Transaction, 'id' | 'date'>;
  * Out: earned income, transfers, card payments, refunds, rewards, outflows, and
  * anything the owner has already confirmed or dismissed. Pending rows are judged
  * identically to posted ones (FIN-REVIEW-002 §2.5); the caller shows the badge.
+ *
+ * #185: also out — an unexplained credit on an `investment` account (#182). A
+ * brokerage's dividends, interest, sell proceeds and sweeps are not candidate
+ * paychecks, and linking Schwab would otherwise fill this queue with them. SCOPE
+ * ONLY: the row's meaning is still `unknown_inflow` (never income, never spend,
+ * never cash — the account is net worth only), and a credit that DOES match an
+ * approved source is earned income exactly as before.
+ * ponytail: a real paycheck paid into a brokerage with no matching source is no
+ * longer asked about; add an approved source for it, or widen this if that happens.
  */
 export function selectInflowReviewQueue(
   ts: Queueable[],
@@ -791,6 +800,7 @@ export function selectInflowReviewQueue(
     if (state === 'confirmed' || state === 'dismissed') return [];
     const i = interpretTransaction(t, accounts, income);
     if (i.financialMeaning !== 'unknown_inflow') return [];
+    if (t.accountId && accounts?.find((a) => a.id === t.accountId)?.type === 'investment') return [];
     const r = resolveInflow(t, income);
     return [{
       transactionId: t.id,
