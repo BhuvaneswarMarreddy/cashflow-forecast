@@ -388,7 +388,7 @@ npm run test:rules                # Firestore rules on the emulator
 npm run test:e2e                  # Playwright: observability + every fixture screen
 ```
 
-`e2e/screens.spec.ts` marks known screen defects with `test.fail` (#176, #177, #178). When you fix one, delete its line in `KNOWN`.
+`e2e/screens.spec.ts` marks known screen defects with `test.fail` (#176, #178). When you fix one, delete its line in `KNOWN`.
 
 ### The phone contract
 `contracts/homeSnapshot.json` is recorded by `functions/src/__tests__/contract-homeSnapshot.test.ts`. If that test fails, you changed what the phone receives: re-record with `UPDATE_CONTRACTS=1 npm test --prefix functions -- contract`. The `mobile contract` CI job then runs cashflow-mobile's checks against it; if it fails, ship the mobile change first or keep the old field. A new callable the phone reads (e.g. `getCalendarMonthCents`) gets the same treatment.

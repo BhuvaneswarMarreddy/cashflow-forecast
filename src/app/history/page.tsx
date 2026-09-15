@@ -20,9 +20,8 @@ import { classifyTransaction, isPositive, isReward, sumExpenseCents, sumIncomeCe
 import { pairedLegId } from '@/lib/transfers';
 import { executePairedDelete, PairedDeleteChoice } from '@/lib/paired-delete';
 import Sheet from '@/components/Sheet';
-import { EXPENSE_CATEGORIES, Transaction, TransactionType, getMerchantColor, displayCategory } from '@/types';
+import { Transaction, TransactionType, displayCategory } from '@/types';
 import {
-  Plus,
   Upload,
   Calendar,
   Search,
@@ -32,10 +31,9 @@ import {
   ChevronDown,
   ChevronUp,
   DollarSign,
-  ArrowUpRight,
-  ArrowDownRight,
   Camera,
   Sparkles,
+  MoreHorizontal,
 } from 'lucide-react';
 import { format, parseISO, startOfMonth, subMonths, isWithinInterval } from 'date-fns';
 import { currentOf, balanceCaption } from '@/lib/accounts';
@@ -43,6 +41,7 @@ import { formatMoney, monthlyIncomeOf } from '@/lib/money';
 import { askAbout, askAboutTransaction } from '@/lib/ask';
 import LoadingScreen from '@/components/LoadingScreen';
 import Link from 'next/link';
+import { displayName } from '@/lib/merchant';
 
 type ViewMode = 'history' | 'insights' | 'runway';
 type DateFilter = 'all' | 'thisMonth' | 'lastMonth' | 'last3Months' | 'last6Months';
@@ -83,6 +82,9 @@ export default function HistoryPage() {
   // #28: a paired row awaiting the three-way delete choice (nothing deletes until chosen).
   const [pairedDelete, setPairedDelete] = useState<{ id: string; other: string } | null>(null);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+  // Phones: one "More" button per row opens this sheet instead of three 44px icons,
+  // which left the title about 120px and crushed every row (owner screenshot, 390px).
+  const [rowActions, setRowActions] = useState<Transaction | null>(null);
   // Mobile-only: filters collapse behind a "Filters (n)" toggle; desktop always shows them
   const [filtersOpen, setFiltersOpen] = useState(false);
 
@@ -416,32 +418,27 @@ export default function HistoryPage() {
           <>
             {/* Compact Header with Actions and Stats */}
             <div className="bg-[var(--background-secondary)] rounded-card border border-[var(--border-color)] p-4 mb-6">
-              {/* Top Row - Stats Summary */}
-              <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-[var(--border-color)]">
-                <div className="flex items-center gap-6">
-                  <div className="flex items-center gap-2">
-                    <ArrowUpRight className="w-4 h-4 text-emerald-500" />
-                    <span className="text-emerald-500 font-semibold tabular-nums">{formatMoney(totals.income, 'USD', 2)}</span>
+              {/* Top Row - Stats Summary. A labelled 3-column grid: the old unwrapped row of
+                  three figures ran 4px past a 390px screen (#177). Money tokens only. Add is
+                  not repeated here; the header Add (phone) / corner FAB (desktop) is the one. */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[var(--border-color)]">
+                <dl className="grid grid-cols-3 gap-3 sm:gap-6 min-w-0">
+                  <div className="min-w-0">
+                    <dt className="text-xs text-[var(--foreground-muted)]">In</dt>
+                    <dd className="font-semibold tnum truncate text-[var(--money-in)]">{formatMoney(totals.income, 'USD', 2)}</dd>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <ArrowDownRight className="w-4 h-4 text-red-400" />
-                    <span className="text-red-400 font-semibold tabular-nums">{formatMoney(totals.expenses, 'USD', 2)}</span>
+                  <div className="min-w-0">
+                    <dt className="text-xs text-[var(--foreground-muted)]">Out</dt>
+                    <dd className="font-semibold tnum truncate text-[var(--money-out)]">{formatMoney(totals.expenses, 'USD', 2)}</dd>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <DollarSign className="w-4 h-4 text-[var(--foreground-muted)]" />
-                    <span className={`font-semibold ${totals.net >= 0 ? 'text-emerald-500' : 'text-red-400'}`}>
-                      {totals.net >= 0 ? '+' : ''}{formatMoney(totals.net, 'USD', 2)}
-                    </span>
+                  <div className="min-w-0">
+                    <dt className="text-xs text-[var(--foreground-muted)]">Net</dt>
+                    <dd className={`font-semibold tnum truncate ${totals.net >= 0 ? 'text-[var(--money-in)]' : 'text-[var(--money-out)]'}`}>
+                      {totals.net >= 0 ? '+' : '−'}{formatMoney(Math.abs(totals.net), 'USD', 2)}
+                    </dd>
                   </div>
-                </div>
+                </dl>
                 <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setIsAddModalOpen(true)}
-                    className="btn-primary min-h-[44px] px-3 py-2 text-sm flex items-center gap-2"
-                  >
-                    <Plus className="w-4 h-4" />
-                    Add
-                  </button>
                   <button
                     onClick={() => setIsScannerOpen(true)}
                     className="btn-gradient min-h-[44px] px-3 py-2 text-sm flex items-center gap-2"
@@ -492,12 +489,8 @@ export default function HistoryPage() {
                 <select
                   value={accountFilter}
                   onChange={(e) => setAccountFilter(e.target.value)}
-                  className="px-3 py-2 rounded-control bg-[var(--background)] border border-[var(--border-color)] text-sm cursor-pointer min-w-[140px]"
-                  style={{
-                    color: accountFilter !== 'all' && accountFilter !== 'unlinked'
-                      ? profile?.paymentAccounts?.find(a => a.id === accountFilter)?.color
-                      : 'var(--foreground-secondary)'
-                  }}
+                  aria-label="Account"
+                  className="px-3 py-2 rounded-control bg-[var(--background)] border border-[var(--border-color)] text-sm text-[var(--foreground-secondary)] cursor-pointer min-w-[140px] max-w-full"
                 >
                   <option value="all">All Accounts</option>
                   {profile?.paymentAccounts?.map((account) => (
@@ -537,8 +530,8 @@ export default function HistoryPage() {
                     onClick={() => setTypeFilter('income')}
                     className={`min-h-[44px] px-3 py-1 rounded-control text-xs font-medium transition-all ${
                       typeFilter === 'income'
-                        ? 'bg-emerald-500 text-white'
-                        : 'text-emerald-500 hover:bg-emerald-500/10'
+                        ? 'bg-[var(--money-in)] text-[var(--background)]'
+                        : 'text-[var(--money-in)] hover:bg-[var(--background-tertiary)]'
                     }`}
                   >
                     In
@@ -547,8 +540,8 @@ export default function HistoryPage() {
                     onClick={() => setTypeFilter('expense')}
                     className={`min-h-[44px] px-3 py-1 rounded-control text-xs font-medium transition-all ${
                       typeFilter === 'expense'
-                        ? 'bg-red-500 text-white'
-                        : 'text-red-400 hover:bg-red-500/10'
+                        ? 'bg-[var(--money-out)] text-[var(--background)]'
+                        : 'text-[var(--money-out)] hover:bg-[var(--background-tertiary)]'
                     }`}
                   >
                     Out
@@ -637,20 +630,20 @@ export default function HistoryPage() {
                 tiles = [
                   ['Borrowed', money(inbound), 'text-[var(--foreground)]'],
                   ['Paid back', money(outbound), 'text-[var(--foreground)]'],
-                  ['Interest / cost', money(Math.max(0, outbound - inbound)), 'text-amber-500'],
-                  ['Balance owed', currentOf(acct) > 0 ? money(currentOf(acct)) : 'Paid off', currentOf(acct) > 0 ? 'text-[var(--accent-danger)]' : 'text-emerald-500', caption],
+                  ['Interest / cost', money(Math.max(0, outbound - inbound)), 'text-[var(--accent-warning)]'],
+                  ['Balance owed', currentOf(acct) > 0 ? money(currentOf(acct)) : 'Paid off', currentOf(acct) > 0 ? 'text-[var(--money-out)]' : 'text-[var(--money-in)]', caption],
                 ];
               } else if (acct.type === 'credit_card') {
                 tiles = [
                   ['Spent (purchases)', money(spent), 'text-[var(--foreground)]'],
-                  ['Paid to card', money(inbound), 'text-emerald-500'],
+                  ['Paid to card', money(inbound), 'text-[var(--money-in)]'],
                   ['Rewards earned', money(rewards), 'text-[var(--accent-primary)]'],
-                  ['Balance owed', currentOf(acct) > 0 ? money(currentOf(acct)) : 'Paid off', currentOf(acct) > 0 ? 'text-[var(--accent-danger)]' : 'text-emerald-500', caption],
+                  ['Balance owed', currentOf(acct) > 0 ? money(currentOf(acct)) : 'Paid off', currentOf(acct) > 0 ? 'text-[var(--money-out)]' : 'text-[var(--money-in)]', caption],
                 ];
               } else {
                 tiles = [
-                  ['Income in', money(income), 'text-emerald-500'],
-                  ['Spent', money(spent), 'text-[var(--accent-danger)]'],
+                  ['Income in', money(income), 'text-[var(--money-in)]'],
+                  ['Spent', money(spent), 'text-[var(--money-out)]'],
                   ['Transfers in / out', `${money(inbound)} / ${money(outbound)}`, 'text-[var(--foreground-secondary)]'],
                   ['Balance', money(currentOf(acct)), 'text-[var(--foreground)]', caption],
                 ];
@@ -697,7 +690,8 @@ export default function HistoryPage() {
               <div className="space-y-4">
                 {groupedTransactions.map((group) => (
                   <div key={group.key} className="bg-[var(--background-secondary)] rounded-card border border-[var(--border-color)] overflow-hidden">
-                    {/* Group Header */}
+                    {/* Group Header — label and count stacked left, in/out stacked right, so a
+                        390px screen never has to fit four fragments on one line. */}
                     <button
                       onClick={() => {
                         setCollapsedGroups(prev => {
@@ -710,131 +704,116 @@ export default function HistoryPage() {
                           return newSet;
                         });
                       }}
-                      className="w-full p-4 flex items-center justify-between hover:bg-[var(--background-tertiary)] transition-colors"
+                      aria-expanded={!collapsedGroups.has(group.key)}
+                      className="w-full px-4 py-3 flex items-center justify-between gap-3 text-left hover:bg-[var(--background-tertiary)] transition-colors"
                     >
-                      <div className="flex items-center gap-4">
-                        <span className="font-semibold text-[var(--foreground)] text-lg">{group.label}</span>
-                        <span className="text-sm text-[var(--foreground-muted)]">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-[var(--foreground)] truncate">{group.label}</p>
+                        <p className="text-xs text-[var(--foreground-muted)]">
                           {group.transactions.length} transaction{group.transactions.length !== 1 ? 's' : ''}
-                        </span>
+                        </p>
                       </div>
-                      <div className="flex items-center gap-4">
-                        <span className="text-sm text-emerald-500 tabular-nums">+{formatMoney(group.income, 'USD', 2)}</span>
-                        <span className="text-sm text-red-400 tabular-nums">-{formatMoney(group.expenses, 'USD', 2)}</span>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <div className="text-right text-sm tnum leading-tight">
+                          <p className="text-[var(--money-in)]">+{formatMoney(group.income, 'USD', 2)}</p>
+                          <p className="text-[var(--money-out)]">−{formatMoney(group.expenses, 'USD', 2)}</p>
+                        </div>
                         {collapsedGroups.has(group.key) ? (
-                          <ChevronDown className="w-5 h-5 text-[var(--foreground-muted)]" />
+                          <ChevronDown className="w-5 h-5 text-[var(--foreground-muted)]" aria-hidden="true" />
                         ) : (
-                          <ChevronUp className="w-5 h-5 text-[var(--foreground-muted)]" />
+                          <ChevronUp className="w-5 h-5 text-[var(--foreground-muted)]" aria-hidden="true" />
                         )}
                       </div>
                     </button>
 
                     {/* Transactions */}
                     {!collapsedGroups.has(group.key) && (
-                      <div className="border-t border-[var(--border-color)]">
+                      <ul className="border-t border-[var(--border-color)]">
                         {group.transactions.map((txn) => {
-                          const category = EXPENSE_CATEGORIES.find(c => c.value === txn.category);
-                          const merchantColor = txn.merchant ? getMerchantColor(txn.merchant) : null;
-                          const linkedAccount = txn.accountId 
-                            ? profile?.paymentAccounts?.find(a => a.id === txn.accountId) 
+                          const linkedAccount = txn.accountId
+                            ? profile?.paymentAccounts?.find(a => a.id === txn.accountId)
                             : null;
+                          const positive = isPositive(txn, derivedAccounts);
+                          // A transfer moves money between the owner's own accounts: never
+                          // painted as spend or income (invariant 5). Pending: not counted yet.
+                          const isTransfer = classifyTransaction(txn, derivedAccounts) === 'transfer';
+                          const amountColor = txn.pending || isTransfer
+                            ? 'text-[var(--foreground-muted)]'
+                            : positive ? 'text-[var(--money-in)]' : 'text-[var(--money-out)]';
                           return (
-                            <div
+                            // One line of name + one line of detail + one amount. The old row
+                            // stacked an avatar, a Pending badge, a merchant pill and a
+                            // wrapping account pill beside three icons, so on a phone each row
+                            // ran several hundred pixels tall and the amount split in two.
+                            <li
                               key={txn.id}
-                              className="p-4 flex items-center justify-between hover:bg-[var(--background-tertiary)] border-b border-[var(--border-color)] last:border-b-0"
+                              className="px-4 py-3 flex items-center gap-3 hover:bg-[var(--background-tertiary)] border-b border-[var(--border-color)] last:border-b-0"
                             >
-                              <div className="flex items-center gap-4 max-sm:min-w-0">
-                                {/* Show merchant badge or category icon */}
-                                {txn.merchant ? (
-                                  <div 
-                                    className="w-10 h-10 rounded-control flex items-center justify-center text-white font-bold text-sm"
-                                    style={{ backgroundColor: merchantColor || undefined }}
-                                  >
-                                    {txn.merchant.charAt(0).toUpperCase()}
-                                  </div>
-                                ) : (
-                                  <div className="w-10 h-10 rounded-control bg-[var(--background-tertiary)] flex items-center justify-center text-xl">
-                                    {category?.icon || '📋'}
-                                  </div>
-                                )}
-                                <div className="max-sm:min-w-0">
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    {/* max-sm: long titles ellipsize instead of wrapping the 360px row */}
-                                    <p className="font-medium text-[var(--foreground)] max-sm:min-w-0 max-sm:truncate">{txn.title}</p>
-                                    {/* A hold is excluded from this group's +/- header (classify.ts:
-                                        `held` → income/expense 'excluded'). Without this badge the row
-                                        reads as counted money and the header looks broken — which is
-                                        exactly how a pending payroll credit made In show $0.00. */}
-                                    {txn.pending && <span className="badge badge-projected flex-shrink-0">Pending</span>}
-                                    {txn.merchant && (
-                                      <span 
-                                        className="text-xs px-2 py-1 rounded-pill text-white"
-                                        style={{ backgroundColor: merchantColor || undefined }}
-                                      >
-                                        {txn.merchant}
-                                      </span>
-                                    )}
-                                    {linkedAccount && (
-                                      <span 
-                                        className="text-xs px-2 py-1 rounded-pill border"
-                                        style={{ 
-                                          borderColor: linkedAccount.color, 
-                                          color: linkedAccount.color,
-                                          backgroundColor: `${linkedAccount.color}10`
-                                        }}
-                                      >
-                                        {linkedAccount.name}
-                                        {linkedAccount.lastFourDigits && ` ••${linkedAccount.lastFourDigits}`}
-                                      </span>
-                                    )}
-                                  </div>
-                                  <p className="text-sm text-[var(--foreground-muted)]">
-                                    {format(parseISO(txn.date), 'MMM d, yyyy')}
-                                    {' • '}
-                                    <span className="text-xs">{category?.icon} {displayCategory(txn)}</span>
-                                    {txn.description && ` • ${txn.description}`}
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  {/* Full string kept in `title`: the reference blob is the only
+                                      handle on a mystery charge. */}
+                                  <p className="font-medium text-[var(--foreground)] truncate" title={txn.title}>
+                                    {displayName(txn.title)}
                                   </p>
+                                  {/* A hold is excluded from this group's +/- header (classify.ts:
+                                      `held` → income/expense 'excluded'). Without this badge the row
+                                      reads as counted money and the header looks broken. */}
+                                  {txn.pending && <span className="badge badge-projected flex-shrink-0">Pending</span>}
+                                  {isTransfer && (
+                                    <span className="flex-shrink-0 px-2 py-0.5 rounded-pill text-[11px] font-medium bg-[var(--background-tertiary)] text-[var(--foreground-secondary)]">
+                                      Transfer
+                                    </span>
+                                  )}
                                 </div>
+                                <p className="text-xs text-[var(--foreground-muted)] truncate" title={txn.description || undefined}>
+                                  {format(parseISO(txn.date), 'MMM d, yyyy')}
+                                  {linkedAccount && ` · ${linkedAccount.name}${linkedAccount.lastFourDigits ? ` ··${linkedAccount.lastFourDigits}` : ''}`}
+                                  {` · ${displayCategory(txn)}`}
+                                  {txn.description && ` · ${txn.description}`}
+                                </p>
                               </div>
-                              <div className="flex items-center gap-4">
-                                {/* Smart display based on transaction type and account */}
-                                {(() => {
-                                  const positive = isPositive(txn, derivedAccounts);
-                                  return (
-                                    <p className={`font-semibold ${txn.pending ? 'text-[var(--foreground-muted)]' : positive ? 'text-emerald-500' : 'text-[var(--foreground)]'}`}>
-                                      {positive ? '+' : '-'}{formatMoney(txn.amount, 'USD', 2)}
-                                    </p>
-                                  );
-                                })()}
-                                {deleteConfirm === txn.id ? (
-                                  <div className="flex items-center gap-2">
-                                    <button
-                                      onClick={() => handleDelete(txn.id)}
-                                      aria-label={`Confirm delete ${txn.title}`}
-                                      className="text-xs px-2 py-1 rounded-control bg-red-500 text-white max-sm:min-w-[44px] max-sm:min-h-[44px]"
-                                    >
-                                      Confirm
-                                    </button>
-                                    <button
-                                      onClick={() => setDeleteConfirm(null)}
-                                      aria-label="Cancel delete"
-                                      className="text-xs px-2 py-1 rounded-control bg-[var(--background-tertiary)] max-sm:min-w-[44px] max-sm:min-h-[44px]"
-                                    >
-                                      Cancel
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <div className="flex items-center gap-1">
+                              <p className={`font-semibold tnum whitespace-nowrap flex-shrink-0 ${amountColor}`}>
+                                {positive ? '+' : '−'}{formatMoney(txn.amount, 'USD', 2)}
+                              </p>
+                              {deleteConfirm === txn.id ? (
+                                <div className="flex items-center gap-2 flex-shrink-0">
+                                  <button
+                                    onClick={() => handleDelete(txn.id)}
+                                    aria-label={`Confirm delete ${txn.title}`}
+                                    className="text-xs px-2 py-1 rounded-control bg-[var(--money-out)] text-[var(--background)] min-w-[44px] min-h-[44px]"
+                                  >
+                                    Confirm
+                                  </button>
+                                  <button
+                                    onClick={() => setDeleteConfirm(null)}
+                                    aria-label="Cancel delete"
+                                    className="text-xs px-2 py-1 rounded-control bg-[var(--background-tertiary)] min-w-[44px] min-h-[44px]"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              ) : (
+                                <>
+                                  {/* Phone: one button, the three actions live in a sheet. */}
+                                  <button
+                                    onClick={() => setRowActions(txn)}
+                                    aria-label={`More actions for ${txn.title}`}
+                                    className="sm:hidden flex-shrink-0 w-11 h-11 -mr-2 rounded-control flex items-center justify-center text-[var(--foreground-muted)] hover:bg-[var(--background-tertiary)]"
+                                  >
+                                    <MoreHorizontal className="w-5 h-5" aria-hidden="true" />
+                                  </button>
+                                  <div className="hidden sm:flex items-center gap-1 flex-shrink-0">
                                     {/* The owner's chat-first rule: any transaction is a
                                         conversation. The question ships the row AND its
                                         account neighbours, so "the next one" means something. */}
                                     <button
                                       onClick={() => askAbout(askAboutTransaction(txn, profile?.paymentAccounts ?? [], transactions))}
                                       aria-label={`Ask about ${txn.title}`}
-                                      className="p-2 rounded-control text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors max-sm:min-w-[44px] max-sm:min-h-[44px] flex items-center justify-center"
+                                      className="p-2 rounded-control text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--background-tertiary)] transition-colors flex items-center justify-center"
                                       title="Ask about this transaction"
                                     >
-                                      <Sparkles className="w-4 h-4" />
+                                      <Sparkles className="w-4 h-4" aria-hidden="true" />
                                     </button>
                                     <button
                                       onClick={() => {
@@ -842,26 +821,26 @@ export default function HistoryPage() {
                                         setIsAddModalOpen(true);
                                       }}
                                       aria-label={`Edit ${txn.title}`}
-                                      className="p-2 rounded-control text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors max-sm:min-w-[44px] max-sm:min-h-[44px] flex items-center justify-center"
+                                      className="p-2 rounded-control text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--background-tertiary)] transition-colors flex items-center justify-center"
                                       title="Edit transaction"
                                     >
-                                      <Edit2 className="w-4 h-4" />
+                                      <Edit2 className="w-4 h-4" aria-hidden="true" />
                                     </button>
                                     <button
                                       onClick={() => setDeleteConfirm(txn.id)}
                                       aria-label={`Delete ${txn.title}`}
-                                      className="p-2 rounded-control text-[var(--foreground-muted)] hover:text-red-500 hover:bg-red-500/10 transition-colors max-sm:min-w-[44px] max-sm:min-h-[44px] flex items-center justify-center"
+                                      className="p-2 rounded-control text-[var(--foreground-muted)] hover:text-[var(--money-out)] hover:bg-[var(--background-tertiary)] transition-colors flex items-center justify-center"
                                       title="Delete transaction"
                                     >
-                                      <Trash2 className="w-4 h-4" />
+                                      <Trash2 className="w-4 h-4" aria-hidden="true" />
                                     </button>
                                   </div>
-                                )}
-                              </div>
-                            </div>
+                                </>
+                              )}
+                            </li>
                           );
                         })}
-                      </div>
+                      </ul>
                     )}
                   </div>
                 ))}
@@ -880,6 +859,59 @@ export default function HistoryPage() {
           )
         )}
       </main>
+
+      {/* Phone row actions — the same three as the desktop icons. Delete hands off to the
+          row's inline Confirm, so paired rows still reach the #28 three-way sheet. */}
+      <Sheet
+        open={rowActions !== null}
+        onClose={() => setRowActions(null)}
+        ariaLabel="Transaction actions"
+        className="p-4"
+      >
+        {rowActions && (
+          <>
+            <p className="font-semibold text-[var(--foreground)] truncate mb-1" title={rowActions.title}>
+              {displayName(rowActions.title)}
+            </p>
+            <p className="text-sm text-[var(--foreground-muted)] tnum mb-4">
+              {format(parseISO(rowActions.date), 'MMM d, yyyy')} · {formatMoney(rowActions.amount, 'USD', 2)}
+            </p>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => {
+                  const txn = rowActions;
+                  setRowActions(null);
+                  askAbout(askAboutTransaction(txn, profile?.paymentAccounts ?? [], transactions));
+                }}
+                className="min-h-[44px] px-4 rounded-control flex items-center gap-3 bg-[var(--background-tertiary)] text-[var(--foreground)] font-medium"
+              >
+                <Sparkles className="w-4 h-4 text-[var(--accent-primary)]" aria-hidden="true" /> Ask about this
+              </button>
+              <button
+                onClick={() => {
+                  const txn = rowActions;
+                  setRowActions(null);
+                  setEditingTransaction(txn);
+                  setIsAddModalOpen(true);
+                }}
+                className="min-h-[44px] px-4 rounded-control flex items-center gap-3 bg-[var(--background-tertiary)] text-[var(--foreground)] font-medium"
+              >
+                <Edit2 className="w-4 h-4" aria-hidden="true" /> Edit
+              </button>
+              <button
+                onClick={() => {
+                  const id = rowActions.id;
+                  setRowActions(null);
+                  setDeleteConfirm(id);
+                }}
+                className="min-h-[44px] px-4 rounded-control flex items-center gap-3 bg-[var(--background-tertiary)] text-[var(--money-out)] font-medium"
+              >
+                <Trash2 className="w-4 h-4" aria-hidden="true" /> Delete
+              </button>
+            </div>
+          </>
+        )}
+      </Sheet>
 
       {/* #28: three-way paired delete — Keep both is a true abort */}
       <Sheet
