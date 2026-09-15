@@ -33,3 +33,17 @@ describe('Activity rows', () => {
     expect(code).toContain('ariaLabel="Delete a paired transfer"');
   });
 });
+
+describe('Activity is the list (tonight queue #196)', () => {
+  it('no Insights or Runway views on Activity', () => {
+    expect(code).not.toContain('InsightsTab');
+    expect(code).not.toContain('RunwayCalculator');
+    expect(code).not.toMatch(/tab=\$\{v\}|'insights'|'runway'/);
+  });
+
+  it('old /analytics links land on Flow, not a tab that no longer exists', () => {
+    const analytics = readFileSync(join(process.cwd(), 'src/app/analytics/page.tsx'), 'utf8');
+    expect(analytics).toContain("redirect('/flow')");
+    expect(analytics).not.toContain('/history?tab=insights');
+  });
+});

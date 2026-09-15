@@ -42,6 +42,13 @@ test('phone: one-line rows, amount on one line, no sideways scroll', async ({ pa
   await page.screenshot({ path: 'test-results/screens/activity-rows-phone.png', animations: 'disabled' });
 });
 
+test('phone: Activity is the list, with no Insights or Runway switch', async ({ page }) => {
+  await openActivity(page, { width: 390, height: 844 });
+  await expect(page.getByRole('button', { name: 'Insights' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Runway' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: /view as flow/i })).toBeVisible();
+});
+
 test('phone: row actions live in one sheet, and Delete still asks to confirm', async ({ page }) => {
   await openActivity(page, { width: 390, height: 844 });
   await expect(page.getByRole('button', { name: /^Edit / })).toHaveCount(0); // inline icons hidden on phones
