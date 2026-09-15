@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { askAbout, askAboutNode } from '@/lib/ask';
 import {
@@ -24,6 +25,7 @@ import { isUnanchored } from '@/lib/accounts';
 import { UnanchoredNote } from '@/components/UnanchoredNote';
 import { simplifyFlowGraph } from '@/lib/flow-simple';
 import SpendingTree from '@/components/SpendingTree';
+import InsightsTab from '@/components/InsightsTab';
 import {
   MONEY_BACK_LANE_IDS, NODE_PADDING_PX, fitLabel, labelMaxChars, nodeDepths, sankeyHeightFor,
 } from '@/lib/flow-lanes';
@@ -110,12 +112,15 @@ function periodFor(range: Range, month: string, year: string): { start?: string;
 }
 
 type NodePayload = { label?: string; kind?: FlowColorKey; value?: number; depth?: number };
-type ChartKind = 'sankey' | 'tree' | 'treemap' | 'waterfall';
+type ChartKind = 'sankey' | 'tree' | 'treemap' | 'waterfall' | 'pace';
 const CHART_KINDS: Array<{ key: ChartKind; label: string }> = [
   { key: 'sankey', label: 'Flow' },
   { key: 'tree', label: 'Spending tree' },
   { key: 'treemap', label: 'Where it went' },
   { key: 'waterfall', label: 'Step by step' },
+  // #199: spending pace vs budget + top merchants (Activity's old Insights tab, #205).
+  // It reads the engine sums itself, so it is not drawn from this graph.
+  { key: 'pace', label: 'Pace' },
 ];
 
 function TreemapCell(props: { x?: number; y?: number; width?: number; height?: number; name?: string; value?: number; fill?: string }) {
@@ -208,8 +213,13 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
   // FIN-FLOW-002: Simple is the default; the last choice sticks. Lazy initializer
   // (DataChatSheet's rail-width pattern): safe here because the toggle only renders
   // after the client-side Firestore load, so server markup never contains it.
+  // #199: a phone always draws the Simple graph (the Detailed toggle is md+ only), so a
+  // "detailed" choice remembered from desktop never lands a 390px screen in full detail.
+  // ponytail: read once at mount; resizing a desktop window below 768px keeps its choice.
   const [simpleView, setSimpleView] = useState<boolean>(() =>
-    typeof window === 'undefined' || window.localStorage.getItem('flow-chart-view') !== 'detailed'
+    typeof window === 'undefined'
+    || (typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 767px)').matches)
+    || window.localStorage.getItem('flow-chart-view') !== 'detailed'
   );
   const chooseView = (simple: boolean) => {
     setSimpleView(simple);
@@ -728,8 +738,8 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
   // FIN-FLOW-002: Simple regroups the same graph into the four-step story; Detailed
   // is every lane the classifier knows. The choice sticks (localStorage).
   const detailToggle = (
-    <div role="group" aria-label="Detail level" className="flex gap-1 rounded-control bg-[var(--background-tertiary)] p-1">
-      {([[true, 'Simple'], [false, 'Detailed']] as const).map(([simple, label]) => (
+    <div role="group" aria-label="Detail level" className="hidden md:flex gap-1 rounded-control bg-[var(--background-tertiary)] p-1">
+      {([[true, 'Simple'], [false, 'Full detail']] as const).map(([simple, label]) => (
         <button
           key={label}
           onClick={() => chooseView(simple)}
@@ -744,24 +754,28 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
     </div>
   );
 
-  // ONE control, not a row of buttons — the owner's rule: fewer chips, calmer page.
+  // #199: one segmented control, default Flow (Sankey). It scrolls sideways on a phone
+  // rather than wrapping, so it stays one calm row.
   const chartToggle = (
-    <select
-      value={chart}
-      onChange={(e) => {
-        const key = e.target.value as ChartKind;
-        setChart(key);
-        window.localStorage.setItem('flow-chart-kind', key);
-      }}
-      aria-label="Chart type"
-      className="px-3 py-2 text-sm font-medium rounded-control bg-[var(--background-tertiary)] text-[var(--foreground)] focus:outline-none cursor-pointer"
-    >
-      {CHART_KINDS.map((c) => (
-        <option key={c.key} value={c.key} className="bg-[var(--background-secondary)] text-[var(--foreground)]">
-          {c.label}
-        </option>
-      ))}
-    </select>
+    <div className="max-w-full overflow-x-auto">
+      <div role="group" aria-label="Chart type" className="flex gap-1 w-max rounded-control bg-[var(--background-tertiary)] p-1">
+        {CHART_KINDS.map((c) => (
+          <button
+            key={c.key}
+            onClick={() => {
+              setChart(c.key);
+              window.localStorage.setItem('flow-chart-kind', c.key);
+            }}
+            aria-pressed={chart === c.key}
+            className={`min-h-[36px] px-3 rounded-control text-sm whitespace-nowrap transition-colors ${chart === c.key
+              ? 'bg-[var(--accent-primary)] text-[#16181c] font-semibold'
+              : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'}`}
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 
   const chartView = (heightPx: number | '100%') => {
@@ -833,8 +847,9 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
     initialTab ??
     (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('tab') || 'flow' : 'flow')
   );
-  // UI-105: mobile hides the wide diagram until asked (story-first).
-  const [showChartMobile, setShowChartMobile] = useState(false);
+  // #199: the Sankey is the hero on a phone too (UI-105's show-the-diagram button is gone).
+  // This slot now holds whether the reconciliation / recurring / projection disclosure is open.
+  const [moreOpen, setMoreOpen] = useState(false);
   const [storedCandidates, setStoredCandidates] = useState<CandidateDoc[]>([]);
   const [recoveryLoaded, setRecoveryLoaded] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -1467,59 +1482,20 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
       <main className="pt-24 pb-24 md:pb-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto relative z-10 space-y-10">
         <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-[var(--foreground)]">Money flow</h1>
+            <h1 className="text-3xl font-[family-name:var(--font-display)] text-[var(--foreground)]">Money flow</h1>
             <p className="text-[var(--foreground-secondary)] mt-1">
-              Every dollar traced — income → between accounts → out. Gaps shown, never hidden.
+              {range === 'month' ? monthLabel(month) : range === 'year' ? effectiveYear : 'All time'} · same cents as Activity
             </p>
+            {/* Flow is the picture of Activity's past (#199); the list is one tap away. */}
+            <Link
+              href="/history"
+              className="tap-target inline-block mt-2 text-sm font-medium text-[var(--accent-primary)] hover:text-[var(--accent-secondary)]"
+            >
+              View as list →
+            </Link>
           </div>
           {rangeButtons}
         </header>
-
-        {/* The story in plain language — same links as the chart, to the cent */}
-        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
-          {[
-            {
-              label: 'Money came in',
-              cents: story.moneyIn,
-              // Naming both halves is what lets the tiles be reconciled by eye:
-              // the money-from-people half is the mirror of "Sent to people" below.
-              sub: story.fromPeople > 0
-                ? `${money(story.earnedIn)} earned · ${money(story.fromPeople)} from people`
-                : 'paychecks & money received',
-            },
-            {
-              label: 'Spent on living',
-              cents: story.spending,
-              sub: story.netted > 0
-                ? `net of ${money(story.netted)} confirmed refunds`
-                : 'gross until you confirm refunds',
-            },
-            {
-              label: 'Money back (not income)',
-              cents: story.moneyBack,
-              sub: 'awaiting a match to a purchase',
-            },
-            {
-              label: 'Sent to people & family',
-              cents: story.toPeople,
-              // Deliberately overlapping with "Spent on living": a row can be both a
-              // cost and a payment to a person. Saying so beats two tiles that look
-              // additive and are not.
-              sub: story.personExpense > 0
-                ? `${money(story.personExpense)} of this is also in “Spent”`
-                : 'money moved, not yet a cost',
-            },
-            { label: gapTotal > 0 ? '⚠ Not yet in the data' : 'Data complete', cents: gapTotal, sub: gapTotal > 0 ? 'older than your bank feeds reach' : 'every dollar accounted for' },
-          ].map((t) => (
-            <div key={t.label} className="rounded-card border border-[var(--border-color)] bg-[var(--background-secondary)] p-4">
-              <p className="text-xs text-[var(--foreground-muted)]">{t.label}</p>
-              <p className={`text-xl font-bold mt-1 ${t.label.startsWith('⚠') ? 'text-[var(--accent-danger)]' : 'text-[var(--foreground)]'}`}>
-                {money(t.cents)}
-              </p>
-              <p className="text-xs text-[var(--foreground-muted)] mt-1">{t.sub}</p>
-            </div>
-          ))}
-        </section>
 
         {/* The review entry point, in the tile voice. Zero-count chips are hidden; when
             everything is reviewed one calm line replaces the strip. The total is
@@ -1554,21 +1530,44 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
           </section>
         )}
 
+        {/* #199: disclosures that change how the picture reads sit above it, not below. */}
+        <UnanchoredNote accounts={accounts} />
+        {graph.reconciliation.some((r) => r.verdict === 'missing-rows') && (
+          <p className="text-sm text-[var(--foreground-secondary)]">
+            <span className="text-[var(--money-out)] font-medium">
+              {graph.reconciliation.filter((r) => r.verdict === 'missing-rows').length === 1
+                ? '⚠ 1 account doesn’t add up.'
+                : `⚠ ${graph.reconciliation.filter((r) => r.verdict === 'missing-rows').length} accounts don’t add up.`}
+            </span>{' '}
+            <button
+              onClick={() => {
+                setMoreOpen(true);
+                requestAnimationFrame(() => document.getElementById('does-it-add-up')?.scrollIntoView({ block: 'start' }));
+              }}
+              className="tap-target font-medium text-[var(--accent-primary)] underline underline-offset-2"
+            >
+              Reconcile
+            </button>
+          </p>
+        )}
+
         <div className="lg:flex lg:items-start lg:gap-4">
         <div className="flex-1 min-w-0 space-y-10">
-        {sankeyData.links.length === 0 ? (
+        {chart === 'pace' ? (
+          <section className="space-y-3">
+            {chartToggle}
+            <InsightsTab />
+          </section>
+        ) : sankeyData.links.length === 0 ? (
           <div className="rounded-card border border-[var(--border-color)] p-10 text-center text-[var(--foreground-muted)]">
             No transactions in this period.
           </div>
         ) : (
           <section className="rounded-card border border-[var(--border-color)] bg-[var(--background-secondary)] p-4 relative">
-            <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
-              <div className="flex items-center gap-2 flex-wrap">
-                {chartToggle}
-                {chart === 'sankey' && detailToggle}
-                {chart === 'sankey' && kindChips}
-                {chart === 'sankey' && grossToggle}
-              </div>
+            {/* The chart switch gets its own width-bounded row: as a w-max flex item beside the
+                other toggles it widened the page 97px on a phone instead of scrolling. */}
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <div className="min-w-0 flex-1">{chartToggle}</div>
               <button
                 onClick={() => setMaximized(true)}
                 className="p-2 rounded-control text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)]"
@@ -1578,6 +1577,13 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
                 <Maximize2 className="w-4 h-4" />
               </button>
             </div>
+            {chart === 'sankey' && (
+              <div className="flex items-center gap-2 flex-wrap mb-2">
+                {detailToggle}
+                {kindChips}
+                {grossToggle}
+              </div>
+            )}
             {chart === 'sankey' && (
               <details className="mb-2 text-xs">
                 <summary className="cursor-pointer min-h-[44px] flex items-center select-none text-[var(--foreground-secondary)] hover:text-[var(--foreground)]">
@@ -1597,18 +1603,10 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
                 </div>
               </details>
             )}
-            {/* UI-105: a 900px diagram in a scroll box can never be seen whole on a
-                390px phone — mobile leads with the story tiles and table, and the
-                diagram opens on demand. Desktop is unchanged. */}
-            <button
-              onClick={() => setShowChartMobile(v => !v)}
-              aria-expanded={showChartMobile}
-              className="sm:hidden w-full min-h-[44px] mb-2 px-3 rounded-control bg-[var(--background-tertiary)] text-sm font-medium text-[var(--foreground-secondary)]"
-            >
-              {showChartMobile ? 'Hide the diagram' : 'Show the diagram'}
-            </button>
+            {/* #199: the diagram is the hero on every width. On a phone it is the Simple
+                graph and scrolls sideways inside this box; the page itself never does. */}
             <div
-              className={`overflow-x-auto ${showChartMobile ? '' : 'hidden sm:block'}`}
+              className="overflow-x-auto"
               role="img"
               aria-label={`${CHART_KINDS.find((c) => c.key === chart)?.label ?? 'Flow'} chart tracing ${money(totalSourcesCents)} across ${graph.nodes.length} sources, accounts and destinations. The full breakdown is in the "View the flow as a table" section below.`}
             >
@@ -1734,6 +1732,53 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
         {reviewOpen && isDesktop && <RecoveryReviewPanel {...reviewPanelProps} variant="panel" />}
         </div>
 
+        {/* The story in plain language — same links as the chart, to the cent. Under the
+            picture (#199), so on a phone the Sankey is what the screen opens on. */}
+        <section className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+          {[
+            {
+              label: 'Money came in',
+              cents: story.moneyIn,
+              // Naming both halves is what lets the tiles be reconciled by eye:
+              // the money-from-people half is the mirror of "Sent to people" below.
+              sub: story.fromPeople > 0
+                ? `${money(story.earnedIn)} earned · ${money(story.fromPeople)} from people`
+                : 'paychecks & money received',
+            },
+            {
+              label: 'Spent on living',
+              cents: story.spending,
+              sub: story.netted > 0
+                ? `net of ${money(story.netted)} confirmed refunds`
+                : 'gross until you confirm refunds',
+            },
+            {
+              label: 'Money back (not income)',
+              cents: story.moneyBack,
+              sub: 'awaiting a match to a purchase',
+            },
+            {
+              label: 'Sent to people & family',
+              cents: story.toPeople,
+              // Deliberately overlapping with "Spent on living": a row can be both a
+              // cost and a payment to a person. Saying so beats two tiles that look
+              // additive and are not.
+              sub: story.personExpense > 0
+                ? `${money(story.personExpense)} of this is also in “Spent”`
+                : 'money moved, not yet a cost',
+            },
+            { label: gapTotal > 0 ? '⚠ Not yet in the data' : 'Data complete', cents: gapTotal, sub: gapTotal > 0 ? 'older than your bank feeds reach' : 'every dollar accounted for' },
+          ].map((t) => (
+            <div key={t.label} className="min-w-0 rounded-card border border-[var(--border-color)] bg-[var(--background-secondary)] p-4 last:col-span-2 lg:last:col-span-1">
+              <p className="text-xs text-[var(--foreground-muted)]">{t.label}</p>
+              <p className={`text-xl font-bold mt-1 ${t.label.startsWith('⚠') ? 'text-[var(--accent-danger)]' : 'text-[var(--foreground)]'}`}>
+                {money(t.cents)}
+              </p>
+              <p className="text-xs text-[var(--foreground-muted)] mt-1">{t.sub}</p>
+            </div>
+          ))}
+        </section>
+
         {/* Maximized overlay */}
         {maximized && (
           <div
@@ -1757,7 +1802,10 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
                 </button>
               </div>
             </div>
-            <div className="mb-2 flex items-center gap-2 flex-wrap">{chartToggle}{chart === 'sankey' && detailToggle}{chart === 'sankey' && kindChips}{chart === 'sankey' && grossToggle}</div>
+            <div className="mb-2 space-y-2">
+              {chartToggle}
+              {chart === 'sankey' && <div className="flex items-center gap-2 flex-wrap">{detailToggle}{kindChips}{grossToggle}</div>}
+            </div>
             <div className="flex-1 min-h-0 overflow-auto rounded-card border border-[var(--border-color)] bg-[var(--background-secondary)] p-2">
               {/* minHeight keeps the chart usable on short/landscape screens — it scrolls in
                   the overflow-auto parent instead of being crushed to a few pixels. */}
@@ -1771,8 +1819,20 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
           </div>
         )}
 
+        {/* #199: one graph on the page. The proof tables and the projection chart live in
+            one disclosure; the Reconcile alert above opens it when an account is off. */}
+        <details
+          open={moreOpen}
+          onToggle={(e) => setMoreOpen((e.currentTarget as HTMLDetailsElement).open)}
+          className="rounded-card border border-[var(--border-color)] bg-[var(--background-secondary)] p-4 lg:p-5"
+        >
+          <summary className="cursor-pointer list-none min-h-[44px] flex items-center justify-between gap-3 font-semibold text-[var(--foreground)]">
+            <span>Reconciliation and more</span>
+            <span className="hidden sm:inline text-sm font-normal text-[var(--foreground-secondary)]">does it add up · between accounts · recurring · at this rate</span>
+          </summary>
+          <div className="mt-4 space-y-10">
         {/* Does it add up? */}
-        <section>
+        <section id="does-it-add-up" className="scroll-mt-24">
           <h2 className="text-lg font-semibold mb-1 text-[var(--foreground)]">Does it add up?</h2>
           <p className="text-sm text-[var(--foreground-muted)] mb-3">
             Opening + in − out = balance at period end, rolled back from your real balances.
@@ -1908,11 +1968,14 @@ export default function FlowPage({ initialTab }: { initialTab?: string } = {}) {
                 <XAxis dataKey="month" tick={{ fontSize: 11 }} tickFormatter={monthLabel} />
                 <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `$${Math.round(Number(v) / 1000)}k`} width={56} />
                 <Tooltip formatter={(v) => money(Math.round(Number(v) * 100))} />
-                <Line type="monotone" dataKey="value" stroke="#b08d3f" strokeWidth={2} dot={false} isAnimationActive={false} />
+                <Line type="monotone" dataKey="value" stroke="var(--progress)" strokeWidth={2} dot={false} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>
         </section>
+
+          </div>
+        </details>
 
         {reviewOpen && !isDesktop && <RecoveryReviewPanel {...reviewPanelProps} variant="sheet" />}
 
