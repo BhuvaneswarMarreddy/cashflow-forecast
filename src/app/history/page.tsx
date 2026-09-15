@@ -13,9 +13,7 @@ import AddTransactionModal from '@/components/AddTransactionModal';
 // there is nothing to prerender behind a closed dialog.
 const CSVImportModal = dynamic(() => import('@/components/CSVImportModal'), { ssr: false });
 import ReceiptScannerModal from '@/components/ReceiptScannerModal';
-import RunwayCalculator from '@/components/RunwayCalculator';
-import InsightsTab from '@/components/InsightsTab';
-import { generateForecast, calculateCurrentCash, monthlyAverages, withDerivedBalances } from '@/lib/forecast';
+import { withDerivedBalances } from '@/lib/forecast';
 import { classifyTransaction, isPositive, isReward, sumExpenseCents, sumIncomeCents } from '@/lib/classify';
 import { pairedLegId } from '@/lib/transfers';
 import { executePairedDelete, PairedDeleteChoice } from '@/lib/paired-delete';
@@ -37,13 +35,12 @@ import {
 } from 'lucide-react';
 import { format, parseISO, startOfMonth, subMonths, isWithinInterval } from 'date-fns';
 import { currentOf, balanceCaption } from '@/lib/accounts';
-import { formatMoney, monthlyIncomeOf } from '@/lib/money';
+import { formatMoney } from '@/lib/money';
 import { askAbout, askAboutTransaction } from '@/lib/ask';
 import LoadingScreen from '@/components/LoadingScreen';
 import Link from 'next/link';
 import { displayName } from '@/lib/merchant';
 
-type ViewMode = 'history' | 'insights' | 'runway';
 type DateFilter = 'all' | 'thisMonth' | 'lastMonth' | 'last3Months' | 'last6Months';
 type GroupBy = 'month' | 'year' | 'category';
 
@@ -53,13 +50,6 @@ export default function HistoryPage() {
   const { profile, isLoading: profileLoading, isOnboarded, incomeContext } = useUserProfile();
   const router = useRouter();
 
-  // UI-104: /analytics folded in as the Insights tab; ?tab= deep-links (its old
-  // route redirects here). Lazy init, hydration-safe behind the auth gate.
-  const [viewMode, setViewMode] = useState<ViewMode>(() => {
-    if (typeof window === 'undefined') return 'history';
-    const t = new URLSearchParams(window.location.search).get('tab');
-    return t === 'insights' || t === 'runway' ? t : 'history';
-  });
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
@@ -270,57 +260,6 @@ export default function HistoryPage() {
     return { acct, spent, income, inbound, outbound, rewards };
   }, [accountFilter, filteredTransactions, derivedAccounts, incomeContext]);
 
-  // Calculate monthly averages for runway
-  /**
-   * The runway headline, from the SAME function the dashboard and forecast use.
-   *
-   * This used to be a fourth private reduce on this page, and it disagreed twice
-   * over: it averaged across every month present (32 on the owner's export) where
-   * monthlyAverages() uses the last 6 FULL calendar months, and it counted every
-   * classifier-level inflow as income where the rest of the app counts only income
-   * matched to an approved source. Measured on the real export, same 6-month
-   * window: $11,681.38/mo here against $8,675.00/mo everywhere else — a $3,006.38
-   * gap on a figure that drives "how long does my money last".
-   *
-   * Spending was already right (it agreed to 18¢), but it is derived here too so
-   * one function owns both halves.
-   */
-  const monthlyStats = useMemo(() => {
-    const past = transactions.filter(t => parseISO(t.date) < new Date());
-    if (past.length === 0) {
-      return { avgExpenses: profile?.monthlyBudget || 3000, avgIncome: 0 };
-    }
-    const avg = monthlyAverages(past, derivedAccounts, 6, incomeContext);
-    // A brand-new ledger has no full prior month; fall back rather than show a zero
-    // runway on real data.
-    if (avg.spending === 0 && avg.income === 0) {
-      const months = new Set(past.map(t => format(parseISO(t.date), 'yyyy-MM'))).size || 1;
-      // STATE-002: counts what the owner confirmed as spending, like every other total.
-      const spent = sumExpenseCents(past, derivedAccounts, incomeContext) / 100;
-      return { avgExpenses: spent / months, avgIncome: 0 };
-    }
-    return { avgExpenses: avg.spending, avgIncome: avg.income };
-  }, [transactions, profile?.monthlyBudget, derivedAccounts, incomeContext]);
-
-  // Generate forecast for runway. Balances derived from linked transactions so the
-  // runway starts from the real current cash, not the stored opening figure.
-  const forecast = useMemo(() => {
-    if (!profile) return null;
-    const currentCash = calculateCurrentCash(derivedAccounts);
-    return generateForecast(
-      currentCash,
-      derivedAccounts,
-      profile?.incomeSources || [],
-      transactions,
-      incomeContext,
-      profile?.settings?.safetyThreshold || 500,
-      90
-    );
-    // STATE-001 (#105): `incomeContext` MUST be in this list. It was not, so this memo
-    // held a forecast computed under the previous policy — flip the pending setting and
-    // History's runway silently kept the old answer until something else invalidated it.
-  }, [profile, transactions, incomeContext, derivedAccounts]);
-
   const handleDelete = async (id: string) => {
     // A card payment / internal move is TWO paired halves. Deleting only one desyncs
     // the two derived balances — but window.confirm can only say OK/Cancel, and Cancel
@@ -358,11 +297,6 @@ export default function HistoryPage() {
     (accountFilter !== 'all' ? 1 : 0) +
     (categoryFilter !== 'all' ? 1 : 0);
 
-  const currentCash = calculateCurrentCash(derivedAccounts);
-  // ACTIVE sources only: getIncomeSources() now returns paused sources too (so they
-  // can be resumed), and a paused source is not money arriving.
-  const monthlyIncome = monthlyIncomeOf(profile?.incomeSources?.filter((i) => i.isActive) ?? []) || monthlyStats.avgIncome;
-
   return (
     <div className="min-h-screen relative">
       <div className="bg-pattern" />
@@ -374,11 +308,7 @@ export default function HistoryPage() {
           <div>
             <h1 className="text-3xl font-bold text-[var(--foreground)]">Activity</h1>
             <p className="text-[var(--foreground-secondary)] mt-1">
-              {viewMode === 'history'
-                ? 'View, add, and import your transactions'
-                : viewMode === 'insights'
-                  ? 'Your spending pace and where it goes'
-                  : 'See how long your money will last'}
+              Every transaction, newest first
             </p>
             {/* Flow is not a tab (UI spec B1); this is how a phone gets there. */}
             <Link
@@ -388,34 +318,12 @@ export default function HistoryPage() {
               View as flow →
             </Link>
           </div>
-          <div className="flex items-center gap-3">
-            {/* UI-104: three tabs — Transactions | Insights | Runway */}
-            <div className="flex bg-[var(--background-tertiary)] rounded-control p-1">
-              {([['history', 'Transactions'], ['insights', 'Insights'], ['runway', 'Runway']] as [ViewMode, string][]).map(([v, label]) => (
-                <button
-                  key={v}
-                  onClick={() => {
-                    setViewMode(v);
-                    window.history.replaceState(null, '', v === 'history' ? '/history' : `/history?tab=${v}`);
-                  }}
-                  aria-pressed={viewMode === v}
-                  className={`min-h-[44px] px-4 rounded-control text-sm font-medium transition-all ${
-                    viewMode === v
-                      ? 'bg-[var(--accent-primary)] text-[#16181c]'
-                      : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
 
-        {viewMode === 'insights' ? (
-          <InsightsTab />
-        ) : viewMode === 'history' ? (
-          <>
+        {/* Activity is the list (tonight's queue, #196). Its Insights and Runway tabs are
+            gone: spending pace belongs with Flow (#199), what-if runway with Forecast (#198);
+            /analytics now redirects to /flow. The components are kept for those homes. */}
+        <>
             {/* Compact Header with Actions and Stats */}
             <div className="bg-[var(--background-secondary)] rounded-card border border-[var(--border-color)] p-4 mb-6">
               {/* Top Row - Stats Summary. A labelled 3-column grid: the old unwrapped row of
@@ -846,18 +754,7 @@ export default function HistoryPage() {
                 ))}
               </div>
             )}
-          </>
-        ) : (
-          /* Runway View */
-          forecast && (
-            <RunwayCalculator
-              currentCash={currentCash}
-              monthlyExpenses={monthlyStats.avgExpenses || profile?.monthlyBudget || 3000}
-              monthlyIncome={monthlyIncome}
-              forecast={forecast}
-            />
-          )
-        )}
+        </>
       </main>
 
       {/* Phone row actions — the same three as the desktop icons. Delete hands off to the
