@@ -143,7 +143,7 @@ export default function ForecastChart({ forecast }: ForecastChartProps) {
 
       {/* Chart */}
       <div
-        className="h-[280px] sm:h-[350px] mt-4"
+        className="h-[200px] sm:h-[320px] mt-4"
         role="img"
         aria-label={`Area chart projecting cash balance from $${forecast.startingBalance.toLocaleString()} to $${forecast.endingBalance.toLocaleString()}, with a lowest point of $${forecast.lowestBalance.toLocaleString()} on ${format(parseISO(forecast.lowestBalanceDate), 'MMM d')}.`}
       >

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useTransactions } from '@/context/TransactionContext';
@@ -18,18 +19,19 @@ import SavingsGoalsPanel from '@/components/SavingsGoalsPanel';
 import PlannedPaymentsPanel from '@/components/PlannedPaymentsPanel';
 import AssumptionsPanel from '@/components/AssumptionsPanel';
 import BillsTab from '@/components/BillsTab';
+import RunwayCalculator from '@/components/RunwayCalculator';
 import { UnanchoredNote } from '@/components/UnanchoredNote';
 import { generateForecast, calculateCurrentCash, getAllAccountForecasts, withDerivedBalances, monthlyAverages } from '@/lib/forecast';
 import CashflowTab from '@/components/CashflowTab';
 import { buildAssumptions, AssumptionOverrides } from '@/lib/behavior';
 import { accountsBehindFigure } from '@/lib/accounts';
-import { homeSummary, RESERVE_TARGET_MONTHS } from '@/lib/home';
-import { formatMoney } from '@/lib/money';
+import { homeSummary, runwayLabel } from '@/lib/home';
+import { formatMoney, monthlyIncomeOf } from '@/lib/money';
 import { sanitizeAssumedSpend } from '@/lib/profile-settings';
 import { loadOverrides, saveOverrides } from '@/lib/assumption-overrides';
 import * as firestoreService from '@/lib/firestore';
 import { format } from 'date-fns';
-import { Shield, CreditCard, Wallet } from 'lucide-react';
+import { CreditCard } from 'lucide-react';
 import { SavingsGoal } from '@/types';
 import LoadingScreen from '@/components/LoadingScreen';
 
@@ -51,21 +53,19 @@ export default function ForecastPage() {
   const [savingsGoals, setSavingsGoals] = useState<SavingsGoal[]>([]);
   // User corrections to the behavior engine's assumptions (localStorage-backed).
   const [overrides, setOverrides] = useState<AssumptionOverrides>(() => loadOverrides());
-  // Bills register (BILLS-001) lives on a second tab; deep-linkable via ?tab=bills.
-  // Read from location instead of useSearchParams to avoid the Suspense boundary
-  // requirement on a fully client-rendered page.
-  // Lazy init is hydration-safe here: the auth-loading gate renders a spinner on
-  // the first client pass, so the tab bar never hydrates against server markup.
-  const [activeTab, setActiveTab] = useState<'timeline' | 'bills' | 'cashflow'>(() =>
-    (() => {
-      if (typeof window === 'undefined') return 'timeline' as const;
-      const t = new URLSearchParams(window.location.search).get('tab');
-      return t === 'bills' || t === 'cashflow' ? t : 'timeline';
-    })()
-  );
-  const switchTab = (tab: 'timeline' | 'bills' | 'cashflow') => {
-    setActiveTab(tab);
-    window.history.replaceState(null, '', tab === 'timeline' ? '/forecast' : `/forecast?tab=${tab}`);
+  // #198: two tabs, Plan and Month. The Bills editor is no longer a tab but keeps its
+  // address (?tab=bills — Home's "All bills" links there) behind Outflows' "Edit bills".
+  // ?tab=cashflow is Month (/calendar and /cashflow redirect there). Read from location
+  // instead of useSearchParams to avoid a Suspense boundary on a client-rendered page;
+  // hydration-safe because the auth gate renders LoadingScreen on the first client pass.
+  const [view, setView] = useState<'plan' | 'month' | 'bills'>(() => {
+    if (typeof window === 'undefined') return 'plan';
+    const t = new URLSearchParams(window.location.search).get('tab');
+    return t === 'cashflow' ? 'month' : t === 'bills' ? 'bills' : 'plan';
+  });
+  const switchView = (next: 'plan' | 'month' | 'bills') => {
+    setView(next);
+    window.history.replaceState(null, '', next === 'plan' ? '/forecast' : `/forecast?tab=${next === 'month' ? 'cashflow' : 'bills'}`);
   };
   
   // Load savings goals from Firestore
@@ -206,16 +206,15 @@ export default function ForecastPage() {
   if (!isAuthenticated || !forecast) return null;
 
   const currentCash = calculateCurrentCash(derivedAccounts);
-  
-  // Calculate monthly expenses for emergency fund calculation
+
   // UI-103: the burn rate is the real 6-month average — the old figure divided
   // the CHART's display range into itself, so Runway changed when you changed
   // the range or picked an account. One basis, shared with Home (lib/home.ts).
-  const steadyBurn = monthlyAverages(transactions, derivedAccounts, 6, incomeContext).spending;
+  const averages = monthlyAverages(transactions, derivedAccounts, 6, incomeContext);
   // FIN-SPEND-001 (#133): same override resolution as Home and homeSnapshot —
   // the owner's own number, set from chat, wins over the derived average so
   // this screen's "steady burn" can never disagree with theirs.
-  const avgMonthlyExpense = sanitizeAssumedSpend(profile?.settings?.assumedMonthlySpend) ?? steadyBurn;
+  const avgMonthlyExpense = sanitizeAssumedSpend(profile?.settings?.assumedMonthlySpend) ?? averages.spending;
   const runway = homeSummary({
     currentCash,
     avgMonthlyExpense,
@@ -224,244 +223,252 @@ export default function ForecastPage() {
     today: new Date(),
   });
   const monthlyExpenses = avgMonthlyExpense;
+  // What-if (moved here from Activity, #205): ACTIVE approved sources first, else the
+  // same 6-month average — the resolution Activity's Runway view used.
+  const monthlyIncome = monthlyIncomeOf(profile?.incomeSources?.filter((i) => i.isActive) ?? []) || averages.income;
+  const threshold = profile?.settings?.safetyThreshold || 500;
+  const isCard = selectedAccountForecast?.accountType === 'credit_card';
+  const periodLabel = forecastDays >= 365 ? 'year' : `${Math.round(forecastDays / 30)} month${Math.round(forecastDays / 30) === 1 ? '' : 's'}`;
 
   return (
     <div className="min-h-screen relative">
       <div className="bg-pattern" />
       <Navbar />
-      
-      <main className="pt-24 pb-24 md:pb-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto relative z-10">
-        {/* Header with Time Period Selector */}
-        <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
-          <div>
-            <h1 className="text-3xl sm:text-4xl font-bold text-[var(--foreground)] mb-2">
-              Cash Flow Forecast
-            </h1>
-            <p className="text-base text-[var(--foreground-secondary)]">
-              {activeTab === 'bills'
-                ? 'Your recurring bills and targets'
-                : activeTab === 'cashflow'
-                  ? 'Where your income goes, month by month'
-                  : `Project your balance for the next ${forecastDays >= 365 ? 'year' : forecastDays >= 30 ? `${Math.round(forecastDays / 30)} months` : `${forecastDays} days`}`}
-            </p>
-          </div>
 
-          {/* Time Period Selector */}
-          {activeTab === 'timeline' && (
-          <div className="flex items-center gap-2 p-2 bg-[var(--background-secondary)] rounded-control border border-[var(--border-color)] shadow-sm">
-            {TIME_PERIODS.map((period) => (
+      <main className="pt-24 pb-24 md:pb-16 px-4 lg:px-8 max-w-content mx-auto relative z-10">
+        <div className="mb-4">
+          <h1 className="text-3xl font-[family-name:var(--font-display)] text-[var(--foreground)]">Forecast</h1>
+          <p className="text-[var(--foreground-secondary)] mt-1">
+            {view === 'month'
+              ? 'Where your money went, month by month'
+              : view === 'bills'
+                ? 'Your recurring bills'
+                : `Will you be OK? Your cash over the next ${periodLabel}.`}
+          </p>
+        </div>
+
+        {/* #198: two underline tabs only. Bills is an address, not a tab. */}
+        {view === 'bills' ? (
+          <button
+            onClick={() => switchView('plan')}
+            className="tap-target mb-6 text-sm font-medium text-[var(--accent-primary)] hover:text-[var(--accent-secondary)]"
+          >
+            ← Back to plan
+          </button>
+        ) : (
+          <div role="tablist" aria-label="Forecast views" className="mb-6 flex gap-6 border-b border-[var(--border-color)]">
+            {([['plan', 'Plan'], ['month', 'Month']] as const).map(([key, label]) => (
               <button
-                key={period.days}
-                onClick={() => setForecastDays(period.days)}
-                className={`px-4 min-h-[44px] text-sm font-semibold rounded-control transition-all ${
-                  forecastDays === period.days
-                    ? 'bg-[var(--accent-primary)] text-[#16181c] shadow-sm'
-                    : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)]'
+                key={key}
+                role="tab"
+                aria-selected={view === key}
+                onClick={() => switchView(key)}
+                className={`min-h-[44px] -mb-px border-b-2 px-1 text-sm font-semibold transition-colors ${
+                  view === key
+                    ? 'border-[var(--accent-primary)] text-[var(--foreground)]'
+                    : 'border-transparent text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'
                 }`}
               >
-                <span className="hidden sm:inline">{period.label}</span>
-                <span className="sm:hidden">{period.short}</span>
+                {label}
               </button>
             ))}
           </div>
-          )}
-        </div>
+        )}
 
-        {/* Tab bar: Timeline | Bills (BILLS-001) */}
-        <div className="mb-6 flex items-center gap-2 p-2 bg-[var(--background-secondary)] rounded-control border border-[var(--border-color)] w-fit">
-          {(['timeline', 'bills', 'cashflow'] as const).map(tab => (
-            <button
-              key={tab}
-              onClick={() => switchTab(tab)}
-              className={`px-4 min-h-[44px] text-sm font-semibold rounded-control transition-all ${
-                activeTab === tab
-                  ? 'bg-[var(--accent-primary)] text-[#16181c] shadow-sm'
-                  : 'text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)]'
-              }`}
-            >
-              {tab === 'timeline' ? 'Timeline' : tab === 'bills' ? 'Bills' : 'Cashflow'}
-            </button>
-          ))}
-        </div>
+        {view === 'bills' && user?.id && <BillsTab userId={user.id} />}
 
-        {activeTab === 'bills' && user?.id && <BillsTab userId={user.id} />}
+        {/* Month: the existing CashflowTab until #188's grid lands. No day-totals here. */}
+        {view === 'month' && <CashflowTab />}
 
-        {activeTab === 'cashflow' && <CashflowTab />}
-
-        {activeTab === 'timeline' && (<>
-        {/* UI-103: the chip-per-account row wrapped to 3 lines on a phone —
-            one dropdown, one line (audit wrongControl). */}
-        {forecastableAccounts.length > 0 && (
-          <div className="mb-6 bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-card p-4">
-            <div className="flex items-center gap-3">
-              <label htmlFor="account-select" className="text-sm font-medium text-[var(--foreground)] flex items-center gap-2 shrink-0">
-                <Wallet className="w-5 h-5 text-[var(--foreground-muted)]" aria-hidden="true" />
-                Forecast for
-              </label>
-              <select
-                id="account-select"
-                value={selectedAccountId}
-                onChange={(e) => setSelectedAccountId(e.target.value)}
-                className="select-field min-h-[44px] px-3 text-sm flex-1 max-w-xs"
-              >
-                <option value="all">All accounts</option>
-                {forecastableAccounts.map(account => (
-                  <option key={account.id} value={account.id}>
-                    {account.name}{account.lastFourDigits ? ` ···${account.lastFourDigits}` : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {selectedAccountForecast?.creditCardPayments && selectedAccountForecast.creditCardPayments.length > 0 && (
-              <div className="mt-4 pt-4 border-t border-[var(--border-color)]">
-                <p className="text-xs font-medium text-[var(--foreground-muted)] mb-2">
-                  Upcoming Credit Card Payments from this Account:
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {selectedAccountForecast.creditCardPayments.map(payment => (
-                    <div
-                      key={payment.cardId}
-                      className="px-3 py-2 rounded-control bg-red-500/10 border border-red-500/20 text-sm"
+        {view === 'plan' && (
+          <div className="space-y-6">
+            {/* Period + account scope. Chips scroll sideways on a phone instead of wrapping. */}
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+              <div className="-mx-4 px-4 sm:mx-0 sm:px-0 overflow-x-auto">
+                <div role="group" aria-label="Forecast period" className="flex gap-2 w-max">
+                  {TIME_PERIODS.map((period) => (
+                    <button
+                      key={period.days}
+                      onClick={() => setForecastDays(period.days)}
+                      aria-pressed={forecastDays === period.days}
+                      aria-label={period.label}
+                      className={`min-h-[44px] px-4 rounded-pill text-sm font-semibold whitespace-nowrap transition-colors ${
+                        forecastDays === period.days
+                          ? 'bg-[var(--accent-primary)] text-[#16181c]'
+                          : 'bg-[var(--background-tertiary)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]'
+                      }`}
                     >
-                      <div className="flex items-center gap-2">
-                        <CreditCard className="w-4 h-4 text-red-400" />
-                        <span className="font-medium text-[var(--foreground)]">{payment.cardName}</span>
-                      </div>
-                      <div className="flex items-center gap-2 mt-1 text-xs text-[var(--foreground-muted)]">
-                        <span className="text-red-400 font-semibold tabular-nums">-{formatMoney(payment.amount, profile?.currency, 2)}</span>
-                        <span>due {format(new Date(payment.dueDate), 'MMM d')}</span>
-                      </div>
-                    </div>
+                      {period.short}
+                    </button>
                   ))}
                 </div>
               </div>
-            )}
-          </div>
-        )}
-
-        {/* UI-103: 4 cards → 3. The Runway pair was ONE number as two cards;
-            "Attention: 45d" never said what happens in 45 days. */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-          <div className="p-5 bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-card">
-            <p className="text-xs font-semibold text-[var(--foreground-muted)] uppercase tracking-wide mb-2">
-              {selectedAccountId === 'all' ? 'Total Cash Available' : `${selectedAccountForecast?.accountName || 'Account'} Balance`}
-            </p>
-            <p className={`text-3xl font-bold tnum ${
-              selectedAccountForecast?.accountType === 'credit_card' ? 'text-[var(--money-out)]' : 'text-[var(--money-in)]'
-            }`}>
-              {formatMoney(
-                selectedAccountId === 'all'
-                  ? currentCash
-                  : (selectedAccountForecast?.accountType === 'credit_card' ? -1 : 1) * Math.abs(selectedAccountForecast?.currentBalance || 0),
-                profile?.currency, 2
+              {/* UI-103: one dropdown, one line — the chip-per-account row wrapped to 3 lines. */}
+              {forecastableAccounts.length > 0 && (
+                <div className="flex items-center gap-2 min-w-0 sm:ml-auto">
+                  <label htmlFor="account-select" className="text-sm text-[var(--foreground-secondary)] shrink-0">
+                    Forecast for
+                  </label>
+                  <select
+                    id="account-select"
+                    value={selectedAccountId}
+                    onChange={(e) => setSelectedAccountId(e.target.value)}
+                    className="select-field min-h-[44px] px-3 text-sm min-w-0 flex-1 sm:flex-none sm:max-w-xs"
+                  >
+                    <option value="all">All accounts</option>
+                    {forecastableAccounts.map(account => (
+                      <option key={account.id} value={account.id}>
+                        {account.name}{account.lastFourDigits ? ` ···${account.lastFourDigits}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               )}
-            </p>
-            {selectedAccountForecast?.accountType === 'credit_card' && (
-              <p className="text-xs text-[var(--foreground-muted)] mt-1">Balance owed</p>
-            )}
-            {/* #83 Finding 1: this card shows the combined total OR one selected
-                account's balance — the note must count only the account(s) behind
-                THAT figure, not every account, or a correctly-anchored single
-                account would show a stale "unanchored" claim borrowed from an
-                account not even in the number above it. */}
-            <UnanchoredNote accounts={accountsBehindFigure(selectedAccountId, derivedAccounts)} />
-          </div>
-
-          <div className="p-5 bg-[var(--background-secondary)] border border-[var(--border-color)] rounded-card">
-            <div className="flex items-center gap-2 mb-2">
-              <Shield className="w-4 h-4 text-[var(--foreground-muted)]" aria-hidden="true" />
-              <p className="text-xs font-semibold text-[var(--foreground-muted)] uppercase tracking-wide">Money lasts</p>
             </div>
-            <p className="text-3xl font-bold tnum text-[var(--foreground)]">
-              {runway.runwayMonths} mo
-            </p>
-            <p className="text-xs text-[var(--foreground-muted)] mt-1 tnum">
-              to {format(runway.runwayDate, 'MMM d, yyyy')} · goal {RESERVE_TARGET_MONTHS} months
-            </p>
-          </div>
 
-          <div className={`p-5 rounded-card border ${
-            forecast.daysUntilUnsafe !== null
-              ? 'bg-[var(--progress)]/10 border-[var(--progress)]/40'
-              : 'bg-[var(--money-in)]/10 border-[var(--money-in)]/40'
-          }`}>
-            <p className="text-xs font-semibold text-[var(--foreground-muted)] uppercase tracking-wide mb-2">Heads-up</p>
-            {forecast.daysUntilUnsafe !== null ? (
-              <div>
-                <p className="text-xl font-bold text-[var(--foreground)] tnum">
-                  Cash dips below {formatMoney(profile?.settings?.safetyThreshold || 500, profile?.currency, 0)} in {forecast.daysUntilUnsafe} days
-                </p>
-                <p className="text-xs text-[var(--foreground-muted)] mt-1 tnum">
-                  {formatMoney(forecast.lowestBalance, profile?.currency, 2)} on {format(new Date(forecast.lowestBalanceDate), 'MMM d')}
-                </p>
+            {/* The one number + the one runway sentence. */}
+            <section className="p-4 lg:p-5 rounded-card bg-[var(--background-secondary)] border border-[var(--border-color)]">
+              <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--accent-primary)]">
+                {selectedAccountId === 'all' ? 'Cash now' : `${selectedAccountForecast?.accountName || 'Account'} balance`}
+              </p>
+              <p className={`hero-number tnum mt-1 ${isCard ? 'text-[var(--money-out)]' : 'text-[var(--foreground)]'}`}>
+                {formatMoney(
+                  selectedAccountId === 'all'
+                    ? currentCash
+                    : (isCard ? -1 : 1) * Math.abs(selectedAccountForecast?.currentBalance || 0),
+                  profile?.currency, 2
+                )}
+              </p>
+              {isCard && <p className="text-xs text-[var(--foreground-muted)] mt-1">Balance owed</p>}
+              {/* #83 Finding 1: the note counts only the account(s) behind THIS figure. */}
+              <UnanchoredNote accounts={accountsBehindFigure(selectedAccountId, derivedAccounts)} />
+              <p className="mt-3 text-sm text-[var(--foreground-secondary)]">
+                {runway.hasBurn ? (
+                  <>
+                    Your cash lasts <span className="font-semibold text-[var(--foreground)] tnum">{runwayLabel(runway)}</span> at
+                    your usual spending, to {format(runway.runwayDate, 'MMM d, yyyy')}.{' '}
+                  </>
+                ) : (
+                  // Unknown is a sentence and a link, never "0 mo" (the old card printed runwayMonths regardless).
+                  <>
+                    Runway isn&apos;t measured yet —{' '}
+                    <Link href="/accounts" className="font-medium text-[var(--accent-primary)] underline underline-offset-2">connect an account</Link>.{' '}
+                  </>
+                )}
+                {forecast.daysUntilUnsafe !== null ? (
+                  <span className="tnum">
+                    {selectedAccountId === 'all' ? 'Cash' : 'This account'} dips below {formatMoney(threshold, profile?.currency, 0)} in {forecast.daysUntilUnsafe} days
+                    ({formatMoney(forecast.lowestBalance, profile?.currency, 2)} on {format(new Date(forecast.lowestBalanceDate), 'MMM d')}).
+                  </span>
+                ) : (
+                  <span className="tnum">
+                    {selectedAccountId === 'all' ? 'Cash stays' : 'This account stays'} above {formatMoney(threshold, profile?.currency, 0)} for the whole period.
+                  </span>
+                )}
+              </p>
+              {selectedAccountForecast?.creditCardPayments && selectedAccountForecast.creditCardPayments.length > 0 && (
+                <div className="mt-4 pt-4 border-t border-[var(--border-color)]">
+                  <p className="text-xs font-medium text-[var(--foreground-muted)] mb-2">Card payments from this account</p>
+                  <ul className="flex flex-wrap gap-2">
+                    {selectedAccountForecast.creditCardPayments.map(payment => (
+                      <li key={payment.cardId} className="px-3 py-2 rounded-control bg-[var(--background-tertiary)] text-sm">
+                        <span className="flex items-center gap-2 font-medium text-[var(--foreground)]">
+                          <CreditCard className="w-4 h-4 text-[var(--foreground-muted)]" aria-hidden="true" />
+                          {payment.cardName}
+                        </span>
+                        <span className="text-xs text-[var(--foreground-muted)] tnum">
+                          <span className="font-semibold text-[var(--money-out)]">−{formatMoney(payment.amount, profile?.currency, 2)}</span>
+                          {' '}due {format(new Date(payment.dueDate), 'MMM d')}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </section>
+
+            <ForecastChart forecast={forecast} />
+
+            {/* "Can I afford this?" sits directly under the chart it reads. */}
+            <DecisionCheckPanel forecast={forecast} />
+
+            {/* One Outflows group: what is due + what is planned. The editor is a link, not a tab. */}
+            <section aria-labelledby="outflows-heading" className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <h2 id="outflows-heading" className="font-semibold text-[var(--foreground)]">Outflows</h2>
+                <button
+                  onClick={() => switchView('bills')}
+                  className="tap-target text-sm font-medium text-[var(--accent-primary)] hover:text-[var(--accent-secondary)]"
+                >
+                  Edit bills
+                </button>
               </div>
-            ) : (
-              <p className="text-3xl font-bold text-[var(--money-in)]">All clear</p>
-            )}
-          </div>
-        </div>
-
-        {/* UI-103: the chart and timeline ARE the screen; the nine helper
-            panels collapse into one disclosure — reachable, never shouting.
-            (They stacked 13 deep on a phone before.) */}
-        <div className="space-y-6">
-          <ForecastChart forecast={forecast} />
-          <ForecastTimeline forecast={forecast} />
-
-          <details className="glass-card p-5">
-            <summary className="cursor-pointer list-none font-semibold text-[var(--foreground)] flex items-center justify-between min-h-[44px]">
-              <span>More tools</span>
-              <span className="text-sm font-normal text-[var(--foreground-secondary)]">assumptions · insights · budgets · goals · plans</span>
-            </summary>
-            <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-              <AssumptionsPanel assumptions={assumptions} onOverridesChange={handleOverridesChange} />
-              <DecisionCheckPanel forecast={forecast} />
-              <AIInsightsPanel
-                transactions={transactions}
-                accounts={derivedAccounts}
-                incomeSources={profile?.incomeSources || []}
-                currentCash={currentCash}
-                safetyThreshold={profile?.settings?.safetyThreshold || 500}
-                income={incomeContext}
-              />
-              {profile?.settings?.categoryBudgets && profile.settings.categoryBudgets.length > 0 && (
-                <BudgetStatusPanel
-                  budgets={profile.settings.categoryBudgets}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+                <UpcomingBillsPanel
+                  accounts={derivedAccounts}
                   transactions={transactions}
-                  accounts={profile?.paymentAccounts}
+                  preferences={profile?.settings?.notificationPreferences}
                   compact={true}
                 />
-              )}
-              <UpcomingBillsPanel
-                accounts={derivedAccounts}
-                transactions={transactions}
-                preferences={profile?.settings?.notificationPreferences}
-                compact={true}
-              />
-              <SavingsGoalsPanel
-                goals={savingsGoals}
-                accounts={derivedAccounts}
-                forecast={forecast}
-                safetyThreshold={profile?.settings?.safetyThreshold || 500}
-                onAddGoal={handleAddGoal}
-                onUpdateGoal={handleUpdateGoal}
-                onDeleteGoal={handleDeleteGoal}
-                compact={true}
-              />
-              <PlannedPaymentsPanel />
-              <EmergencyFundPanel
-                forecast={forecast}
-                monthlyExpenses={monthlyExpenses}
-                currentCash={currentCash}
-              />
-              <AIQuestionPanel forecast={forecast} />
-            </div>
-          </details>
-        </div>
+                <PlannedPaymentsPanel />
+              </div>
+            </section>
 
-        </>)}
+            {/* #198: everything else collapses into one Assumptions disclosure until #201
+                gives the knobs a home in Settings. Reachable, never competing with the chart. */}
+            <details className="rounded-card border border-[var(--border-color)] bg-[var(--background-secondary)] p-4 lg:p-5">
+              <summary className="cursor-pointer list-none min-h-[44px] flex items-center justify-between gap-3 font-semibold text-[var(--foreground)]">
+                <span>Assumptions</span>
+                <span className="hidden sm:inline text-sm font-normal text-[var(--foreground-secondary)]">what-if · timeline · reserve · goals · budgets · insights</span>
+              </summary>
+              <div className="mt-4 grid grid-cols-1 gap-6">
+                <AssumptionsPanel assumptions={assumptions} onOverridesChange={handleOverridesChange} />
+                {runway.hasBurn && (
+                  <RunwayCalculator
+                    currentCash={currentCash}
+                    monthlyExpenses={monthlyExpenses}
+                    monthlyIncome={monthlyIncome}
+                    forecast={forecast}
+                  />
+                )}
+                <ForecastTimeline forecast={forecast} />
+                <EmergencyFundPanel
+                  forecast={forecast}
+                  monthlyExpenses={monthlyExpenses}
+                  currentCash={currentCash}
+                />
+                <SavingsGoalsPanel
+                  goals={savingsGoals}
+                  accounts={derivedAccounts}
+                  forecast={forecast}
+                  safetyThreshold={threshold}
+                  onAddGoal={handleAddGoal}
+                  onUpdateGoal={handleUpdateGoal}
+                  onDeleteGoal={handleDeleteGoal}
+                  compact={true}
+                />
+                {profile?.settings?.categoryBudgets && profile.settings.categoryBudgets.length > 0 && (
+                  <BudgetStatusPanel
+                    budgets={profile.settings.categoryBudgets}
+                    transactions={transactions}
+                    accounts={profile?.paymentAccounts}
+                    compact={true}
+                  />
+                )}
+                <AIInsightsPanel
+                  transactions={transactions}
+                  accounts={derivedAccounts}
+                  incomeSources={profile?.incomeSources || []}
+                  currentCash={currentCash}
+                  safetyThreshold={threshold}
+                  income={incomeContext}
+                />
+                <AIQuestionPanel forecast={forecast} />
+              </div>
+            </details>
+          </div>
+        )}
       </main>
     </div>
   );
 }
-
