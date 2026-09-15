@@ -59,26 +59,33 @@ export function matchTransfers(
   windowDays = 4
 ): TransferMatch {
   const legs = transactions.filter(t => classifyTransaction(t, accounts) === 'transfer');
-  const outs = legs
-    .filter(t => legDirection(t, accounts) === 'out')
-    .sort((a, b) => a.date.localeCompare(b.date));
-  const ins = legs.filter(t => legDirection(t, accounts) === 'in');
+  // #168: BOTH lists in a total order (date, then id). The result must never depend on
+  // the order Firestore returned rows in: pairedLegId feeds the paired DELETE, so a
+  // different pairing offers — and removes — an unrelated transaction.
+  const byDateThenId = (a: Transaction, b: Transaction) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id);
+  const outs = legs.filter(t => legDirection(t, accounts) === 'out').sort(byDateThenId);
+  const ins = legs.filter(t => legDirection(t, accounts) === 'in').sort(byDateThenId);
 
   const usedIn = new Set<number>();
   const pairs: TransferPair[] = [];
 
   for (const out of outs) {
+    // #168: integer cents, not a float gap — `< 0.01` paired legs a cent apart at $2,000
+    // but not at $2,500. And the NEAREST date wins (findTwin's rule), not the first hit:
+    // first-fit made one $2,000 ledger match $2,000 or $4,000 depending on array order.
+    const outCents = Math.round(out.amount * 100);
     let match = -1;
+    let bestDistance = Infinity;
     for (let j = 0; j < ins.length; j++) {
       if (usedIn.has(j)) continue;
       const inbound = ins[j];
-      if (
-        Math.abs(out.amount - inbound.amount) < 0.01 &&
-        Math.abs(differenceInDays(parseISO(out.date), parseISO(inbound.date))) <= windowDays &&
-        out.accountId !== inbound.accountId // never pair a leg with itself / same account
-      ) {
+      if (Math.round(inbound.amount * 100) !== outCents) continue;
+      if (out.accountId === inbound.accountId) continue; // never pair a leg with itself / same account
+      const distance = Math.abs(differenceInDays(parseISO(out.date), parseISO(inbound.date)));
+      // Strictly nearer only: `ins` is sorted, so a tie keeps the earlier (then lower-id) leg.
+      if (distance <= windowDays && distance < bestDistance) {
         match = j;
-        break;
+        bestDistance = distance;
       }
     }
     if (match >= 0) {
