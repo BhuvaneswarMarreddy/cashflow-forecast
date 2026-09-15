@@ -90,7 +90,10 @@ export function findLinkedInstitution(
 /** What the owner is told after Link, and whether a Repair button belongs beside it. */
 export function describeConnect(r: ConnectResult): { message: string; repairItemId: string | null; refresh: boolean } {
   if (r.status === 'already-linked') {
-    return { message: `${r.institution} is already connected. Repair that connection to change which accounts are shared.`, repairItemId: r.itemId, refresh: false };
+    // Refresh too: a connection that exists but never synced (2026-09-15, Charles Schwab —
+    // linked, then every scheduled run crashed) shows nothing until a sync runs, and
+    // "already connected" with an empty list reads as "linking did nothing".
+    return { message: `${r.institution} is already connected — pulling its data. Repair the connection to change which accounts are shared.`, repairItemId: r.itemId, refresh: true };
   }
   if (r.accountsShared === 0) {
     // Never an empty list that reads as "no money": say what happened and the next tap.

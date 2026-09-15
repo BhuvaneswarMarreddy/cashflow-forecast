@@ -104,10 +104,10 @@ describe('what the owner is told (#183)', () => {
     });
   });
 
-  it('a duplicate names the bank and offers Repair', () => {
+  it('a duplicate names the bank, offers Repair, and still pulls data for a connection that never synced', () => {
     const d = describeConnect({ status: 'already-linked', institution: 'Charles Schwab', itemId: 'item-schwab' });
-    expect(d.message).toBe('Charles Schwab is already connected. Repair that connection to change which accounts are shared.');
-    expect(d).toMatchObject({ repairItemId: 'item-schwab', refresh: false });
+    expect(d.message).toBe('Charles Schwab is already connected — pulling its data. Repair the connection to change which accounts are shared.');
+    expect(d).toMatchObject({ repairItemId: 'item-schwab', refresh: true });
   });
 
   it('a real connection pulls data', () => {
