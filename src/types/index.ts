@@ -452,7 +452,9 @@ export interface UserProfile {
     notifications?: boolean;
     safetyThreshold?: number; // Minimum safe balance
     emergencyFundGoal?: number; // Target emergency fund (in months of expenses)
-    emergencyFundAmount?: number; // Fixed amount goal (alternative to months)
+    // Fixed amount goal (alternative to months). `null` clears it: Firestore's updateDoc
+    // drops `undefined`, so a cleared goal needs a value that survives the write (#201).
+    emergencyFundAmount?: number | null;
     categoryBudgets?: CategoryBudget[]; // Per-category spending limits
     notificationPreferences?: NotificationPreferences; // Reminder settings
     /**
@@ -463,7 +465,8 @@ export interface UserProfile {
     includePendingInCalculations?: boolean;
     /**
      * FIN-SPEND-001 (#133). The owner's own number for the monthly-spend
-     * assumption that drives runway, in DOLLARS. Settable from chat only.
+     * assumption that drives runway, in DOLLARS. Settable from chat and from
+     * Settings → Assumptions (#201).
      * Absent or null = no override: runway uses the derived 6-month average
      * (monthlyAverages().spending). `null` — not just "absent" — is a real,
      * writable value: it is how the chat card's "Back to derived" affordance

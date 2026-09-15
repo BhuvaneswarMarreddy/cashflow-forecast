@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { formatMoney, monthlyIncomeOf } from '@/lib/money';
-import { reconcileAllIncome, type Cadence } from '@/lib/income-cadence';
+import { reconcileAllIncome } from '@/lib/income-cadence';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
@@ -18,7 +18,7 @@ import BudgetSettingsPanel from '@/components/BudgetSettingsPanel';
 import BudgetStatusPanel from '@/components/BudgetStatusPanel';
 import DebtPlannerPanel from '@/components/DebtPlannerPanel';
 import { UnanchoredNote } from '@/components/UnanchoredNote';
-import { PAYMENT_METHODS, ACCOUNT_TYPES, PaymentAccount, IncomeSource, AccountType, PaymentMethod, CategoryBudget } from '@/types';
+import { PAYMENT_METHODS, ACCOUNT_TYPES, PaymentAccount, AccountType, PaymentMethod, CategoryBudget } from '@/types';
 import { withDerivedBalances, monthlyAverages, calculateCurrentCash } from '@/lib/forecast';
 import { currentOf, isCashAccount, isDebtAccount, isUnanchored, openingAnchor, balanceCaption } from '@/lib/accounts';
 import ReconcileSheet from '@/components/ReconcileSheet';
@@ -70,9 +70,6 @@ export default function AccountsPage() {
     updatePaymentAccount,
     reorderPaymentAccounts,
     deletePaymentAccount,
-    addIncomeSource,
-    updateIncomeSource,
-    deleteIncomeSource,
     updateProfile,
     incomeContext,
     refreshProfile,
@@ -82,7 +79,8 @@ export default function AccountsPage() {
   const router = useRouter();
   
   // #200: the account list is always the page; these are the Tools under it.
-  const [activeTab, setActiveTab] = useState<'income' | 'subscriptions' | 'budgets' | 'debt'>('income');
+  // #201: income sources moved to Settings; the Monthly Income card links there.
+  const [activeTab, setActiveTab] = useState<'subscriptions' | 'budgets' | 'debt'>('subscriptions');
   const [showImport, setShowImport] = useState(false);
 
   // Live transfer pairing: match each leg leaving an account to the leg arriving in
@@ -108,7 +106,6 @@ export default function AccountsPage() {
     error: transactionsError,
   });
   const [showAccountModal, setShowAccountModal] = useState(false);
-  const [showIncomeModal, setShowIncomeModal] = useState(false);
   const [editingAccount, setEditingAccount] = useState<PaymentAccount | null>(null);
   const [graphAccount, setGraphAccount] = useState<PaymentAccount | null>(null);
   // Round 3a: the account the "Set balance" control on an unanchored row was
@@ -117,7 +114,6 @@ export default function AccountsPage() {
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [syncErr, setSyncErr] = useState(false);
-  const [editingIncome, setEditingIncome] = useState<IncomeSource | null>(null);
   
   const [accountForm, setAccountForm] = useState({
     name: '',
@@ -137,20 +133,9 @@ export default function AccountsPage() {
     loanTerm: '',
   });
 
-  const [incomeForm, setIncomeForm] = useState({
-    name: '',
-    amount: '',
-    frequency: 'monthly' as 'weekly' | 'biweekly' | 'monthly' | 'yearly',
-    payDate: '',
-    // Comma-separated text that must appear on the bank line for a deposit to count
-    // as THIS income. Without it the source name is the only alias, and a source
-    // called "Canton Group" never matches a row that reads "CANTON PAYROLL PPD".
-    matchAliases: '',
-  });
-
   const [budgetAmount, setBudgetAmount] = useState('');
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
-  const [deleteType, setDeleteType] = useState<'account' | 'income' | null>(null);
+  const [deleteType, setDeleteType] = useState<'account' | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
@@ -235,18 +220,6 @@ export default function AccountsPage() {
       loanTerm: account.loanTerm?.toString() || '',
     });
     setShowAccountModal(true);
-  };
-
-  const openEditIncome = (income: IncomeSource) => {
-    setEditingIncome(income);
-    setIncomeForm({
-      name: income.name,
-      amount: income.amount.toString(),
-      frequency: income.frequency,
-      payDate: income.payDate?.toString() || '',
-      matchAliases: (income.matchAliases ?? []).join(', '),
-    });
-    setShowIncomeModal(true);
   };
 
   const handleSaveAccount = async () => {
@@ -337,31 +310,6 @@ export default function AccountsPage() {
     resetAccountForm();
   };
 
-  const handleSaveIncome = async () => {
-    const incomeData = {
-      name: incomeForm.name,
-      amount: parseFloat(incomeForm.amount) || 0,
-      frequency: incomeForm.frequency,
-      payDate: incomeForm.payDate ? parseInt(incomeForm.payDate) : undefined,
-      // Split, trim, drop blanks and 1-2 char fragments (matchApprovedSources rejects
-      // those anyway — a 2-char alias would match half the ledger). Empty => undefined,
-      // so the source falls back to matching on its own name.
-      matchAliases: incomeForm.matchAliases
-        .split(',').map((a) => a.trim()).filter((a) => a.length >= 3).length
-        ? incomeForm.matchAliases.split(',').map((a) => a.trim()).filter((a) => a.length >= 3)
-        : undefined,
-      isActive: true,
-    };
-
-    if (editingIncome) {
-      await updateIncomeSource(editingIncome.id, incomeData);
-    } else {
-      await addIncomeSource(incomeData);
-    }
-
-    resetIncomeForm();
-  };
-
   const handleSaveBudget = async () => {
     await updateProfile({ monthlyBudget: parseFloat(budgetAmount) || 0 });
   };
@@ -387,19 +335,7 @@ export default function AccountsPage() {
     setShowAccountModal(false);
   };
 
-  const resetIncomeForm = () => {
-    setIncomeForm({
-      name: '',
-      amount: '',
-      frequency: 'monthly',
-      payDate: '',
-      matchAliases: '',
-    });
-    setEditingIncome(null);
-    setShowIncomeModal(false);
-  };
-
-  const confirmDelete = (id: string, type: 'account' | 'income') => {
+  const confirmDelete = (id: string, type: 'account') => {
     setDeleteConfirmId(id);
     setDeleteType(type);
   };
@@ -409,11 +345,7 @@ export default function AccountsPage() {
     
     setIsDeleting(true);
     try {
-      if (deleteType === 'account') {
-        await deletePaymentAccount(deleteConfirmId);
-      } else {
-        await deleteIncomeSource(deleteConfirmId);
-      }
+      await deletePaymentAccount(deleteConfirmId);
     } finally {
       setIsDeleting(false);
       setDeleteConfirmId(null);
@@ -428,10 +360,7 @@ export default function AccountsPage() {
 
   const getItemToDelete = () => {
     if (!deleteConfirmId || !deleteType) return null;
-    if (deleteType === 'account') {
-      return profile?.paymentAccounts?.find(a => a.id === deleteConfirmId);
-    }
-    return profile?.incomeSources?.find(i => i.id === deleteConfirmId);
+    return profile?.paymentAccounts?.find(a => a.id === deleteConfirmId);
   };
 
   // Balances derived from linked transactions for every DISPLAY below. The edit form
@@ -778,6 +707,9 @@ export default function AccountsPage() {
                 <p className="text-xs text-[var(--foreground-muted)]">{incomeIsDerived ? 'avg (from transactions)' : 'from income sources'}</p>
               </>
             )}
+            <Link href="/settings#income-sources" className="tap-target inline-block mt-1 text-xs text-[var(--accent-primary)] underline hover:no-underline">
+              Edit income sources in Settings
+            </Link>
           </div>
           <div className="stat-card p-4 lg:p-5">
             <div className="flex items-center justify-between mb-2">
@@ -809,7 +741,6 @@ export default function AccountsPage() {
 
           <div role="tablist" aria-label="Tools" className="flex gap-2 mb-4 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
             {([
-              { key: 'income', label: 'Income sources' },
               { key: 'subscriptions', label: 'Bills & subscriptions' },
               { key: 'budgets', label: 'Budget' },
               { key: 'debt', label: 'Debt plan' },
@@ -831,78 +762,6 @@ export default function AccountsPage() {
           </div>
 
           <div className="glass-card p-4 lg:p-5 mb-6">
-          {/* Income sources (a Tool; Settings will own it in #201) */}
-          {activeTab === 'income' && (
-            <div>
-              <div className="flex justify-between items-start gap-4 mb-4">
-                <h2 className="text-xl font-semibold text-[var(--foreground)] min-w-0">
-                  Income Sources ({profile?.incomeSources?.length || 0})
-                </h2>
-                <button
-                  onClick={() => setShowIncomeModal(true)}
-                  className="btn-primary flex items-center gap-2 shrink-0 whitespace-nowrap"
-                >
-                  <Plus className="w-4 h-4" />
-                  Add Income
-                </button>
-              </div>
-
-              {profile?.incomeSources && profile.incomeSources.length > 0 ? (
-                <div className="space-y-3">
-                  {profile.incomeSources.map((income) => (
-                    <div
-                      key={income.id}
-                      className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-0 p-4 rounded-card bg-[var(--background-tertiary)] border-l-4 border-l-[var(--accent-success)] hover:bg-[var(--background-secondary)] transition-colors"
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-card flex items-center justify-center bg-[var(--accent-success)]/20 text-[var(--accent-success)]">
-                          <Banknote className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <p className="font-medium text-[var(--foreground)]">{income.name}</p>
-                          <p className="text-sm text-[var(--foreground-secondary)]">
-                            {income.frequency.charAt(0).toUpperCase() + income.frequency.slice(1)}
-                            {income.payDate && ` • Pay day: ${income.payDate}${getOrdinalSuffix(income.payDate)}`}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between sm:justify-end gap-4">
-                        <p className="text-lg font-semibold text-[var(--accent-success)]">
-                          +{formatMoney(income.amount, profile?.currency, 2)}
-                        </p>
-                        <div className="flex gap-1">
-                          <button
-                            onClick={() => openEditIncome(income)}
-                            aria-label={`Edit ${income.name}`}
-                            className="p-3 min-w-11 min-h-11 sm:p-2 sm:min-w-auto sm:min-h-auto rounded-control text-[var(--foreground-muted)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-colors"
-                          >
-                            <Edit3 className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => confirmDelete(income.id, 'income')}
-                            aria-label={`Delete ${income.name}`}
-                            className="p-3 min-w-11 min-h-11 sm:p-2 sm:min-w-auto sm:min-h-auto rounded-control text-[var(--foreground-muted)] hover:text-[var(--accent-danger)] hover:bg-[var(--accent-danger)]/10 transition-colors"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-12">
-                  <Banknote className="w-16 h-16 text-[var(--foreground-muted)] mx-auto mb-4" />
-                  <h3 className="text-lg font-medium text-[var(--foreground)] mb-2">No income sources yet</h3>
-                  <p className="text-[var(--foreground-secondary)] mb-4">Add your salary and other income to forecast cash flow</p>
-                  <button onClick={() => setShowIncomeModal(true)} className="btn-primary">
-                    Add Your First Income
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
           {/* Spending Tab - Transactions by Account */}
           {activeTab === 'subscriptions' && (
             <div>
@@ -1276,112 +1135,13 @@ export default function AccountsPage() {
         </div>
       )}
 
-      {/* Income Modal */}
-      {showIncomeModal && (
-        <div className="modal-overlay" onClick={resetIncomeForm}>
-          <div className="modal-content max-w-lg" onClick={(e) => e.stopPropagation()}>
-            <div className="flex justify-between items-start gap-4 mt-8 mb-4">
-              <h2 className="text-xl font-bold text-[var(--foreground)]">
-                {editingIncome ? 'Edit Income' : 'Add Income'}
-              </h2>
-              <button onClick={resetIncomeForm} aria-label="Close" className="p-2 rounded-control text-[var(--foreground-muted)] hover:bg-[var(--background-tertiary)]">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">Income Name</label>
-                <input
-                  type="text"
-                  value={incomeForm.name}
-                  onChange={(e) => setIncomeForm({ ...incomeForm, name: e.target.value })}
-                  placeholder="e.g., Salary, Freelance"
-                  className="input-field"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="income-aliases" className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">
-                  Bank description contains
-                </label>
-                <input
-                  id="income-aliases"
-                  type="text"
-                  value={incomeForm.matchAliases}
-                  onChange={(e) => setIncomeForm({ ...incomeForm, matchAliases: e.target.value })}
-                  placeholder="e.g., CANTON PAYROLL, CANTON DEPOSIT"
-                  className="input-field"
-                  aria-describedby="income-aliases-help"
-                />
-                <p id="income-aliases-help" className="text-xs text-[var(--foreground-muted)] mt-2">
-                  Text that appears on the bank line for this income, comma-separated. A deposit only
-                  counts as earned income when it matches. Leave blank to match on the name above.
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">Amount</label>
-                  <div className="relative">
-                    <DollarSign className="absolute left-[1.1rem] top-1/2 -translate-y-1/2 w-5 h-5 text-[var(--foreground-muted)]" />
-                    <input
-                      type="number"
-                      value={incomeForm.amount}
-                      onChange={(e) => setIncomeForm({ ...incomeForm, amount: e.target.value })}
-                      placeholder="5000"
-                      className="input-field pl-[3.25rem]"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">Frequency</label>
-                  <select
-                    value={incomeForm.frequency}
-                    onChange={(e) => setIncomeForm({ ...incomeForm, frequency: e.target.value as Cadence })}
-                    className="select-field"
-                  >
-                    <option value="weekly">Weekly</option>
-                    <option value="biweekly">Bi-weekly</option>
-                    <option value="monthly">Monthly</option>
-                    <option value="yearly">Yearly</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-[var(--foreground-secondary)] mb-2">Pay Date (Day of Month)</label>
-                <select
-                        value={incomeForm.payDate}
-                        onChange={(e) => setIncomeForm({ ...incomeForm, payDate: e.target.value })}
-                        className="input-field"
-                      >
-                        <option value="">Not set</option>
-                        {Array.from({ length: 31 }, (_, i) => String(i + 1)).map((d) => (
-                          <option key={d} value={d}>{d}</option>
-                        ))}
-                      </select>
-              </div>
-
-              <button
-                onClick={handleSaveIncome}
-                disabled={!incomeForm.name || !incomeForm.amount}
-                className="btn-primary w-full disabled:opacity-50"
-              >
-                {editingIncome ? 'Update Income' : 'Add Income'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Delete Confirmation Modal */}
       {deleteConfirmId && deleteType && (
         <div className="modal-overlay" onClick={cancelDelete}>
           <div className="delete-confirm-modal" onClick={(e) => e.stopPropagation()}>
             <Trash2 className="w-12 h-12 text-[var(--accent-danger)] mx-auto mb-4" />
             <h3 className="text-xl font-bold text-[var(--foreground)] mb-2">
-              Delete {deleteType === 'account' ? 'Account' : 'Income Source'}?
+              Delete Account?
             </h3>
             <p className="text-[var(--foreground-secondary)] mb-6">
               Are you sure you want to delete &quot;{getItemToDelete()?.name}&quot;? This action cannot be undone.
