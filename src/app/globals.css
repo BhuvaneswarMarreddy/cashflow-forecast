@@ -296,7 +296,7 @@ body {
   .input-field:focus {
     outline: none;
     border-color: var(--accent-primary);
-    box-shadow: 0 0 0 3px rgba(201, 162, 78, 0.2);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 25%, transparent);
   }
 
   .input-field::placeholder {
@@ -606,7 +606,7 @@ input[type="number"].input-field::-webkit-inner-spin-button {
 .select-field:focus {
   outline: none;
   border-color: var(--accent-primary);
-  box-shadow: 0 0 0 3px rgba(201, 162, 78, 0.2);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 25%, transparent);
 }
 }
 
@@ -633,25 +633,6 @@ select option:focus,
 select option:checked {
   background-color: #b08d3f;
   color: white;
-}
-
-/* Custom dropdown styling */
-@layer components {
-.dropdown-blue {
-  background: rgba(201, 162, 78, 0.1);
-  border: 1px solid rgba(176, 141, 63, 0.3);
-  color: #f0f6fc;
-}
-}@layer components {
-.dropdown-blue:focus {
-  border-color: #c9a24e;
-  box-shadow: 0 0 0 3px rgba(176, 141, 63, 0.2);
-}
-}@layer components {
-.dropdown-blue option {
-  background-color: #1c1f24;
-  color: #f0f6fc;
-}
 }
 
 /* Form spacing utilities */
