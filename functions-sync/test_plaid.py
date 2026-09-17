@@ -235,6 +235,45 @@ class OneItemPerInstitution(unittest.TestCase):
         self.assertNotIn("accessToken", repr(listed))
 
 
+class NeverDuplicateAnAccount(unittest.TestCase):
+    """2026-09-16: two Chase Items returned the same three accounts. resolve_matches
+    correctly demoted each app account to AMBIGUOUS, then the sync created both
+    claimants anyway — 6 new accounts per run, 11 accounts became 35."""
+
+    APP = [{"id": "acc-chk", "name": "Chase TOTAL CHECKING", "lastFourDigits": "7535"},
+           {"id": "acc-sav", "name": "CHASE SAVINGS", "lastFourDigits": "2591"}]
+
+    def adapted(self, pid, name, mask):
+        return {"id": pid, "displayName": name, "mask": mask, "currentBalance": 1.0}
+
+    def test_two_items_claiming_one_account_create_nothing(self):
+        legs = [self.adapted("pl-a", "Chase TOTAL CHECKING", "7535"),
+                self.adapted("pl-b", "Chase TOTAL CHECKING", "7535")]
+        matched, unmatched, ambiguous = sync_core.resolve_matches(legs, self.APP)
+        self.assertEqual(matched, {})          # both demoted: the app account is ambiguous
+        self.assertTrue(ambiguous)
+        # Why the old guard never fired: `ambiguous` holds readable strings, not names.
+        self.assertNotIn(legs[0]["displayName"], ambiguous)
+        for leg in legs:
+            self.assertFalse(plaid_ingest.should_create_account(leg, matched, self.APP),
+                             f"{leg['id']} would have been created as a duplicate")
+
+    def test_a_matched_account_is_not_created_again(self):
+        leg = self.adapted("pl-c", "Chase CHASE SAVINGS", "2591")
+        matched, _, _ = sync_core.resolve_matches([leg], self.APP)
+        self.assertIn("pl-c", matched)
+        self.assertFalse(plaid_ingest.should_create_account(leg, matched, self.APP))
+
+    def test_an_account_matching_by_name_alone_is_not_created_again(self):
+        # No mask from Plaid: the name still identifies it, so it is not a new account.
+        leg = self.adapted("pl-d", "Chase TOTAL CHECKING", None)
+        self.assertFalse(plaid_ingest.should_create_account(leg, {}, self.APP))
+
+    def test_a_genuinely_new_account_is_still_created(self):
+        leg = self.adapted("pl-e", "Charles Schwab Individual", "4321")
+        self.assertTrue(plaid_ingest.should_create_account(leg, {}, self.APP))
+
+
 class ExpiredLogins(unittest.TestCase):
     """2026-09-15: a Chase Item failed every sync with ITEM_LOGIN_REQUIRED and the
     only trace was a log line — its accounts silently stopped updating."""

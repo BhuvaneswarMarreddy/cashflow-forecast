@@ -393,6 +393,22 @@ def provider_for(institution: str, app_type: str):
     return ("bank-transfer", "#3b82f6") if app_type == "bank_account" else ("other", "#8b949e")
 
 
+def should_create_account(adapted: dict, matched: dict, app_accounts: list) -> bool:
+    """Is this Plaid account one the app does not have yet?
+
+    NEVER create an account that already exists. The old test in the sync loop was
+    `adapted["displayName"] in ambiguous`, and `ambiguous` holds human-readable strings
+    ("CHASE SAVINGS <- Chase CHASE SAVINGS, Chase CHASE SAVINGS"), so it never fired:
+    two Chase Items returning the same three accounts demoted each app account to
+    ambiguous and then CREATED both claimants — 6 new accounts every run (2026-09-16:
+    11 accounts became 35, all 24 copies empty). Asking match_account — the same matcher
+    resolve_matches used to find them — cannot disagree with itself that way.
+    """
+    if adapted["id"] in matched:
+        return False
+    return sync_core.match_account(adapted["displayName"], adapted.get("mask"), app_accounts) is None
+
+
 def new_account_fields(adapted: dict, raw: dict, institution: str, today: str) -> dict:
     """The app account doc for a freshly connected Plaid account.
 
@@ -523,7 +539,7 @@ async def run_plaid_sync(db, uid: str, client_id: str, secret: str,
     created = []
     for adapted in adapted_accounts:
         aid = adapted["id"]
-        if aid in matched or adapted["displayName"] in ambiguous:
+        if not should_create_account(adapted, matched, app_accounts):
             continue
         raw = raw_by_id.get(aid) or {}
         fields = new_account_fields(adapted, raw, institution_by_account.get(aid, ""), today)
@@ -543,6 +559,8 @@ async def run_plaid_sync(db, uid: str, client_id: str, secret: str,
     unmatched = [a["displayName"] for a in adapted_accounts if a["id"] not in matched]
     if created:
         log(f"created {len(created)} account(s) from Plaid: {created}")
+    if ambiguous:
+        log(f"kept {len(ambiguous)} existing account(s) rather than creating a copy: {ambiguous}")
 
     log(f"plaid: {len(matched)} matched / {len(unmatched)} unmatched accounts, "
         f"{sum(len(v) for v in rows_by_account.values())} fetched rows")
